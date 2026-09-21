@@ -264,7 +264,8 @@ class OpenAICompatibleTranscriber:
         )
         started = time.perf_counter()
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            # The endpoint is operator-supplied configuration, not user input.
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:  # nosec B310
                 raw_bytes = response.read()
         except urllib.error.HTTPError as exc:
             # Do not include request headers or the API key in diagnostics.
