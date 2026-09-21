@@ -407,6 +407,17 @@
     let evaluationSnapshotMinutes = new Set();
     const LIVE_TARGET_RATE = 24000;
     const LIVE_CHUNK_SAMPLES = 2400;
+    const CONTROLLER_STORAGE_KEY = 'ronro.controller.instance';
+
+    function controllerInstanceId() {
+      let value = null;
+      try { value = window.localStorage.getItem(CONTROLLER_STORAGE_KEY); } catch (_) {}
+      if (!value) {
+        value = window.crypto?.randomUUID?.() || `controller-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        try { window.localStorage.setItem(CONTROLLER_STORAGE_KEY, value); } catch (_) {}
+      }
+      return value;
+    }
 
     function liveResample(samples, sourceRate, targetRate) {
       if (!samples.length) return new Float32Array();
@@ -553,7 +564,7 @@
         const started = await getJson('/api/live/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode }),
+          body: JSON.stringify({ mode, controller_id: controllerInstanceId() }),
         });
         applyLiveSnapshot(started);
         liveSocket = new WebSocket(started.websocket_url);
@@ -613,7 +624,11 @@
     async function stopLiveOneUtterance() {
       try {
         stopLiveCapture();
-        const snapshot = await getJson('/api/live/stop', { method: 'POST' });
+        const snapshot = await getJson('/api/live/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ controller_id: controllerInstanceId() }),
+        });
         applyLiveSnapshot(snapshot);
         setStatus('Stopping · waiting for Final Transcript');
       } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
@@ -623,7 +638,11 @@
       if (liveMode !== 'continuous') return;
       try {
         stopLiveCapture();
-        const snapshot = await getJson('/api/live/stop', { method: 'POST' });
+        const snapshot = await getJson('/api/live/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ controller_id: controllerInstanceId() }),
+        });
         applyLiveSnapshot(snapshot);
         setStatus('Finalizing · draining STT, Analyzer, and Map');
       } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
@@ -631,7 +650,11 @@
 
     async function retryLiveAnalyzer() {
       try {
-        const snapshot = await getJson('/api/live/retry', { method: 'POST' });
+        const snapshot = await getJson('/api/live/retry', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ controller_id: controllerInstanceId() }),
+        });
         liveLog({ type: 'analyzer_retry' });
         applyLiveSnapshot(snapshot);
       } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }

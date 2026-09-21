@@ -76,8 +76,10 @@ cp .env.example .env
 
 ブラウザで次を開きます。
 
-- `http://127.0.0.1:8000/` — 開発・進行役向け画面
-- `http://127.0.0.1:8000/shared` — 参加者向け読み取り専用画面
+- `http://127.0.0.1:8000/` — 参加者向け読み取り専用の論点図
+- `http://127.0.0.1:8000/session` — 進行役向けスマートフォンController / Microphone
+- `http://127.0.0.1:8000/control` — 開発・進行役向け画面
+- `http://127.0.0.1:8000/shared` — `/`の互換入口
 
 マイクは画面上で開始操作をした後にのみ使用されます。公開URLやHTTPS Ingressを使う場合の配備手順は[デプロイ手順](docs/deployment/kubernetes-pilot-deployment.md)を参照してください。
 

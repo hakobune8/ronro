@@ -187,19 +187,29 @@
       const graph = snapshot?.state?.graph;
       const map = snapshot?.map;
       if (!graph || !map) {
-        $('current-topic').textContent = '議論の現在地を整理しています';
-        $('topic-items').innerHTML = '<div class="topic-empty">発言が整理されると、ここに現在のトピックが表示されます。</div>';
+        const runtimeState = snapshot?.live_state?.runtime_state || 'idle';
+        const passiveTitle = runtimeState === 'finalizing'
+          ? '最後の発話を整理しています…'
+          : ['ended', 'ended_with_incomplete_processing'].includes(runtimeState)
+            ? '会議を終了しました'
+            : '会議の開始を待っています';
+        $('current-topic').textContent = passiveTitle;
+        $('topic-items').innerHTML = `<div class="topic-empty">${escapeHtml(runtimeState === 'idle' ? 'Controllerから会議を開始すると、ここに論点図が表示されます。' : '論点図を準備しています。')}</div>`;
         $('past-topics').innerHTML = '';
         renderList($('candidate-list'), [], 'まだありません', 2);
         renderList($('open-list'), [], 'まだありません');
         renderList($('action-list'), [], 'まだありません', 1);
         $('parking-line').hidden = true;
+        const status = statusFor(snapshot, isDemo);
+        $('shared-status').textContent = status.text;
+        $('shared-status').className = `shared-status ${status.className}`;
         return;
       }
       $('session-goal').textContent = snapshot.state.session?.goal || '議論の現在地を共有する';
       const currentId = graph.current_topic?.primary_topic_id;
       const current = nodeById(graph, currentId);
-      $('current-topic').textContent = current?.label || '現在のトピックを整理しています';
+      const runtimeState = snapshot?.live_state?.runtime_state || 'active';
+      $('current-topic').textContent = current?.label || (runtimeState === 'finalizing' ? '最後の発話を整理しています…' : '現在のトピックを整理しています');
 
       const nodes = (graph.nodes || []).filter(activeNode);
       const currentLane = (map.lanes || []).find((lane) => lane.current);

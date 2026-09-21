@@ -41,12 +41,16 @@
 
 Pilot当日に次をObserverが実機で確認する。いずれかに失敗したらPilotを開始しない。
 
-1. Microphone permissionを明示的Start後に取得できる。
-2. Topic発言がFinal Transcriptとして取得される。
-3. Candidate Decisionが`candidate`として論点図へ入り、Confirmedにならない。
-4. Action発言がEvidenceからActionへ追跡できる。
-5. End SessionでFinalizing、STT/Queue/Analyzer/Graph/ProjectionのDrainが完了する。
-6. `rendered_revision == graph_revision` を確認できる。
+1. Shared DisplayとFacilitator SmartphoneがNetBird Private Networkへ接続されている。
+2. NetBird未接続端末から`ronro.hakobune8.com`へ到達できない。
+3. Microphone permissionを明示的Start後に取得できる。
+4. Topic発言がFinal Transcriptとして取得される。
+5. Candidate Decisionが`candidate`として論点図へ入り、Confirmedにならない。
+6. Action発言がEvidenceからActionへ追跡できる。
+7. End SessionでFinalizing、STT/Queue/Analyzer/Graph/ProjectionのDrainが完了する。
+8. `rendered_revision == graph_revision` を確認できる。
+9. 最初にStartしたControllerがActive Controllerとなり、別端末がStart / End / Audio controlを奪えない。
+10. Active Controllerの短時間reload / Network interruptionでSessionが即終了せず、同一BrowserがReconnectできる。
 
 L1/L2の実Microphone 3-case AcceptanceがPendingのままの場合は、これをPilot開始の必須Pre-flightとして扱う。
 
@@ -58,7 +62,8 @@ L1/L2の実Microphone 3-case AcceptanceがPendingのままの場合は、これ�
 2. Raw Audioは既定で保存しない。保存する場合だけ、明示同意を取得する。
 3. `Evaluation Mode`で参加者数とDiscussion Themeを入力する。
 4. Observerは、開始時刻、参加者数、環境、Consent状態を確認する。
-5. `Start Evaluation`後に`Start Continuous`を押す。
+5. `Start Evaluation`後、Pilot Controller（`/session`）で会議を開始する。Controller未実装の確認時はFacilitatorの`/control`をFallbackとして使用する。
+6. Controllerは前面表示し、画面をLockしない。Background AudioはPilotの前提にしない。
 
 ### During Discussion
 

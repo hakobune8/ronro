@@ -29,8 +29,13 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 
 ## HTTPS / Safari
 
+- [ ] Shared Display and Controller devices are connected to the NetBird Private Network.
+- [ ] A device outside NetBird cannot reach `ronro.hakobune8.com`.
+- [ ] Pilot QR, if shown, contains only `https://ronro.hakobune8.com/session` and no secret or credential.
+- [ ] One active Controller is assigned for the Session; a second Controller cannot take Start / End / Audio control.
 - [ ] UI loads over valid HTTPS.
 - [ ] Certificate hostname matches.
+- [ ] Smartphone Controller remains in the foreground and unlocked during the Pilot.
 - [ ] Safari microphone permission is granted only after Start.
 - [ ] Microphone active indicator is visible.
 - [ ] AudioWorklet loads.

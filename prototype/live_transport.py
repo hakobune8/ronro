@@ -6,8 +6,10 @@ import asyncio
 import json
 import threading
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from .live_audio import AudioFrameError, decode_audio_frame
+from .errors import PrototypeError
 from .live_session import LiveSessionManager
 from .live_stt import OpenAIRealtimeTranscriptionClient, RealtimeSTTConfig, RealtimeSTTFailure
 
@@ -37,8 +39,10 @@ class LiveWebSocketGateway:
             await connection.close()
             return
         provider: OpenAIRealtimeTranscriptionClient | None = None
+        controller_id = self._controller_id_from_connection(connection)
+        transport_failed = False
         try:
-            snapshot = self.manager.mark_connected()
+            snapshot = self.manager.mark_connected(controller_id=controller_id)
             await connection.send(_json({"type": "runtime_snapshot", "snapshot": snapshot}))
             provider = OpenAIRealtimeTranscriptionClient(self.stt_config)
             await provider.connect()
@@ -46,16 +50,21 @@ class LiveWebSocketGateway:
             if getattr(session, "mode", "one_utterance") == "continuous":
                 snapshot = self.manager.activate()
                 await connection.send(_json({"type": "live_active", "snapshot": snapshot}))
-                await self._capture_continuous(connection, provider)
+                await self._capture_continuous(connection, provider, controller_id=controller_id)
             else:
                 await self._capture(connection, provider)
         except RealtimeSTTFailure as exc:
+            transport_failed = True
             snapshot = self.manager.fail(exc.code, exc.message)
             await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message, "snapshot": snapshot})
+        except PrototypeError as exc:
+            await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message})
         except (AudioFrameError, ValueError, TypeError) as exc:
+            transport_failed = True
             snapshot = self.manager.fail("audio_transport_error", str(exc))
             await self._safe_send(connection, {"type": "error", "code": "audio_transport_error", "message": str(exc), "snapshot": snapshot})
         except Exception as exc:  # Transport errors must not touch the Graph.
+            transport_failed = True
             snapshot = self.manager.fail("live_transport_error", str(exc))
             await self._safe_send(connection, {"type": "error", "code": "live_transport_error", "message": str(exc), "snapshot": snapshot})
         finally:
@@ -66,12 +75,15 @@ class LiveWebSocketGateway:
                 pass
             session = self.manager.current()
             if session is not None and getattr(session, "mode", "one_utterance") == "continuous":
-                if session.runtime_state in {"active", "starting", "finalizing"}:
-                    self.manager.fail("live_transport_closed", "Continuous transport closed before a clean drain")
+                if transport_failed and session.runtime_state in {"active", "starting", "finalizing"}:
                     try:
                         await asyncio.to_thread(self.manager.drain, allow_without_stt=True)
                     except Exception:
                         pass
+                elif session.runtime_state in {"active", "starting", "finalizing"}:
+                    # A browser/controller disconnect is recoverable. Keep
+                    # the in-memory Session and Graph for the same controller.
+                    self.manager.mark_controller_disconnected(controller_id=controller_id)
                 await self._safe_send(connection, {"type": "runtime_snapshot", "snapshot": session.snapshot()})
             elif session is not None and session.runtime_state not in {"disconnected"}:
                 session.runtime_state = "disconnected"
@@ -136,7 +148,13 @@ class LiveWebSocketGateway:
                 await self._safe_send(connection, {"type": "live_complete", "snapshot": snapshot})
                 return
 
-    async def _capture_continuous(self, connection: ServerConnection, provider: OpenAIRealtimeTranscriptionClient) -> None:
+    async def _capture_continuous(
+        self,
+        connection: ServerConnection,
+        provider: OpenAIRealtimeTranscriptionClient,
+        *,
+        controller_id: str | None,
+    ) -> None:
         """Run audio input and provider events concurrently until Drain."""
 
         provider_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -185,8 +203,7 @@ class LiveWebSocketGateway:
                 if browser_task in done:
                     message = browser_task.result()
                     if message is None:
-                        self.manager.fail("browser_disconnected", "Browser WebSocket disconnected")
-                        await self._drain_and_send(connection, allow_without_stt=True)
+                        self.manager.mark_controller_disconnected(controller_id=controller_id)
                         return
                     if isinstance(message, bytes):
                         if stop_seen:
@@ -210,7 +227,7 @@ class LiveWebSocketGateway:
                         if control_type == "commit" and not stop_seen and not commit_pending:
                             commit_pending = await self._request_continuous_commit(provider, connection)
                         elif control_type == "stop" and not stop_seen:
-                            self.manager.request_stop()
+                            self.manager.request_stop(controller_id=controller_id)
                             stop_seen = True
                             commit_pending = await self._request_continuous_commit(provider, connection)
                             if not commit_pending:
@@ -283,6 +300,14 @@ class LiveWebSocketGateway:
         except json.JSONDecodeError:
             return {}
         return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _controller_id_from_connection(connection: ServerConnection) -> str | None:
+        request = getattr(connection, "request", None)
+        path = getattr(request, "path", "") if request is not None else ""
+        if not path:
+            return None
+        return parse_qs(urlparse(path).query).get("controller_id", [None])[0]
 
     @staticmethod
     async def _safe_send(connection: ServerConnection, value: Any) -> None:

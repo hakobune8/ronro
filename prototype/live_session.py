@@ -90,6 +90,26 @@ def _live_evaluation_configuration() -> dict[str, Any]:
     }
 
 
+LEGACY_CONTROLLER_ID = "legacy-control"
+MAX_CONTROLLER_ID_LENGTH = 128
+
+
+def normalize_controller_id(value: Any | None) -> str:
+    """Normalize a runtime-only browser instance identifier.
+
+    This identifier is deliberately not an authentication credential.  It is
+    used only to prevent two local controllers from racing the same in-memory
+    Live Session.
+    """
+
+    if value is None or not str(value).strip():
+        return LEGACY_CONTROLLER_ID
+    controller_id = str(value).strip()
+    if len(controller_id) > MAX_CONTROLLER_ID_LENGTH:
+        raise PrototypeError("controller_id_invalid", "Controller instance identifier is too long")
+    return controller_id
+
+
 class LiveSessionStateError(RuntimeError):
     """A one-utterance runtime transition is invalid."""
 
@@ -498,6 +518,9 @@ class LiveSessionManager:
         self._session: LiveOneUtteranceSession | None = None
         self._stop_requested = False
         self._shutting_down = False
+        self._controller_id: str | None = None
+        self._controller_connected = False
+        self._controller_last_seen_at: str | None = None
         schema_path = Path(schema_dir)
         self._evaluation_root = Path(evaluation_root) if evaluation_root is not None else schema_path.parent / "evaluation" / "live" / "sessions"
         self._evaluation_report_root = Path(evaluation_report_root) if evaluation_report_root is not None else schema_path.parent / "docs" / "evaluation"
@@ -506,7 +529,39 @@ class LiveSessionManager:
     def start(self) -> dict[str, Any]:
         return self.start_mode("one_utterance")
 
-    def start_mode(self, mode: str = "one_utterance") -> dict[str, Any]:
+    def _controller_snapshot_locked(self, controller_id: Any | None = None) -> dict[str, Any]:
+        requester = normalize_controller_id(controller_id) if controller_id is not None else None
+        if self._controller_id is None:
+            status = "available"
+        elif requester == self._controller_id:
+            status = "owned_by_this_controller"
+        else:
+            status = "owned_by_other"
+        return {
+            "claimed": self._controller_id is not None,
+            "status": status,
+            "connected": self._controller_connected,
+            "last_seen_at": self._controller_last_seen_at,
+        }
+
+    def _decorate_snapshot_locked(
+        self,
+        snapshot: dict[str, Any],
+        controller_id: Any | None = None,
+    ) -> dict[str, Any]:
+        live_state = snapshot.setdefault("live_state", {})
+        live_state["controller"] = self._controller_snapshot_locked(controller_id)
+        return snapshot
+
+    def _claim_controller_locked(self, controller_id: Any | None) -> str:
+        candidate = normalize_controller_id(controller_id)
+        if self._controller_id is None:
+            self._controller_id = candidate
+        elif self._controller_id != candidate:
+            raise PrototypeError("live_controller_owned", "別の端末で会議を操作中です")
+        return candidate
+
+    def start_mode(self, mode: str = "one_utterance", *, controller_id: Any | None = None) -> dict[str, Any]:
         if mode not in {"one_utterance", "continuous"}:
             raise PrototypeError("live_mode_invalid", f"Unsupported Live mode: {mode}")
         with self._lock:
@@ -520,9 +575,11 @@ class LiveSessionManager:
             }:
                 # Start is idempotent while a session is active; do not
                 # create a second microphone, worker, or STT connection.
-                return self._session.snapshot()
+                owner = self._claim_controller_locked(controller_id)
+                return self._decorate_snapshot_locked(self._session.snapshot(), owner)
             if self._session is not None:
                 self._session.close()
+            owner = normalize_controller_id(controller_id)
             session_id = f"live-{uuid.uuid4().hex[:12]}"
             if mode == "continuous":
                 render_interval_seconds = _env_float("RENDER_COALESCING_SECONDS", 2.0)
@@ -549,7 +606,10 @@ class LiveSessionManager:
                     analyzer_factory=self.analyzer_factory,
                 )
             self._stop_requested = False
-            return self._session.snapshot()
+            self._controller_id = owner
+            self._controller_connected = False
+            self._controller_last_seen_at = utc_now()
+            return self._decorate_snapshot_locked(self._session.snapshot(), owner)
 
     def shutdown_for_termination(self, *, timeout_seconds: float = 45.0) -> dict[str, Any] | None:
         """Reject new sessions and give an active session a bounded drain window."""
@@ -591,6 +651,9 @@ class LiveSessionManager:
             return self._session
 
     def snapshot(self) -> dict[str, Any]:
+        return self.snapshot_for_controller(None)
+
+    def snapshot_for_controller(self, controller_id: Any | None) -> dict[str, Any]:
         with self._lock:
             if self._session is None:
                 snapshot = {"live": True, "live_state": {"runtime_state": "idle", "mode": None}}
@@ -598,7 +661,7 @@ class LiveSessionManager:
                 snapshot = self._session.snapshot()
             if self._evaluation is not None:
                 snapshot["evaluation"] = self._evaluation.snapshot()
-            return snapshot
+            return self._decorate_snapshot_locked(snapshot, controller_id)
 
     def start_evaluation(self, metadata: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Start an evaluation observer session; this never starts Live Audio."""
@@ -669,13 +732,14 @@ class LiveSessionManager:
             raise PrototypeError("evaluation_missing", "No Live Evaluation session is active")
         return self._evaluation
 
-    def request_stop(self) -> dict[str, Any]:
+    def request_stop(self, *, controller_id: Any | None = None) -> dict[str, Any]:
         with self._lock:
             if self._session is None:
                 raise PrototypeError("live_session_missing", "No Live session is active")
+            owner = self._claim_controller_locked(controller_id)
             self._stop_requested = True
             self._session.begin_stop()
-            return self._session.snapshot()
+            return self._decorate_snapshot_locked(self._session.snapshot(), owner)
 
     def consume_stop_request(self) -> bool:
         with self._lock:
@@ -683,11 +747,26 @@ class LiveSessionManager:
             self._stop_requested = False
             return requested
 
-    def mark_connected(self) -> dict[str, Any]:
+    def mark_connected(self, *, controller_id: Any | None = None) -> dict[str, Any]:
         with self._lock:
             session = self._require()
+            owner = self._claim_controller_locked(controller_id)
             session.mark_connected()
-            return session.snapshot()
+            self._controller_connected = True
+            self._controller_last_seen_at = utc_now()
+            return self._decorate_snapshot_locked(session.snapshot(), owner)
+
+    def mark_controller_disconnected(self, *, controller_id: Any | None = None) -> dict[str, Any]:
+        with self._lock:
+            owner = normalize_controller_id(controller_id)
+            if self._controller_id != owner:
+                return self._decorate_snapshot_locked(self.snapshot(), controller_id)
+            self._controller_connected = False
+            self._controller_last_seen_at = utc_now()
+            session = self._session
+            if isinstance(session, LiveContinuousSession):
+                session.mark_transport_disconnected()
+            return self._decorate_snapshot_locked(self.snapshot(), owner)
 
     def activate(self) -> dict[str, Any]:
         with self._lock:
@@ -741,15 +820,16 @@ class LiveSessionManager:
             session.mark_provider_failure(code, message)
             return session.snapshot()
 
-    def retry(self) -> dict[str, Any]:
+    def retry(self, *, controller_id: Any | None = None) -> dict[str, Any]:
         with self._lock:
             session = self._require()
+            owner = self._claim_controller_locked(controller_id)
             if isinstance(session, LiveContinuousSession):
                 raise PrototypeError(
                     "live_retry_unsupported",
                     "Continuous Session retry is disabled; retry is available in the L3 developer flow",
                 )
-            return session.retry_analyzer()
+            return self._decorate_snapshot_locked(session.retry_analyzer(), owner)
 
     def execute_command(self, command: Mapping[str, Any]) -> dict[str, Any]:
         with self._lock:

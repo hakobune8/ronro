@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>論路 — Controller</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Yu Gothic", YuGothic, sans-serif;
+      --ink: #17202a;
+      --muted: #596a7b;
+      --line: #d9e1e9;
+      --canvas: #f5f8fb;
+      --panel: #ffffff;
+      --blue: #2563eb;
+      --blue-soft: #eaf2ff;
+      --amber: #8a5b07;
+      --amber-soft: #fffaf0;
+      --green: #146b3d;
+      --green-soft: #f1faf4;
+      --danger: #a33b32;
+      --danger-soft: #fff4f1;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body { margin: 0; background: var(--canvas); color: var(--ink); }
+    .controller-shell { width: min(100%, 560px); min-height: 100vh; margin: 0 auto; padding: 24px 18px 32px; display: flex; flex-direction: column; gap: 18px; }
+    .brand { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 6px 2px 16px; border-bottom: 1px solid var(--line); }
+    .brand-name { font-size: 32px; font-weight: 800; letter-spacing: -.04em; }
+    .brand-subtitle { color: var(--muted); font-size: 15px; }
+    .panel { padding: 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: 0 6px 20px rgba(45, 77, 112, .05); }
+    .status-panel { text-align: center; }
+    .status-dot { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--muted); font-size: 18px; font-weight: 750; }
+    .status-dot.active { color: var(--green); }
+    .status-dot.busy { color: var(--amber); }
+    .status-dot.error { color: var(--danger); }
+    .status-title { margin: 0; font-size: clamp(27px, 8vw, 42px); line-height: 1.25; letter-spacing: -.04em; }
+    .status-detail { min-height: 1.5em; margin: 14px 0 0; color: var(--muted); font-size: 18px; line-height: 1.55; }
+    .current-topic { margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: var(--blue-soft); color: #174ea6; font-size: 20px; font-weight: 700; line-height: 1.45; }
+    .current-topic[hidden] { display: none; }
+    .actions { display: grid; gap: 12px; margin-top: 20px; }
+    button { width: 100%; min-height: 54px; padding: 12px 16px; border: 1px solid #cbd7e3; border-radius: 12px; background: #fff; color: var(--ink); font: inherit; font-size: 19px; font-weight: 750; cursor: pointer; }
+    button.primary { border-color: var(--blue); background: var(--blue); color: #fff; }
+    button.danger { border-color: #d59b93; background: #fff8f6; color: var(--danger); }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    .notice { padding: 14px 16px; border-radius: 12px; background: var(--amber-soft); color: var(--amber); font-size: 16px; line-height: 1.55; }
+    .notice.error { background: var(--danger-soft); color: var(--danger); }
+    .notice[hidden] { display: none; }
+    .privacy { color: var(--muted); font-size: 14px; line-height: 1.6; }
+    .privacy strong { color: var(--ink); }
+    .footer { margin-top: auto; padding: 4px 2px; color: var(--muted); font-size: 14px; line-height: 1.5; text-align: center; }
+    @media (min-width: 700px) {
+      .controller-shell { padding-top: 42px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="controller-shell" aria-label="論路 Controller">
+    <header class="brand">
+      <div class="brand-name">論路</div>
+      <div class="brand-subtitle">会議Controller</div>
+    </header>
+
+    <section class="panel status-panel" aria-live="polite">
+      <div id="status-badge" class="status-dot">● 待機中</div>
+      <h1 id="status-title" class="status-title">会議の開始を待っています</h1>
+      <p id="status-detail" class="status-detail">開始すると、スマートフォンのマイクから音声を入力します。</p>
+      <div id="current-topic" class="current-topic" hidden></div>
+      <div class="actions">
+        <button id="start-button" class="primary">会議をはじめる</button>
+        <button id="reconnect-button" hidden>接続を再開する</button>
+        <button id="end-button" class="danger" hidden>会議を終了</button>
+      </div>
+    </section>
+
+    <div id="notice" class="notice" hidden></div>
+
+    <section class="privacy">
+      <strong>音声について</strong><br>
+      会議中はマイクを使用し、発話を音声認識して論点図を更新します。録音データは既定で永続保存しません。Controllerは前面表示し、画面をLockしないでください。
+    </section>
+
+    <footer class="footer">普段どおりに話してください。論点図は議論とともに更新されます。</footer>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const TARGET_RATE = 24000;
+    const CHUNK_SAMPLES = 2400;
+    const CONTROLLER_STORAGE_KEY = 'ronro.controller.instance';
+    let controllerId = null;
+    let socket = null;
+    let stream = null;
+    let context = null;
+    let source = null;
+    let worklet = null;
+    let pcmSamples = [];
+    let sentSamples = 0;
+    let chunkSequence = 0;
+    let desiredActive = false;
+    let reconnectTimer = null;
+    let latestSnapshot = null;
+
+    function getControllerId() {
+      if (controllerId) return controllerId;
+      try { controllerId = window.localStorage.getItem(CONTROLLER_STORAGE_KEY); } catch (_) {}
+      if (!controllerId) {
+        controllerId = window.crypto?.randomUUID?.() || `controller-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        try { window.localStorage.setItem(CONTROLLER_STORAGE_KEY, controllerId); } catch (_) {}
+      }
+      return controllerId;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+    }
+
+    async function jsonRequest(url, options = {}) {
+      const response = await fetch(url, { cache: 'no-store', ...options });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(payload?.error?.message || `Request failed: ${response.status}`);
+        error.code = payload?.error?.code || `http_${response.status}`;
+        throw error;
+      }
+      return payload;
+    }
+
+    function setNotice(message, error = false) {
+      const element = $('notice');
+      element.textContent = message || '';
+      element.hidden = !message;
+      element.className = `notice${error ? ' error' : ''}`;
+    }
+
+    function resample(samples, sourceRate, targetRate) {
+      if (!samples.length || sourceRate === targetRate) return samples;
+      const count = Math.max(1, Math.round(samples.length * targetRate / sourceRate));
+      const result = new Float32Array(count);
+      const ratio = sourceRate / targetRate;
+      for (let index = 0; index < count; index += 1) {
+        const position = index * ratio;
+        const left = Math.min(samples.length - 1, Math.floor(position));
+        const right = Math.min(samples.length - 1, left + 1);
+        const fraction = position - left;
+        result[index] = samples[left] * (1 - fraction) + samples[right] * fraction;
+      }
+      return result;
+    }
+
+    function floatToPcm16(samples) {
+      const result = new ArrayBuffer(samples.length * 2);
+      const view = new DataView(result);
+      for (let index = 0; index < samples.length; index += 1) {
+        const value = Number.isFinite(samples[index]) ? Math.max(-1, Math.min(1, samples[index])) : 0;
+        const integer = value >= 0 ? Math.round(value * 32767) : Math.round(value * 32768);
+        view.setInt16(index * 2, Math.max(-32768, Math.min(32767, integer)), true);
+      }
+      return result;
+    }
+
+    function buildFrame(pcm16, sequence, audioStart) {
+      const frame = new ArrayBuffer(20 + pcm16.byteLength);
+      const view = new DataView(frame);
+      view.setUint8(0, 68); view.setUint8(1, 77); view.setUint8(2, 65); view.setUint8(3, 80);
+      view.setUint8(4, 1);
+      view.setUint32(8, sequence, true);
+      view.setFloat64(12, audioStart, true);
+      new Uint8Array(frame, 20).set(new Uint8Array(pcm16));
+      return frame;
+    }
+
+    function handlePcm(samples, sourceRate) {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      const converted = resample(samples, sourceRate, TARGET_RATE);
+      pcmSamples = pcmSamples.concat(Array.from(converted));
+      while (pcmSamples.length >= CHUNK_SAMPLES) {
+        const frameSamples = pcmSamples.splice(0, CHUNK_SAMPLES);
+        socket.send(buildFrame(floatToPcm16(frameSamples), chunkSequence, sentSamples / TARGET_RATE));
+        sentSamples += frameSamples.length;
+        chunkSequence += 1;
+      }
+    }
+
+    async function stopCapture() {
+      if (worklet) { try { worklet.disconnect(); } catch (_) {} worklet = null; }
+      if (source) { try { source.disconnect(); } catch (_) {} source = null; }
+      if (stream) { stream.getTracks().forEach((track) => track.stop()); stream = null; }
+      if (context) { try { await context.close(); } catch (_) {} context = null; }
+      pcmSamples = [];
+      sentSamples = 0;
+      chunkSequence = 0;
+    }
+
+    async function startCaptureGraph() {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('このブラウザではマイクを利用できません');
+      if (!stream) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      }
+      context = new AudioContext();
+      await context.resume();
+      await context.audioWorklet.addModule('/static/live-audio-worklet.js');
+      source = context.createMediaStreamSource(stream);
+      worklet = new AudioWorkletNode(context, 'discussion-map-capture', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+      worklet.port.onmessage = (event) => {
+        if (event.data?.type === 'pcm') handlePcm(event.data.samples, event.data.sampleRate || context.sampleRate);
+      };
+      source.connect(worklet);
+      const mute = context.createGain();
+      mute.gain.value = 0;
+      worklet.connect(mute).connect(context.destination);
+    }
+
+    function render(snapshot) {
+      latestSnapshot = snapshot;
+      const live = snapshot?.live_state || {};
+      const state = live.runtime_state || 'idle';
+      const controller = live.controller || {};
+      const otherController = controller.status === 'owned_by_other';
+      const connected = live.websocket_state === 'connected';
+      let badge = '● 待機中';
+      let title = '会議の開始を待っています';
+      let detail = '開始すると、スマートフォンのマイクから音声を入力します。';
+      let className = '';
+      if (otherController) {
+        badge = '● 別の端末が操作中';
+        title = '別の端末で会議を操作中です';
+        detail = '論点図の更新を確認できます。Start / End操作はできません。';
+        className = 'busy';
+      } else if (state === 'starting' || state === 'connecting') {
+        badge = '● 接続しています';
+        title = '会議を準備しています';
+        detail = 'マイクと音声接続を準備しています。';
+        className = 'busy';
+      } else if (state === 'active') {
+        badge = connected ? '● 聞いています' : '● 接続を再開しています';
+        title = connected ? '会議中です' : '音声接続が一時停止しています';
+        detail = connected ? '普段どおりに話してください。論点図は共有画面に更新されます。' : '同じ端末から自動的に接続を再開します。';
+        className = connected ? 'active' : 'busy';
+      } else if (state === 'finalizing') {
+        badge = '● まとめています';
+        title = '会議をまとめています…';
+        detail = '最後の発話と論点図の更新が終わるまでお待ちください。';
+        className = 'busy';
+      } else if (state === 'ended' || state === 'ended_with_incomplete_processing') {
+        badge = state === 'ended' ? '● 終了しました' : '● 一部未完了';
+        title = state === 'ended' ? '会議を終了しました' : '会議を終了しました（一部未完了）';
+        detail = '共有画面には最後の論点図が表示されています。';
+        className = state === 'ended' ? 'active' : 'error';
+      } else if (live.error) {
+        badge = '● エラー';
+        title = '接続を確認してください';
+        detail = live.error.message || '音声接続を開始できませんでした。';
+        className = 'error';
+      }
+      $('status-badge').textContent = badge;
+      $('status-badge').className = `status-dot ${className}`;
+      $('status-title').textContent = title;
+      $('status-detail').textContent = detail;
+      const current = snapshot?.state?.graph?.current_topic?.primary_topic_id;
+      const topic = (snapshot?.state?.graph?.nodes || []).find((node) => node.id === current);
+      $('current-topic').hidden = !topic?.label || state === 'idle';
+      $('current-topic').textContent = topic?.label ? `今話していること：${topic.label}` : '';
+      $('start-button').hidden = state !== 'idle' || otherController;
+      $('start-button').disabled = state !== 'idle' || otherController;
+      $('reconnect-button').hidden = !(state === 'active' && !connected && !otherController);
+      $('end-button').hidden = !(['active', 'starting'].includes(state) && !otherController);
+      $('end-button').disabled = !(['active', 'starting'].includes(state) && !otherController);
+      if (otherController || state === 'ended' || state === 'ended_with_incomplete_processing') {
+        setNotice(otherController ? '別の端末で会議を操作中です。' : '会議の論点図を確認できます。', false);
+      } else if (state === 'active' && document.visibilityState !== 'visible') {
+        setNotice('Controllerがバックグラウンドになっています。前面表示に戻してください。', true);
+      } else if (!live.error) {
+        setNotice('', false);
+      }
+    }
+
+    async function refresh() {
+      try {
+        const snapshot = await jsonRequest(`/api/live?controller_id=${encodeURIComponent(getControllerId())}`);
+        render(snapshot);
+        if (desiredActive && snapshot?.live_state?.runtime_state === 'active' && !socket && snapshot.live_state.controller?.status === 'owned_by_this_controller') {
+          scheduleReconnect();
+        }
+      } catch (error) {
+        setNotice(error.message, true);
+      }
+    }
+
+    function scheduleReconnect() {
+      if (!desiredActive || reconnectTimer || socket) return;
+      reconnectTimer = window.setTimeout(async () => {
+        reconnectTimer = null;
+        try {
+          const started = await jsonRequest('/api/live/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'continuous', controller_id: getControllerId() }),
+          });
+          connectSocket(started.websocket_url);
+        } catch (error) {
+          setNotice(error.message, true);
+          scheduleReconnect();
+        }
+      }, 1000);
+    }
+
+    function connectSocket(url) {
+      if (socket) return;
+      socket = new WebSocket(url);
+      socket.binaryType = 'arraybuffer';
+      socket.onopen = async () => {
+        try {
+          await startCaptureGraph();
+          await refresh();
+        } catch (error) {
+          desiredActive = false;
+          await stopCapture();
+          setNotice(error.message, true);
+          try {
+            await jsonRequest('/api/live/stop', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ controller_id: getControllerId() }),
+            });
+          } catch (_) {}
+          socket?.close();
+        }
+      };
+      socket.onmessage = (message) => {
+        try {
+          const event = JSON.parse(message.data);
+          if (event.snapshot) render(event.snapshot);
+          if (event.type === 'error') setNotice(event.message || '音声接続でエラーが発生しました。', true);
+          if (event.type === 'session_ended') {
+            desiredActive = false;
+            stopCapture();
+            setNotice('会議を終了しました。共有画面には最後の論点図が表示されています。', false);
+            socket?.close();
+          }
+        } catch (_) {
+          setNotice('音声接続からの応答を読み取れませんでした。', true);
+        }
+      };
+      socket.onerror = () => setNotice('音声接続を確認しています。', true);
+      socket.onclose = () => {
+        stopCapture();
+        socket = null;
+        if (desiredActive) scheduleReconnect();
+        refresh();
+      };
+    }
+
+    async function startSession() {
+      if (latestSnapshot?.live_state?.controller?.status === 'owned_by_other') return;
+      desiredActive = true;
+      setNotice('マイクの使用許可を確認しています。', false);
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('このブラウザではマイクを利用できません');
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+        const started = await jsonRequest('/api/live/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'continuous', controller_id: getControllerId() }),
+        });
+        render(started);
+        connectSocket(started.websocket_url);
+      } catch (error) {
+        desiredActive = false;
+        await stopCapture();
+        setNotice(error.message, true);
+        await refresh();
+      }
+    }
+
+    async function endSession() {
+      if (!window.confirm('会議を終了しますか？')) return;
+      desiredActive = false;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      await stopCapture();
+      try {
+        const snapshot = await jsonRequest('/api/live/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ controller_id: getControllerId() }),
+        });
+        render(snapshot);
+        setNotice('最後の発話を整理しています。', false);
+      } catch (error) {
+        setNotice(error.message, true);
+      }
+    }
+
+    $('start-button').addEventListener('click', startSession);
+    $('reconnect-button').addEventListener('click', () => { desiredActive = true; scheduleReconnect(); });
+    $('end-button').addEventListener('click', endSession);
+    document.addEventListener('visibilitychange', () => {
+      refresh();
+      if (document.visibilityState === 'visible' && desiredActive && !socket) scheduleReconnect();
+    });
+    refresh();
+    window.setInterval(refresh, 1000);
+  </script>
+</body>
+</html>

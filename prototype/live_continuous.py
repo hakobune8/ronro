@@ -69,6 +69,7 @@ class LiveContinuousSession:
         self._analyzer_factory = analyzer_factory
         self.analyzer = analyzer
         self.runtime_state = "starting"
+        self.transport_connected = False
         self.stt_state = "idle"
         self.analyzer_status = "idle"
         self.error: dict[str, Any] | None = None
@@ -163,18 +164,32 @@ class LiveContinuousSession:
 
     def mark_connected(self) -> None:
         with self._lock:
-            if self.runtime_state not in {"starting", "active"}:
+            if self.runtime_state not in {"starting", "active", "finalizing"}:
                 raise ContinuousSessionStateError(f"Cannot connect from {self.runtime_state}")
             self.stt_state = "connecting"
+            self.transport_connected = True
+
+    def mark_transport_disconnected(self) -> None:
+        with self._lock:
+            self.transport_connected = False
+            if self.runtime_state in {"starting", "active"}:
+                self.stt_state = "disconnected"
 
     def activate(self) -> None:
         with self._lock:
             if self.runtime_state != "starting":
                 if self.runtime_state == "active":
+                    self.transport_connected = True
+                    self.stt_state = "connected"
+                    return
+                if self.runtime_state == "finalizing":
+                    self.transport_connected = True
+                    self.stt_state = "connected"
                     return
                 raise ContinuousSessionStateError(f"Cannot activate from {self.runtime_state}")
             self.runtime_state = "active"
             self.stt_state = "connected"
+            self.transport_connected = True
             self.analyzer_status = "idle"
 
     def accept_audio_chunk(self, chunk: AudioChunk) -> None:
@@ -237,6 +252,7 @@ class LiveContinuousSession:
             self._transport_failure_count += 1
             self.stt_state = "error"
             self.capture_stopped = True
+            self.transport_connected = False
             self.stt_finalization_complete = True
             self._forced_incomplete = True
             self.runtime_state = "finalizing"
@@ -451,7 +467,7 @@ class LiveContinuousSession:
                     "session_id": self.session_id,
                     "runtime_state": self.runtime_state,
                     "microphone_state": "active" if self.runtime_state == "active" else "inactive",
-                    "websocket_state": "connected" if self.runtime_state in {"starting", "active", "finalizing"} else "disconnected",
+                    "websocket_state": "connected" if self.transport_connected else "disconnected",
                     "stt_state": self.stt_state,
                     "analyzer_status": self.analyzer_status,
                     "partial_transcript": self.partial_transcript,

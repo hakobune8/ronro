@@ -10,7 +10,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from .app import DeveloperPrototypeApp
 from .errors import PrototypeError
@@ -29,6 +29,7 @@ class DeveloperRequestHandler(BaseHTTPRequestHandler):
     app: DeveloperPrototypeApp
     index_html: bytes
     shared_html: bytes
+    session_html: bytes
     live_manager: LiveSessionManager | None = None
     live_worklet: bytes = b""
     readiness_check = staticmethod(lambda: True)
@@ -45,10 +46,10 @@ class DeveloperRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _error(self, exc: PrototypeError) -> None:
-        status = 409 if exc.code == "revision_mismatch" else 422
+        status = 409 if exc.code in {"revision_mismatch", "live_controller_owned"} else 422
         self._send(status, _json_bytes({"error": exc.as_dict()}))
 
-    def _websocket_url(self) -> str:
+    def _websocket_url(self, controller_id: str | None = None) -> str:
         """Return a browser-reachable WebSocket URL.
 
         Local development keeps the historical two-port URL.  Behind an
@@ -59,18 +60,24 @@ class DeveloperRequestHandler(BaseHTTPRequestHandler):
 
         configured = os.getenv("LIVE_PUBLIC_WEBSOCKET_URL")
         if configured:
-            return configured
-        path = os.getenv("LIVE_WEBSOCKET_PATH", "/live")
-        if not path.startswith("/"):
-            path = f"/{path}"
-        forwarded_proto = (self.headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower()
-        forwarded_host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host")
-        if forwarded_proto and forwarded_host:
-            scheme = "wss" if forwarded_proto == "https" else "ws"
-            return f"{scheme}://{forwarded_host}{path}"
-        request_host = self.headers.get("Host", "").split(":", 1)[0].strip()
-        host = request_host or str(self.server.server_address[0])
-        return f"ws://{host}:{getattr(self.server, 'live_ws_port', 8765)}{path}"
+            websocket_url = configured
+        else:
+            path = os.getenv("LIVE_WEBSOCKET_PATH", "/live")
+            if not path.startswith("/"):
+                path = f"/{path}"
+            forwarded_proto = (self.headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower()
+            forwarded_host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host")
+            if forwarded_proto and forwarded_host:
+                scheme = "wss" if forwarded_proto == "https" else "ws"
+                websocket_url = f"{scheme}://{forwarded_host}{path}"
+            else:
+                request_host = self.headers.get("Host", "").split(":", 1)[0].strip()
+                host = request_host or str(self.server.server_address[0])
+                websocket_url = f"ws://{host}:{getattr(self.server, 'live_ws_port', 8765)}{path}"
+        if controller_id:
+            separator = "&" if "?" in websocket_url else "?"
+            websocket_url = f"{websocket_url}{separator}controller_id={quote(controller_id, safe='')}"
+        return websocket_url
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
@@ -83,10 +90,16 @@ class DeveloperRequestHandler(BaseHTTPRequestHandler):
                 self._send(200 if ready else 503, _json_bytes({"status": "ready" if ready else "not_ready"}))
                 return
             if parsed.path == "/":
-                self._send(200, self.index_html, "text/html; charset=utf-8")
+                self._send(200, self.shared_html, "text/html; charset=utf-8")
                 return
             if parsed.path == "/shared":
                 self._send(200, self.shared_html, "text/html; charset=utf-8")
+                return
+            if parsed.path == "/control":
+                self._send(200, self.index_html, "text/html; charset=utf-8")
+                return
+            if parsed.path == "/session":
+                self._send(200, self.session_html, "text/html; charset=utf-8")
                 return
             if parsed.path == "/static/live-audio-worklet.js":
                 self._send(200, self.live_worklet, "text/javascript; charset=utf-8")
@@ -95,7 +108,8 @@ class DeveloperRequestHandler(BaseHTTPRequestHandler):
                 if self.live_manager is None:
                     self._send(404, _json_bytes({"error": {"code": "live_disabled", "message": "Live Audio is not enabled"}}))
                 else:
-                    self._send(200, _json_bytes(self.live_manager.snapshot()))
+                    controller_id = parse_qs(parsed.query).get("controller_id", [None])[0]
+                    self._send(200, _json_bytes(self.live_manager.snapshot_for_controller(controller_id)))
                 return
             if parsed.path == "/api/live/evaluation":
                 if self.live_manager is None:
@@ -182,12 +196,23 @@ class DeveloperRequestHandler(BaseHTTPRequestHandler):
                     if length:
                         payload = json.loads(self.rfile.read(length).decode("utf-8"))
                     mode = payload.get("mode", "one_utterance") if isinstance(payload, dict) else "one_utterance"
-                    snapshot = self.live_manager.start_mode(str(mode))
-                    snapshot["websocket_url"] = self._websocket_url()
+                    controller_id = payload.get("controller_id") if isinstance(payload, dict) else None
+                    snapshot = self.live_manager.start_mode(str(mode), controller_id=controller_id)
+                    snapshot["websocket_url"] = self._websocket_url(controller_id=controller_id)
                 elif self.path == "/api/live/stop":
-                    snapshot = self.live_manager.request_stop()
+                    length = int(self.headers.get("Content-Length", "0"))
+                    payload = {}
+                    if length:
+                        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    controller_id = payload.get("controller_id") if isinstance(payload, dict) else None
+                    snapshot = self.live_manager.request_stop(controller_id=controller_id)
                 elif self.path == "/api/live/retry":
-                    snapshot = self.live_manager.retry()
+                    length = int(self.headers.get("Content-Length", "0"))
+                    payload = {}
+                    if length:
+                        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    controller_id = payload.get("controller_id") if isinstance(payload, dict) else None
+                    snapshot = self.live_manager.retry(controller_id=controller_id)
                 else:
                     length = int(self.headers.get("Content-Length", "0"))
                     command = json.loads(self.rfile.read(length).decode("utf-8"))
@@ -247,6 +272,7 @@ def create_server(
 ) -> ThreadingHTTPServer:
     index_path = Path(__file__).resolve().parent / "web" / "index.html"
     shared_path = Path(__file__).resolve().parent / "web" / "shared.html"
+    session_path = Path(__file__).resolve().parent / "web" / "session.html"
     worklet_path = Path(__file__).resolve().parent / "web" / "live-audio-worklet.js"
     handler_type = type(
         "BoundDeveloperRequestHandler",
@@ -255,9 +281,10 @@ def create_server(
             "app": app,
             "index_html": index_path.read_bytes(),
             "shared_html": shared_path.read_bytes(),
+            "session_html": session_path.read_bytes(),
             "live_manager": live_manager,
             "live_worklet": worklet_path.read_bytes(),
-            "readiness_check": staticmethod(lambda: _runtime_ready(index_path, worklet_path, live_manager)),
+            "readiness_check": staticmethod(lambda: _runtime_ready(index_path, worklet_path, session_path, live_manager)),
         },
     )
     server = ThreadingHTTPServer((host, port), handler_type)
@@ -265,7 +292,12 @@ def create_server(
     return server
 
 
-def _runtime_ready(index_path: Path, worklet_path: Path, live_manager: LiveSessionManager | None) -> bool:
+def _runtime_ready(
+    index_path: Path,
+    worklet_path: Path,
+    session_path: Path,
+    live_manager: LiveSessionManager | None,
+) -> bool:
     """Check local initialization only; never call an external provider."""
 
     api_key_configured = bool(
@@ -283,6 +315,7 @@ def _runtime_ready(index_path: Path, worklet_path: Path, live_manager: LiveSessi
         live_manager is not None
         and index_path.is_file()
         and worklet_path.is_file()
+        and session_path.is_file()
         and api_key_configured
         and analyzer_model_configured
         and stt_model_configured

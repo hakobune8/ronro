@@ -89,6 +89,39 @@ class SharedViewTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_primary_control_and_mobile_routes_have_separate_responsibilities(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas")
+        app = DeveloperPrototypeApp(ROOT / "evaluation" / "fixtures", ROOT / "schemas")
+        server = create_server(app, "127.0.0.1", 0, live_manager=manager, live_ws_port=18767)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        try:
+            for path in ("/", "/shared"):
+                with urlopen(f"http://{host}:{port}{path}", timeout=2) as response:
+                    body = response.read().decode("utf-8")
+                    self.assertEqual(response.status, 200)
+                    self.assertIn("論点図", body)
+                    self.assertNotIn("Start Continuous", body)
+                    self.assertNotIn("<button", body)
+            with urlopen(f"http://{host}:{port}/control", timeout=2) as response:
+                body = response.read().decode("utf-8")
+                self.assertEqual(response.status, 200)
+                self.assertIn("Start Continuous", body)
+            with urlopen(f"http://{host}:{port}/session", timeout=2) as response:
+                body = response.read().decode("utf-8")
+                self.assertEqual(response.status, 200)
+                self.assertIn("会議をはじめる", body)
+                self.assertIn("getUserMedia", body)
+                self.assertNotIn("Start Continuous", body)
+        finally:
+            current = manager.current()
+            if current is not None:
+                current.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_pilot_shared_scenario_uses_meaningful_labels_and_topic_return(self) -> None:
         app = DeveloperPrototypeApp(ROOT / "evaluation" / "fixtures", ROOT / "schemas")
         snapshot = app.reset_session("pilot-shared", through_sequence=48)
