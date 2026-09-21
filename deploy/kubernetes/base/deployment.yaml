@@ -21,6 +21,7 @@ spec:
         app.kubernetes.io/configuration: pilot-001
     spec:
       terminationGracePeriodSeconds: 60
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
