@@ -1,0 +1,70 @@
+name: Publish RONRO container
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Git tag to build and publish
+        required: true
+        default: v0.1.0-pilot
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build and publish GHCR image
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_TAG: ${{ inputs.source_tag || github.ref_name }}
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/ronro
+
+    steps:
+      - name: Check out the requested release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Verify source tag identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${SOURCE_TAG}"
+          git fetch --force --tags origin
+          test "$(git rev-parse "${SOURCE_TAG}^{commit}")" = "$(git rev-parse HEAD)"
+          echo "Building ${SOURCE_TAG} from $(git rev-parse HEAD)"
+
+      - name: Set image metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ env.SOURCE_TAG }}
+          build-args: |
+            APP_VERSION=${{ env.SOURCE_TAG }}
+            VCS_REF=${{ env.SOURCE_SHA }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
