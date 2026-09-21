@@ -1,0 +1,1159 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Discussion Map Prototype 1 — Recorded Analyzer Spike</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --ink: #17202a;
+      --muted: #52606d;
+      --line: #d7dee7;
+      --panel: #ffffff;
+      --canvas: #f4f7fa;
+      --accent: #2563eb;
+      --accent-soft: #e8f0ff;
+      --warning: #b45309;
+      --success: #15803d;
+      --danger: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--canvas); color: var(--ink); min-width: 1080px; }
+    button, select, input { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: default; opacity: .45; }
+    header { display: flex; justify-content: space-between; gap: 24px; padding: 18px 28px; background: #15253a; color: #fff; }
+    header h1 { margin: 2px 0 4px; font-size: 23px; letter-spacing: -.02em; }
+    header p { margin: 0; color: #c9d7e8; font-size: 13px; }
+    .eyebrow { color: #8db5ea; font-size: 11px; font-weight: 750; letter-spacing: .11em; text-transform: uppercase; }
+    .header-meta { min-width: 250px; text-align: right; color: #dbe7f4; font-size: 13px; line-height: 1.7; }
+    .app-shell { padding: 14px; }
+    .toolbar, .panel, .status-rail section, details { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
+    .toolbar { display: flex; align-items: end; gap: 9px; padding: 10px; margin-bottom: 12px; }
+    .toolbar-group { display: flex; align-items: end; gap: 6px; }
+    .toolbar-group.grow { flex: 1; }
+    label, .field-label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; font-weight: 650; }
+    select, input { min-height: 34px; padding: 6px 8px; border: 1px solid #b9c5d3; border-radius: 6px; background: #fff; color: var(--ink); }
+    .fixture-select { width: 270px; }
+    .sequence-input { width: 96px; }
+    .button-row { display: flex; flex-wrap: wrap; gap: 5px; }
+    button { min-height: 32px; padding: 5px 9px; border: 1px solid #9baabd; border-radius: 6px; background: #fff; color: var(--ink); }
+    button:hover:not(:disabled) { border-color: #52749f; background: #f0f5fb; }
+    button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+    button.primary:hover:not(:disabled) { background: #1d4ed8; }
+    button.danger { border-color: #e3a3a3; color: var(--danger); }
+    .status-message { min-height: 32px; margin-bottom: 12px; padding: 8px 10px; border-radius: 7px; background: #eaf1f8; color: #2b455e; font-size: 13px; }
+    .status-message.error { background: #fff0f0; color: var(--danger); }
+    .live-panel { margin-bottom: 12px; }
+    .live-controls { display: flex; align-items: end; gap: 7px; flex-wrap: wrap; padding: 12px 14px 8px; }
+    .live-state-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; padding: 0 14px 12px; }
+    .live-state { padding: 7px 9px; border: 1px solid #dfe6ee; border-radius: 6px; background: #fbfcfd; }
+    .live-state strong { display: block; font-size: 12px; }
+    .live-state span { color: var(--muted); font-size: 11px; }
+    .live-transcript-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 0 14px 12px; }
+    .live-transcript-box { min-height: 46px; padding: 8px; border: 1px solid #d7dee7; border-radius: 6px; background: #fff; font-size: 12px; line-height: 1.4; }
+    .live-transcript-box .field-label { margin-bottom: 4px; }
+    .live-event-log { max-height: 105px; overflow: auto; margin: 0 14px 12px; padding: 8px; border-radius: 6px; background: #111827; color: #e5e7eb; font-size: 10px; line-height: 1.4; white-space: pre-wrap; }
+    .live-status-badge { padding: 4px 8px; border: 1px solid #b9c5d3; border-radius: 5px; font-size: 11px; font-weight: 750; }
+    .live-status-badge.active { border-color: var(--success); color: var(--success); background: #f2fff5; }
+    .live-status-badge.busy { border-color: var(--warning); color: var(--warning); background: #fffaf0; }
+    .live-status-badge.error { border-color: var(--danger); color: var(--danger); background: #fff4f4; }
+    .evaluation-panel { margin: 10px 0 12px; }
+    .evaluation-controls, .evaluation-feedback, .evaluation-review { display: flex; align-items: end; gap: 7px; flex-wrap: wrap; padding: 10px 13px; }
+    .evaluation-controls label, .evaluation-feedback label, .evaluation-review label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 10px; font-weight: 700; }
+    .evaluation-controls input, .evaluation-feedback input, .evaluation-review input, .evaluation-review textarea { min-height: 28px; border: 1px solid #cbd5e1; border-radius: 5px; padding: 4px 7px; font: inherit; font-size: 11px; }
+    .evaluation-controls input[type="number"], .evaluation-feedback input[type="number"], .evaluation-review input[type="number"] { width: 52px; }
+    .evaluation-controls input[type="text"] { width: 310px; }
+    .evaluation-feedback input[type="text"] { width: 260px; }
+    .evaluation-review textarea { width: 250px; min-height: 48px; resize: vertical; }
+    .evaluation-markers { display: flex; gap: 5px; flex-wrap: wrap; padding: 0 13px 10px; }
+    .evaluation-markers button { font-size: 11px; }
+    .evaluation-note { padding: 0 13px 10px; color: var(--muted); font-size: 10px; }
+    .replay-mode { width: 190px; }
+    .transcript-strip { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 12px; border-top: 1px solid var(--line); background: #f8fbfd; color: #33475b; }
+    .analysis-indicator { flex: 0 0 auto; padding: 4px 7px; border: 1px solid #b9c5d3; border-radius: 5px; background: #fff; font-size: 11px; font-weight: 750; }
+    .analysis-indicator.analyzing { border-color: var(--warning); color: var(--warning); }
+    .analysis-indicator.updated { border-color: var(--success); color: var(--success); }
+    .transcript-content { min-width: 0; flex: 1; font-size: 12px; line-height: 1.4; }
+    .transcript-content strong { color: var(--ink); }
+    .transcript-evidence { color: var(--muted); font-size: 10px; }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 12px; align-items: start; }
+    .panel { min-width: 0; overflow: hidden; }
+    .panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 15px 10px; border-bottom: 1px solid var(--line); }
+    .panel-heading h2 { margin: 0; font-size: 15px; }
+    .panel-heading .hint { color: var(--muted); font-size: 11px; }
+    .map-viewport { height: 650px; overflow: auto; padding: 14px; background: #eef3f7; }
+    .map-canvas { min-width: 740px; transform-origin: top left; transition: none; }
+    .lane-grid { display: flex; align-items: flex-start; gap: 12px; min-height: 150px; }
+    .lane { flex: 0 0 190px; min-height: 138px; border: 1px solid #cbd6e2; border-radius: 9px; background: #fbfdff; overflow: hidden; }
+    .lane.expanded { flex-basis: 284px; min-height: 220px; }
+    .lane.parking, .lane.archived { flex-basis: 156px; }
+    .lane.expanded.parking, .lane.expanded.archived { flex-basis: 284px; }
+    .lane.current { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, .16); }
+    .lane.parking { border-style: dashed; background: #fffdf7; }
+    .lane.archived { opacity: .78; background: #f7f7f8; }
+    .lane-header { padding: 10px 11px; border-bottom: 1px solid #dce4ed; background: #f5f8fb; }
+    .lane.current .lane-header { background: var(--accent-soft); }
+    .lane-title-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+    .lane-title { display: flex; align-items: center; gap: 6px; font-weight: 750; font-size: 14px; }
+    .lane-title .current-marker { color: var(--accent); font-size: 12px; }
+    .lane-meta { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .collapse-button { min-height: 24px; padding: 2px 7px; font-size: 12px; }
+    .lane-cards { display: flex; flex-direction: column; gap: 7px; padding: 9px; }
+    .lane.compact .lane-cards { padding: 0; }
+    .compact-summary { display: flex; flex-direction: column; gap: 9px; min-height: 92px; padding: 12px 10px; background: #fff; }
+    .lane.parking .compact-summary { background: #fffdf7; }
+    .lane.archived .compact-summary { background: #f7f7f8; }
+    .compact-summary-hint { color: var(--muted); font-size: 11px; line-height: 1.35; }
+    .compact-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+    .compact-count { padding: 5px 3px; border: 1px solid #dce4ed; border-radius: 5px; background: #f8fafc; color: #33475b; font-size: 10px; line-height: 1.15; text-align: center; }
+    .compact-count strong { display: block; color: var(--ink); font-size: 16px; }
+    .compact-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+    .compact-badge { padding: 2px 5px; border: 1px solid #c8d2dd; border-radius: 4px; color: #52606d; font-size: 10px; }
+    .empty-lane { padding: 12px 9px; color: var(--muted); font-size: 12px; }
+    .node-card { display: block; width: 100%; min-height: 74px; padding: 9px; border: 1px solid #bdc9d6; border-left: 4px solid #91a4b8; border-radius: 7px; background: #fff; text-align: left; }
+    .node-card:hover, .node-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, .12); }
+    .node-card.candidate { border-style: dashed; border-left-style: dashed; border-left-color: var(--warning); background: #fffaf1; }
+    .node-card.confirmed { border-left-color: var(--success); background: #f7fff9; }
+    .node-card.revoked { opacity: .62; }
+    .node-card.parked { border-style: dashed; background: #fffdf5; }
+    .node-card.archived { opacity: .56; }
+    .card-top { display: flex; align-items: start; gap: 6px; }
+    .type-icon { width: 20px; flex: 0 0 20px; text-align: center; font-size: 15px; }
+    .card-label { flex: 1; font-size: 13px; font-weight: 720; line-height: 1.3; overflow-wrap: anywhere; }
+    .state-badge { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #b5c2d0; border-radius: 4px; color: #435568; font-size: 10px; font-weight: 750; }
+    .card-meta { margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .special-lanes { display: none; }
+    .empty-map { display: flex; min-height: 250px; align-items: center; justify-content: center; padding: 30px; border: 1px dashed #aebdcd; border-radius: 9px; background: rgba(255,255,255,.64); color: var(--muted); text-align: center; }
+    .recent-flow { display: flex; align-items: center; gap: 6px; min-height: 55px; overflow-x: auto; padding: 8px 12px; border-top: 1px solid var(--line); background: #fff; }
+    .flow-label { color: var(--muted); font-size: 11px; font-weight: 750; white-space: nowrap; }
+    .flow-item { padding: 5px 8px; border: 1px solid #c6d2df; border-radius: 14px; background: #f7fafc; font-size: 12px; white-space: nowrap; }
+    .flow-arrow { color: #8291a1; }
+    .status-rail { display: flex; flex-direction: column; gap: 10px; }
+    .status-rail section { padding: 12px; }
+    .status-rail h2, .status-rail h3 { margin: 0 0 8px; font-size: 14px; }
+    .status-rail h3 { margin-top: 10px; font-size: 12px; }
+    .current-topic { padding: 10px; border: 1px solid #b9d0f6; border-radius: 7px; background: var(--accent-soft); }
+    .current-topic.none { border-color: var(--line); background: #f7f9fb; }
+    .current-topic .label { font-size: 16px; font-weight: 800; }
+    .current-topic .meta { margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .metric-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+    .metric { padding: 7px; border: 1px solid #e0e6ed; border-radius: 6px; background: #fbfcfd; }
+    .metric-value { display: block; font-size: 19px; font-weight: 800; }
+    .metric-label { color: var(--muted); font-size: 10px; }
+    .rail-list { margin: 0; padding-left: 18px; color: #33475b; font-size: 12px; line-height: 1.55; }
+    .rail-list li { margin: 2px 0; }
+    .subtle { color: var(--muted); font-size: 11px; }
+    .detail-empty { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .detail-title { margin-bottom: 7px; font-size: 16px; font-weight: 800; overflow-wrap: anywhere; }
+    .detail-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .detail-table th, .detail-table td { padding: 4px 0; border-bottom: 1px solid #e7ebef; text-align: left; vertical-align: top; }
+    .detail-table th { width: 85px; color: var(--muted); font-weight: 650; }
+    .command-area { margin-top: 10px; }
+    .command-area .button-row { margin-top: 5px; }
+    .merge-area { margin-top: 10px; padding-top: 9px; border-top: 1px solid #e2e8ef; }
+    .merge-selection { min-height: 18px; color: var(--muted); font-size: 11px; }
+    details { margin-top: 12px; overflow: hidden; }
+    details summary { padding: 11px 13px; cursor: pointer; font-size: 13px; font-weight: 750; }
+    .debug-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 13px 13px; }
+    pre { max-height: 340px; overflow: auto; margin: 0; padding: 10px; border-radius: 6px; background: #111827; color: #e5e7eb; font-size: 10px; line-height: 1.4; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { padding: 5px; border-bottom: 1px solid #e5e9ee; text-align: left; vertical-align: top; }
+    .replay-progress { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    @media (max-width: 1180px) { body { min-width: 0; } .workspace { grid-template-columns: 1fr; } .status-rail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .status-rail section:last-child { grid-column: 1 / -1; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="eyebrow">Prototype 1 · Recorded Analyzer Spike + Stable Discussion Map</div>
+      <h1 id="session-title">Discussion Map</h1>
+      <p id="session-goal">Recorded Transcript / Fake or Real Analyzer / Human Command integration</p>
+    </div>
+    <div class="header-meta" id="header-meta">Revision: —<br>Session: —</div>
+  </header>
+
+  <div class="app-shell">
+    <div class="toolbar">
+      <div class="toolbar-group grow">
+        <div>
+          <label for="fixture">Fixture Session</label>
+          <select class="fixture-select" id="fixture"></select>
+        </div>
+        <div>
+          <label for="sequence">Load through Event</label>
+          <input class="sequence-input" id="sequence" type="number" min="0" placeholder="final">
+        </div>
+        <div>
+          <label for="replay-mode">Replay source</label>
+          <select class="replay-mode" id="replay-mode">
+            <option value="events">Fixed Event Replay</option>
+            <option value="transcript">Golden Transcript + Fake Analyzer</option>
+            <option value="recorded_fake">Recorded Transcript + Fake Analyzer</option>
+            <option value="real">Recorded Transcript + Real Analyzer</option>
+          </select>
+        </div>
+        <button id="load-final" class="primary">Load</button>
+      </div>
+      <div>
+        <label>Replay</label>
+        <div class="button-row">
+          <button id="replay-reset">Reset</button>
+          <button id="replay-step">Step</button>
+          <button id="replay-play">Play</button>
+        </div>
+      </div>
+      <div>
+        <label>Manual View</label>
+        <div class="button-row">
+          <button id="zoom-out" title="Zoom out">−</button>
+          <button id="zoom-reset">100%</button>
+          <button id="zoom-in" title="Zoom in">+</button>
+        </div>
+      </div>
+      <div class="replay-progress" id="replay-progress">Replay: —</div>
+    </div>
+
+    <div id="status-message" class="status-message">Loading fixtures…</div>
+
+    <section class="panel live-panel" aria-labelledby="live-heading">
+      <div class="panel-heading">
+        <h2 id="live-heading">Live Audio · One Utterance / Continuous</h2>
+        <span id="live-runtime-badge" class="live-status-badge">Disconnected</span>
+      </div>
+      <div class="live-controls">
+        <button id="live-start" class="primary">Start One Utterance</button>
+        <button id="live-start-continuous" class="primary">Start Continuous</button>
+        <button id="live-stop" disabled>Stop / Commit</button>
+        <button id="live-commit" disabled>Commit Utterance</button>
+        <button id="live-end" class="danger" disabled>End Session</button>
+        <button id="live-retry" disabled>Retry Analyzer</button>
+        <span class="subtle">明示的Start後のみMicrophoneを使用します。ContinuousはCommit UtteranceでFinal化します。</span>
+      </div>
+      <div class="live-state-grid">
+        <div class="live-state"><strong>Microphone</strong><span id="live-mic-state">inactive</span></div>
+        <div class="live-state"><strong>WebSocket</strong><span id="live-ws-state">disconnected</span></div>
+        <div class="live-state"><strong>STT</strong><span id="live-stt-state">idle</span></div>
+        <div class="live-state"><strong>Analyzer / Graph</strong><span id="live-analyzer-state">idle · Rev —</span></div>
+        <div class="live-state"><strong>Queue</strong><span id="live-queue-state">depth 0 · completed — · failed 0</span></div>
+        <div class="live-state"><strong>Queue Wait</strong><span id="live-queue-wait">p50 — · p95 — · state normal</span></div>
+      </div>
+      <div class="live-transcript-grid">
+        <div class="live-transcript-box"><div class="field-label">Partial Transcript (debug)</div><div id="live-partial">—</div></div>
+        <div class="live-transcript-box"><div class="field-label">Final Transcript</div><div id="live-final">—</div></div>
+        <div class="live-transcript-box"><div class="field-label">Normalized Utterance</div><div id="live-normalized">—</div></div>
+      </div>
+      <pre id="live-event-log" class="live-event-log">No Live runtime events.</pre>
+    </section>
+
+    <details class="evaluation-panel">
+      <summary>Evaluation Mode / Observer</summary>
+      <div class="evaluation-controls">
+        <label>Participants<input id="evaluation-participants" type="number" min="1" max="20" value="2"></label>
+        <label>Discussion theme<input id="evaluation-theme" type="text" value="Discussion Map AI Facilitatorを社内会議で使う場合、必要な機能"></label>
+        <label><span>Raw audio consent</span><input id="evaluation-audio-consent" type="checkbox"></label>
+        <button id="evaluation-start" class="primary">Start Evaluation</button>
+        <button id="evaluation-end" class="danger" disabled>End Evaluation</button>
+        <span id="evaluation-state" class="live-status-badge">idle</span>
+      </div>
+      <div class="evaluation-note">Evaluation開始前に、microphone使用・transcription・raw audio / evaluation logの保持方針を参加者へ説明してください。Raw Audioは既定で保存しません。</div>
+      <div class="evaluation-markers">
+        <span class="field-label">One-click marker</span>
+        <button data-evaluation-marker="helpful">Helpful</button>
+        <button data-evaluation-marker="distracting">Distracting</button>
+        <button data-evaluation-marker="wrong">Wrong</button>
+        <button data-evaluation-marker="important_miss">Important miss</button>
+        <button data-evaluation-marker="looked_at_map">Looked at map</button>
+        <input id="evaluation-marker-note" type="text" placeholder="Optional note">
+      </div>
+      <div class="evaluation-feedback">
+        <strong>Participant Feedback (1–5)</strong>
+        <label>Usefulness<input id="feedback-usefulness" type="number" min="1" max="5" value="4"></label>
+        <label>Current Topic<input id="feedback-current-topic" type="number" min="1" max="5" value="4"></label>
+        <label>Decision / Open Item<input id="feedback-decision-open" type="number" min="1" max="5" value="4"></label>
+        <label>Distraction<input id="feedback-distraction" type="number" min="1" max="5" value="2"></label>
+        <label>Would use again<input id="feedback-use-again" type="number" min="1" max="5" value="4"></label>
+        <label>Comment<input id="feedback-comment" type="text" placeholder="Optional comment"></label>
+        <button id="evaluation-feedback-submit" disabled>Save Feedback</button>
+      </div>
+      <div class="evaluation-review">
+        <strong>Observer Review (1–5)</strong>
+        <label>Clarity<input id="review-clarity" type="number" min="1" max="5" value="4"></label>
+        <label>Density<input id="review-density" type="number" min="1" max="5" value="4"></label>
+        <label>Decision Safety<input id="review-decision-safety" type="number" min="1" max="5" value="4"></label>
+        <label>Topic Coherence<input id="review-topic-coherence" type="number" min="1" max="5" value="4"></label>
+        <label>Stability<input id="review-stability" type="number" min="1" max="5" value="4"></label>
+        <label>Usefulness<input id="review-usefulness" type="number" min="1" max="5" value="4"></label>
+        <label>Most helpful<textarea id="review-helpful" placeholder="Optional"></textarea></label>
+        <label>Most distracting<textarea id="review-distracting" placeholder="Optional"></textarea></label>
+        <label>Wrong item<textarea id="review-wrong" placeholder="Optional"></textarea></label>
+        <label>Missing item<textarea id="review-missing" placeholder="Optional"></textarea></label>
+        <button id="evaluation-review-submit" disabled>Save Observer Review</button>
+      </div>
+      <div class="evaluation-review">
+        <strong>Post-session Golden</strong>
+        <label>Main Topics<textarea id="golden-topics" placeholder="one label per line"></textarea></label>
+        <label>Strong Decisions<textarea id="golden-decisions" placeholder="one label per line"></textarea></label>
+        <label>Important Open Items<textarea id="golden-open-items" placeholder="one label per line"></textarea></label>
+        <label>Actions<textarea id="golden-actions" placeholder="one label per line"></textarea></label>
+        <button id="evaluation-golden-submit" disabled>Save Golden</button>
+      </div>
+    </details>
+
+    <div class="workspace">
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Discussion Map</h2>
+          <span class="hint">Topic Lane · Local Card Stack · existing positions are retained</span>
+        </div>
+        <div class="map-viewport" id="map-viewport">
+          <div class="map-canvas" id="map-canvas">
+            <div id="lane-grid" class="lane-grid"></div>
+            <div id="special-lanes" class="special-lanes"></div>
+          </div>
+        </div>
+        <div class="recent-flow" id="recent-flow"></div>
+        <div class="transcript-strip" id="transcript-strip">
+          <span class="analysis-indicator" id="analysis-status">Event Replay</span>
+          <div class="transcript-content" id="current-utterance">Transcript Replayを選択すると、Final UtteranceとAnalyzerの更新が表示されます。</div>
+        </div>
+      </section>
+
+      <aside class="status-rail">
+        <section>
+          <h2>Current Topic</h2>
+          <div id="current-topic" class="current-topic none">No active topic</div>
+        </section>
+        <section>
+          <h2>Status Rail</h2>
+          <div class="metric-grid" id="metrics"></div>
+        </section>
+        <section>
+          <h2>Discussion Status</h2>
+          <h3>Decisions</h3>
+          <ul class="rail-list" id="decision-list"></ul>
+          <h3>Open Items</h3>
+          <ul class="rail-list" id="open-list"></ul>
+          <h3>Actions</h3>
+          <ul class="rail-list" id="action-list"></ul>
+        </section>
+        <section>
+          <h2>Selected Node</h2>
+          <div id="node-detail" class="detail-empty">Select a card to inspect it and access its Human Commands.</div>
+        </section>
+        <section>
+          <h2>AI Observation</h2>
+          <div class="subtle" id="ai-observation">Fake AnalyzerはCandidate Eventのみを生成します。</div>
+        </section>
+      </aside>
+    </div>
+
+    <details>
+      <summary>Developer Event Log / Graph State</summary>
+      <div class="debug-grid">
+        <div id="event-log"></div>
+        <pre id="graph-json"></pre>
+      </div>
+    </details>
+  </div>
+
+  <script>
+    let model = null;
+    let selectedNodeId = null;
+    let mergeSelection = [];
+    let compactLanes = new Set();
+    let manuallyExpandedLanes = new Set();
+    let mapZoom = 1;
+    let playTimer = null;
+    let requestInFlight = false;
+
+    const $ = (id) => document.getElementById(id);
+    const typeIcons = { topic: '●', idea: '✦', option: '◇', concern: '!', open_item: '?', decision: '✓', action: '→' };
+    const typeLabels = { topic: 'Topic', idea: 'Idea', option: 'Option', concern: 'Concern', open_item: 'Open Item', decision: 'Decision', action: 'Action' };
+    const statusLabels = { active: 'Active', candidate: 'Candidate', confirmed: 'Confirmed', revoked: 'Revoked', resolved: 'Resolved', parked: 'Parked', completed: 'Completed', archived: 'Archived' };
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+    }
+    function selectedFixture() { return $('fixture').value; }
+    function nodeById(id) { return model?.state?.graph?.nodes?.find((node) => node.id === id); }
+    function currentNode() { return nodeById(model?.state?.graph?.current_topic?.primary_topic_id); }
+    function setStatus(message, error = false) { $('status-message').textContent = message; $('status-message').className = error ? 'status-message error' : 'status-message'; }
+    function stopPlaying() { if (playTimer) { clearInterval(playTimer); playTimer = null; } $('replay-play').textContent = 'Play'; }
+
+    async function getJson(url, options) {
+      const response = await fetch(url, options);
+      const body = await response.json();
+      if (!response.ok) throw body.error || { code: 'request_failed', message: response.statusText };
+      return body;
+    }
+
+    // L1/L2 Live Audio state.  This is Runtime / Presentation state only; it
+    // never becomes a Canonical Discussion Event.
+    let liveSocket = null;
+    let liveStream = null;
+    let liveContext = null;
+    let liveSource = null;
+    let liveWorklet = null;
+    let livePcmSamples = [];
+    let liveSentSamples = 0;
+    let liveChunkSequence = 0;
+    let liveEventLines = [];
+    let liveMode = 'one_utterance';
+    let evaluationTimer = null;
+    let evaluationStartedAt = null;
+    let evaluationSnapshotMinutes = new Set();
+    const LIVE_TARGET_RATE = 24000;
+    const LIVE_CHUNK_SAMPLES = 2400;
+
+    function liveResample(samples, sourceRate, targetRate) {
+      if (!samples.length) return new Float32Array();
+      if (sourceRate === targetRate) return samples;
+      const count = Math.max(1, Math.round(samples.length * targetRate / sourceRate));
+      const result = new Float32Array(count);
+      const ratio = sourceRate / targetRate;
+      for (let index = 0; index < count; index += 1) {
+        const position = index * ratio;
+        const left = Math.min(samples.length - 1, Math.floor(position));
+        const right = Math.min(samples.length - 1, left + 1);
+        const fraction = position - left;
+        result[index] = samples[left] * (1 - fraction) + samples[right] * fraction;
+      }
+      return result;
+    }
+
+    function liveFloatToPcm16(samples) {
+      const result = new ArrayBuffer(samples.length * 2);
+      const view = new DataView(result);
+      for (let index = 0; index < samples.length; index += 1) {
+        const value = Number.isFinite(samples[index]) ? Math.max(-1, Math.min(1, samples[index])) : 0;
+        const integer = value >= 0 ? Math.round(value * 32767) : Math.round(value * 32768);
+        view.setInt16(index * 2, Math.max(-32768, Math.min(32767, integer)), true);
+      }
+      return result;
+    }
+
+    function liveBuildFrame(pcm16, sequence, audioStart) {
+      // Must match prototype.live_audio.FRAME_HEADER: 20 bytes, little endian.
+      const frame = new ArrayBuffer(20 + pcm16.byteLength);
+      const view = new DataView(frame);
+      view.setUint8(0, 68); view.setUint8(1, 77); view.setUint8(2, 65); view.setUint8(3, 80); // DMAP
+      view.setUint8(4, 1);
+      view.setUint32(8, sequence, true);
+      view.setFloat64(12, audioStart, true);
+      new Uint8Array(frame, 20).set(new Uint8Array(pcm16));
+      return frame;
+    }
+
+    function liveLog(event) {
+      liveEventLines.push(JSON.stringify(event, null, 0));
+      liveEventLines = liveEventLines.slice(-18);
+      $('live-event-log').textContent = liveEventLines.join('\n');
+    }
+
+    function updateLivePanel(snapshot) {
+      const state = snapshot?.live_state || {};
+      const runtime = state.runtime_state || 'disconnected';
+      const badge = $('live-runtime-badge');
+      badge.textContent = runtime;
+      badge.className = `live-status-badge ${['capturing', 'connected'].includes(runtime) ? 'active' : ['stopping', 'connecting'].includes(runtime) ? 'busy' : state.error ? 'error' : ''}`;
+      $('live-mic-state').textContent = state.microphone_state || 'inactive';
+      $('live-ws-state').textContent = state.websocket_state || 'disconnected';
+      $('live-stt-state').textContent = state.stt_state || 'idle';
+      $('live-analyzer-state').textContent = `${state.analyzer_status || 'idle'} · Rev ${state.graph_revision ?? '—'} / Render ${state.rendered_revision ?? '—'}${state.render_status ? ` · ${state.render_status}` : ''}`;
+      const queue = state.queue || {};
+      $('live-queue-state').textContent = `depth ${queue.current_depth ?? 0} · processing ${queue.processing_sequence ?? '—'} · completed ${queue.last_completed_sequence ?? '—'} · failed ${queue.failed ?? 0}`;
+      const queueLatency = state.queue_latency?.queue_wait || {};
+      $('live-queue-wait').textContent = `p50 ${queueLatency.p50 == null ? '—' : `${queueLatency.p50.toFixed(2)}s`} · p95 ${queueLatency.p95 == null ? '—' : `${queueLatency.p95.toFixed(2)}s`} · state ${queue.delayed_state || 'normal'}`;
+      $('live-partial').textContent = state.partial_transcript || '—';
+      $('live-final').textContent = state.final_transcript || '—';
+      $('live-normalized').textContent = state.normalized_utterance?.text || '—';
+      const active = ['starting', 'active', 'connecting', 'connected', 'capturing', 'stopping', 'finalizing'].includes(runtime);
+      const continuous = state.mode === 'continuous' || liveMode === 'continuous';
+      $('live-start').disabled = active;
+      $('live-start-continuous').disabled = active;
+      $('live-stop').disabled = continuous ? true : !['connected', 'capturing'].includes(runtime);
+      $('live-commit').disabled = !continuous || runtime !== 'active' || !liveSocket || liveSocket.readyState !== WebSocket.OPEN;
+      $('live-end').disabled = !continuous || !['active', 'finalizing'].includes(runtime);
+      $('live-retry').disabled = continuous || !state.final_transcript || state.analyzer_status === 'analyzing';
+      if (state.error) setStatus(`[${state.error.code}] ${state.error.message}`, true);
+      if (state.e2e_latency_ms !== null && state.e2e_latency_ms !== undefined) {
+        setStatus(`Live complete · audio_end → map_rendered ${state.e2e_latency_ms} ms`);
+      }
+    }
+
+    function applyLiveSnapshot(snapshot) {
+      if (!snapshot) return;
+      if (snapshot.live_state?.mode) liveMode = snapshot.live_state.mode;
+      const previousCurrentLaneId = model?.map?.current_lane_id;
+      if (snapshot.state && snapshot.map) {
+        model = snapshot;
+        reconcilePresentationLanes(previousCurrentLaneId, false);
+        render();
+      }
+      updateLivePanel(snapshot);
+    }
+
+    function stopLiveCapture() {
+      if (liveWorklet) { try { liveWorklet.disconnect(); } catch (_) {} liveWorklet = null; }
+      if (liveSource) { try { liveSource.disconnect(); } catch (_) {} liveSource = null; }
+      if (liveStream) { liveStream.getTracks().forEach((track) => track.stop()); liveStream = null; }
+      if (liveContext) { liveContext.close().catch(() => {}); liveContext = null; }
+      livePcmSamples = [];
+    }
+
+    function requestLiveMicrophone(constraints, timeoutMs = 10000) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const timer = window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new Error('Microphone permission or device request timed out'));
+        }, timeoutMs);
+        navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+          if (settled) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          settled = true;
+          window.clearTimeout(timer);
+          resolve(stream);
+        }).catch((error) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          reject(error);
+        });
+      });
+    }
+
+    function handleLivePcm(samples, sourceRate) {
+      if (!liveSocket || liveSocket.readyState !== WebSocket.OPEN) return;
+      const converted = liveResample(samples, sourceRate, LIVE_TARGET_RATE);
+      livePcmSamples = livePcmSamples.concat(Array.from(converted));
+      while (livePcmSamples.length >= LIVE_CHUNK_SAMPLES) {
+        const frameSamples = livePcmSamples.splice(0, LIVE_CHUNK_SAMPLES);
+        const pcm16 = liveFloatToPcm16(frameSamples);
+        const frame = liveBuildFrame(pcm16, liveChunkSequence, liveSentSamples / LIVE_TARGET_RATE);
+        liveSocket.send(frame);
+        liveSentSamples += frameSamples.length;
+        liveChunkSequence += 1;
+      }
+    }
+
+    async function startLiveSession(mode = 'one_utterance') {
+      if (liveSocket) return;
+      try {
+        liveMode = mode;
+        liveEventLines = [];
+        liveSentSamples = 0;
+        liveChunkSequence = 0;
+        const started = await getJson('/api/live/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode }),
+        });
+        applyLiveSnapshot(started);
+        liveSocket = new WebSocket(started.websocket_url);
+        liveSocket.binaryType = 'arraybuffer';
+        liveSocket.onopen = async () => {
+          try {
+            if (!navigator.mediaDevices?.getUserMedia) throw new Error('Browser microphone API is unavailable');
+            liveStream = await requestLiveMicrophone({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+            liveContext = new AudioContext();
+            await liveContext.resume();
+            await liveContext.audioWorklet.addModule('/static/live-audio-worklet.js');
+            liveSource = liveContext.createMediaStreamSource(liveStream);
+            liveWorklet = new AudioWorkletNode(liveContext, 'discussion-map-capture', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+            liveWorklet.port.onmessage = (event) => { if (event.data?.type === 'pcm') handleLivePcm(event.data.samples, event.data.sampleRate || liveContext.sampleRate); };
+            liveSource.connect(liveWorklet);
+            const mute = liveContext.createGain(); mute.gain.value = 0; liveWorklet.connect(mute).connect(liveContext.destination);
+            liveLog({ type: 'capture_started', source_sample_rate: liveContext.sampleRate, target_sample_rate: LIVE_TARGET_RATE });
+            setStatus(mode === 'continuous'
+              ? 'Microphone active · speak, then Commit Utterance or End Session'
+              : 'Microphone active · speak one utterance, then press Stop / Commit');
+          } catch (error) {
+            stopLiveCapture();
+            setStatus(`Microphone error: ${error.message}`, true);
+            if (liveSocket) { liveSocket.close(); liveSocket = null; }
+          }
+        };
+        liveSocket.onmessage = (message) => {
+          try {
+            const event = JSON.parse(message.data);
+            liveLog({ type: event.type, code: event.code, text: event.text });
+            if (event.snapshot) applyLiveSnapshot(event.snapshot);
+            if (event.type === 'error') setStatus(`[${event.code}] ${event.message}`, true);
+            if (event.type === 'live_complete') stopLiveCapture();
+            if (event.type === 'session_ended') {
+              stopLiveCapture();
+              setStatus('Live Session ended · final projection rendered');
+              if (liveSocket) liveSocket.close();
+            }
+          } catch (error) { setStatus(`Live event parse error: ${error.message}`, true); }
+        };
+        liveSocket.onerror = () => setStatus('Live WebSocket error', true);
+        liveSocket.onclose = () => { stopLiveCapture(); liveSocket = null; updateLivePanel({ live_state: { runtime_state: 'disconnected' } }); };
+      } catch (error) {
+        setStatus(`[${error.code || 'live_start_failed'}] ${error.message}`, true);
+      }
+    }
+
+    function startLiveOneUtterance() { return startLiveSession('one_utterance'); }
+    function startLiveContinuous() { return startLiveSession('continuous'); }
+
+    function commitLiveUtterance() {
+      if (!liveSocket || liveSocket.readyState !== WebSocket.OPEN || liveMode !== 'continuous') return;
+      liveSocket.send(JSON.stringify({ type: 'commit' }));
+      setStatus('Transcribing · waiting for Final Transcript');
+    }
+
+    async function stopLiveOneUtterance() {
+      try {
+        stopLiveCapture();
+        const snapshot = await getJson('/api/live/stop', { method: 'POST' });
+        applyLiveSnapshot(snapshot);
+        setStatus('Stopping · waiting for Final Transcript');
+      } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+    }
+
+    async function endLiveContinuous() {
+      if (liveMode !== 'continuous') return;
+      try {
+        stopLiveCapture();
+        const snapshot = await getJson('/api/live/stop', { method: 'POST' });
+        applyLiveSnapshot(snapshot);
+        setStatus('Finalizing · draining STT, Analyzer, and Map');
+      } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+    }
+
+    async function retryLiveAnalyzer() {
+      try {
+        const snapshot = await getJson('/api/live/retry', { method: 'POST' });
+        liveLog({ type: 'analyzer_retry' });
+        applyLiveSnapshot(snapshot);
+      } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+    }
+
+    function setEvaluationControls(active, ended = false) {
+      $('evaluation-start').disabled = active || ended;
+      $('evaluation-end').disabled = !active;
+      $('evaluation-feedback-submit').disabled = !ended;
+      $('evaluation-review-submit').disabled = !ended;
+      $('evaluation-golden-submit').disabled = !ended;
+      $('evaluation-state').textContent = ended ? 'ended' : active ? 'active' : 'idle';
+      document.querySelectorAll('[data-evaluation-marker]').forEach((button) => { button.disabled = !active; });
+    }
+
+    async function startEvaluation() {
+      try {
+        const result = await getJson('/api/live/evaluation/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            participant_count: Number($('evaluation-participants').value || 2),
+            discussion_theme: $('evaluation-theme').value,
+            raw_audio_consent: $('evaluation-audio-consent').checked,
+          }),
+        });
+        evaluationStartedAt = Date.now();
+        evaluationSnapshotMinutes = new Set();
+        if (evaluationTimer) clearInterval(evaluationTimer);
+        evaluationTimer = window.setInterval(async () => {
+          if (!evaluationStartedAt) return;
+          const elapsedMinutes = Math.floor((Date.now() - evaluationStartedAt) / 60000);
+          for (const minute of [5, 10, 15]) {
+            if (elapsedMinutes >= minute && !evaluationSnapshotMinutes.has(minute)) {
+              try {
+                await getJson('/api/live/evaluation/snapshot', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ minute }),
+                });
+                evaluationSnapshotMinutes.add(minute);
+              } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+            }
+          }
+        }, 5000);
+        setEvaluationControls(true);
+        setStatus(`Evaluation started · ${result.evaluation_session_id || 'active'}`);
+      } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+    }
+
+    async function endEvaluation() {
+      try {
+        const result = await getJson('/api/live/evaluation/end', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        if (evaluationTimer) { clearInterval(evaluationTimer); evaluationTimer = null; }
+        evaluationStartedAt = null;
+        setEvaluationControls(false, true);
+        setStatus(`Evaluation artifact saved · ${result.session_dir || 'complete'}`);
+      } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+    }
+
+    async function addEvaluationMarker(markerType) {
+      try {
+        await getJson('/api/live/evaluation/marker', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: markerType, note: $('evaluation-marker-note').value || null }),
+        });
+        $('evaluation-marker-note').value = '';
+        setStatus(`Evaluation marker · ${markerType}`);
+      } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+    }
+
+    function linesToList(id) {
+      return $(id).value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    }
+
+    async function saveEvaluationFeedback() {
+      try {
+        await getJson('/api/live/evaluation/feedback', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            usefulness: Number($('feedback-usefulness').value),
+            current_topic: Number($('feedback-current-topic').value),
+            decision_open_item_usefulness: Number($('feedback-decision-open').value),
+            distraction: Number($('feedback-distraction').value),
+            would_use_again: Number($('feedback-use-again').value),
+            free_comment: $('feedback-comment').value,
+          }),
+        });
+        await getJson('/api/live/evaluation/end', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        setStatus('Participant feedback saved');
+      } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+    }
+
+    async function saveEvaluationReview() {
+      try {
+        await getJson('/api/live/evaluation/observer-review', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rubric: {
+              clarity: Number($('review-clarity').value), density: Number($('review-density').value),
+              decision_safety: Number($('review-decision-safety').value), topic_coherence: Number($('review-topic-coherence').value),
+              stability: Number($('review-stability').value), usefulness: Number($('review-usefulness').value),
+            },
+            most_helpful_moment: $('review-helpful').value,
+            most_distracting_moment: $('review-distracting').value,
+            most_important_wrong_item: $('review-wrong').value,
+            most_important_missing_item: $('review-missing').value,
+          }),
+        });
+        await getJson('/api/live/evaluation/end', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        setStatus('Observer review saved');
+      } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+    }
+
+    async function saveEvaluationGolden() {
+      try {
+        await getJson('/api/live/evaluation/golden', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            main_topics: linesToList('golden-topics'), strong_decisions: linesToList('golden-decisions'),
+            important_open_items: linesToList('golden-open-items'), actions: linesToList('golden-actions'),
+          }),
+        });
+        const result = await getJson('/api/live/evaluation/end', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        setStatus(`Post-session Golden saved · ${result.session_dir || 'complete'}`);
+      } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+    }
+
+    async function loadSnapshot(sequence = null, resetPresentation = false) {
+      const id = selectedFixture();
+      const params = new URLSearchParams({ mode: $('replay-mode').value });
+      if (sequence !== null) params.set('sequence', sequence);
+      const query = `?${params.toString()}`;
+      if (resetPresentation) { selectedNodeId = null; mergeSelection = []; compactLanes = new Set(); manuallyExpandedLanes = new Set(); }
+      try {
+        const previousCurrentLaneId = model?.map?.current_lane_id;
+        model = await getJson(`/api/sessions/${id}${query}`);
+        reconcilePresentationLanes(previousCurrentLaneId, resetPresentation);
+        $('sequence').value = sequence === null ? '' : sequence;
+        render();
+        setStatus(`Loaded ${id} · revision ${model.state.graph.revision}`);
+      } catch (error) {
+        setStatus(`[${error.code}] ${error.message}`, true);
+      }
+    }
+
+    async function loadFinal() {
+      stopPlaying();
+      const rawSequence = $('sequence').value.trim();
+      const sequence = rawSequence === '' ? null : Number(rawSequence);
+      if (sequence !== null && (!Number.isInteger(sequence) || sequence < 0)) {
+        setStatus('Load through Event / Utterance must be a non-negative integer.', true);
+        return;
+      }
+      await loadSnapshot(sequence, true);
+    }
+    async function resetReplay() {
+      stopPlaying();
+      if (['transcript', 'recorded_fake', 'real'].includes($('replay-mode').value)) {
+        try {
+          const previousCurrentLaneId = model?.map?.current_lane_id;
+          const mode = encodeURIComponent($('replay-mode').value);
+          model = await getJson(`/api/sessions/${selectedFixture()}/transcript/reset?mode=${mode}`, { method: 'POST' });
+          selectedNodeId = null; mergeSelection = []; compactLanes = new Set(); manuallyExpandedLanes = new Set();
+          reconcilePresentationLanes(previousCurrentLaneId, true);
+          $('sequence').value = '';
+          render();
+          setStatus(`Reset ${selectedFixture()} · transcript replay`);
+        } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+        return;
+      }
+      await loadSnapshot(0, true);
+    }
+    async function stepReplay() {
+      if (requestInFlight || !model?.replay?.enabled || model.replay.complete) { stopPlaying(); return; }
+      requestInFlight = true;
+      try {
+        if (['transcript', 'recorded_fake', 'real'].includes(model.replay.mode)) {
+          const previousCurrentLaneId = model?.map?.current_lane_id;
+          model = await getJson(`/api/sessions/${selectedFixture()}/transcript/step`, { method: 'POST' });
+          reconcilePresentationLanes(previousCurrentLaneId, false);
+          render();
+          setStatus(`Analyzed Utterance ${model.replay.current_utterance_index} · revision ${model.state.graph.revision}`);
+        } else {
+          const nextSequence = model.replay.current_sequence + 1;
+          if (nextSequence > model.replay.total_sequence) { stopPlaying(); return; }
+          await loadSnapshot(nextSequence, false);
+        }
+      } catch (error) {
+        setStatus(`[${error.code}] ${error.message}`, true);
+      } finally { requestInFlight = false; }
+    }
+    function togglePlay() {
+      if (playTimer) { stopPlaying(); return; }
+      if (!model?.replay?.enabled || model.replay.complete) return;
+      $('replay-play').textContent = 'Pause';
+      playTimer = setInterval(async () => {
+        await stepReplay();
+        if (!model?.replay?.enabled || model.replay.complete) stopPlaying();
+      }, 720);
+    }
+
+    async function sendCommand(commandType, payload = {}) {
+      if (!model) return;
+      stopPlaying();
+      const previousCurrentLaneId = model?.map?.current_lane_id;
+      const command = { command_type: commandType, expected_revision: model.state.graph.revision, occurred_at: new Date().toISOString(), ...payload };
+      try {
+        model = await getJson(`/api/sessions/${selectedFixture()}/commands`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command) });
+        render();
+        setStatus(`Applied ${model.applied_event.event_type} · revision ${model.state.graph.revision}`);
+      } catch (error) {
+        setStatus(`[${error.code}] ${error.message}`, true);
+        await loadSnapshot(null, false);
+      }
+    }
+
+    function commandButton(label, command, nodeId, extraClass = '') {
+      return `<button class="command-button ${extraClass}" data-command="${escapeHtml(command)}" data-node-id="${escapeHtml(nodeId)}">${escapeHtml(label)}</button>`;
+    }
+
+    function nodeCard(node, position) {
+      const selected = selectedNodeId === node.id ? ' selected' : '';
+      const metadata = node.type === 'action'
+        ? `Owner: ${escapeHtml(node.action.owner || 'unset')} · Due: ${escapeHtml(node.action.due_date || 'unset')}`
+        : `${escapeHtml(typeLabels[node.type] || node.type)} · ${escapeHtml(statusLabels[node.status] || node.status)}`;
+      return `<button class="node-card ${escapeHtml(node.status)}${selected}" data-node-id="${escapeHtml(node.id)}" data-layout-order="${position?.order ?? ''}">
+        <span class="card-top"><span class="type-icon" aria-hidden="true">${typeIcons[node.type] || '·'}</span><span class="card-label">${escapeHtml(node.label)}</span><span class="state-badge">${escapeHtml(statusLabels[node.status] || node.status)}</span></span>
+        <span class="card-meta">${metadata}</span>
+      </button>`;
+    }
+
+    function compactLaneSummary(lane, nodes) {
+      const summary = lane.summary || {
+        decisions: nodes.filter((node) => node.type === 'decision').length,
+        candidate_decisions: nodes.filter((node) => node.type === 'decision' && node.status === 'candidate').length,
+        confirmed_decisions: nodes.filter((node) => node.type === 'decision' && node.status === 'confirmed').length,
+        open_items: nodes.filter((node) => node.type === 'open_item' && !['archived', 'resolved'].includes(node.status)).length,
+        actions: nodes.filter((node) => node.type === 'action' && node.status !== 'archived').length,
+        parked: nodes.filter((node) => node.status === 'parked').length,
+        archived: nodes.filter((node) => node.status === 'archived').length,
+      };
+      const hint = lane.kind === 'parking'
+        ? '後回しの論点'
+        : lane.kind === 'archived'
+          ? '履歴'
+          : lane.node_count + '件 · 必要ならExpand';
+      const badges = [];
+      if (summary.confirmed_decisions) badges.push('<span class="compact-badge">✓ ' + summary.confirmed_decisions + ' Confirmed</span>');
+      if (summary.candidate_decisions) badges.push('<span class="compact-badge">◇ ' + summary.candidate_decisions + ' Candidate</span>');
+      if (summary.parked) badges.push('<span class="compact-badge">Parked ' + summary.parked + '</span>');
+      if (summary.archived) badges.push('<span class="compact-badge">Archived ' + summary.archived + '</span>');
+      return '<div class="compact-summary">' +
+        '<div class="compact-summary-hint">' + escapeHtml(hint) + '</div>' +
+        '<div class="compact-counts">' +
+          '<span class="compact-count"><strong>' + summary.decisions + '</strong>Decision</span>' +
+          '<span class="compact-count"><strong>' + summary.open_items + '</strong>Open</span>' +
+          '<span class="compact-count"><strong>' + summary.actions + '</strong>Action</span>' +
+        '</div>' +
+        (badges.length ? '<div class="compact-badges">' + badges.join('') + '</div>' : '') +
+      '</div>';
+    }
+
+    function laneHtml(lane) {
+      const nodes = lane.node_ids
+        .map((id) => nodeById(id))
+        .filter(Boolean)
+        .sort((left, right) => (model.map.positions[left.id]?.order ?? 0) - (model.map.positions[right.id]?.order ?? 0));
+      const specialLane = ['parking', 'archived'].includes(lane.kind);
+      const compact = (specialLane && !manuallyExpandedLanes.has(lane.id)) || compactLanes.has(lane.id);
+      const cards = compact
+        ? compactLaneSummary(lane, nodes)
+        : (nodes.length ? nodes.map((node) => nodeCard(node, model.map.positions[node.id])).join('') : '<div class="empty-lane">このLaneには表示項目がありません</div>');
+      const currentMarker = lane.current ? '<span class="current-marker" title="Current Topic">● CURRENT</span>' : '';
+      const kindLabel = lane.kind === 'parking' ? '後回し' : lane.kind === 'archived' ? '履歴' : lane.node_count + ' nodes';
+      const laneControl = lane.current
+        ? '<button class="collapse-button" disabled aria-label="Current Topic lane is always expanded">•</button>'
+        : '<button class="collapse-button" data-collapse-lane="' + escapeHtml(lane.id) + '" aria-label="' + (compact ? 'Expand lane' : 'Compact lane') + '">' + (compact ? '+' : '−') + '</button>';
+      const laneClass = 'lane ' + (lane.current ? 'current ' : '') + (compact ? 'compact ' : 'expanded ') + lane.kind;
+      return '<section class="' + laneClass + '" data-lane-id="' + escapeHtml(lane.id) + '">' +
+        '<div class="lane-header"><div class="lane-title-row"><div class="lane-title"><span>' + escapeHtml(lane.label) + '</span>' + currentMarker + '</div>' + laneControl + '</div><div class="lane-meta">' + escapeHtml(kindLabel) + ' · ID固定</div></div>' +
+        '<div class="lane-cards">' + cards + '</div>' +
+      '</section>';
+    }
+
+    function renderMap() {
+      const lanes = model.map.lanes;
+      $('lane-grid').innerHTML = lanes.length ? lanes.map(laneHtml).join('') : '<div class="empty-map"><div><strong>Discussion Mapはまだ空です</strong><br>ReplayのStepでEventを適用すると、Topic Laneが育ちます。</div></div>';
+      $('special-lanes').innerHTML = '';
+      $('map-canvas').style.zoom = mapZoom;
+    }
+
+    function renderRail() {
+      const state = model.state;
+      const graph = state.graph;
+      const current = currentNode();
+      $('session-title').textContent = state.session.title || 'Discussion Map';
+      $('session-goal').textContent = state.session.goal || 'Fixed Event Replay / Human Command integration';
+      $('header-meta').innerHTML = `Revision: <strong>${graph.revision}</strong><br>Session: ${escapeHtml(graph.session_id)} · ${escapeHtml(state.session.status)}`;
+      const currentTopic = $('current-topic');
+      currentTopic.className = current ? 'current-topic' : 'current-topic none';
+      currentTopic.innerHTML = current
+        ? `<div class="label">${escapeHtml(current.label)}</div><div class="meta">${escapeHtml(graph.current_topic.mode)}${graph.current_topic.confidence !== undefined ? ` · confidence ${graph.current_topic.confidence}` : ''}</div>`
+        : '<div class="label">No active topic</div><div class="meta">Current Topicは未設定です</div>';
+
+      const counts = model.map.counts;
+      const metrics = [['topics', 'Topics'], ['candidate_decisions', 'Candidate'], ['confirmed_decisions', 'Confirmed'], ['open_items', 'Open Items'], ['actions', 'Actions'], ['parked', 'Parked']];
+      $('metrics').innerHTML = metrics.map(([key, label]) => `<div class="metric"><span class="metric-value">${counts[key]}</span><span class="metric-label">${label}</span></div>`).join('');
+      const decisions = graph.nodes.filter((node) => node.type === 'decision' && node.status !== 'archived');
+      $('decision-list').innerHTML = decisions.length ? decisions.map((node) => `<li><span aria-hidden="true">${node.status === 'confirmed' ? '✓' : '◇'}</span> ${escapeHtml(node.label)} <span class="subtle">(${escapeHtml(statusLabels[node.status])})</span></li>`).join('') : '<li class="subtle">なし</li>';
+      const openItems = graph.nodes.filter((node) => node.type === 'open_item' && !['archived', 'resolved'].includes(node.status));
+      $('open-list').innerHTML = openItems.length ? openItems.map((node) => `<li>${escapeHtml(node.label)}</li>`).join('') : '<li class="subtle">なし</li>';
+      const actions = graph.nodes.filter((node) => node.type === 'action' && node.status !== 'archived');
+      $('action-list').innerHTML = actions.length ? actions.map((node) => `<li>${escapeHtml(node.label)} <span class="subtle">(${escapeHtml(node.action.status)})</span></li>`).join('') : '<li class="subtle">なし</li>';
+      renderDetail();
+    }
+
+    function renderDetail() {
+      const node = nodeById(selectedNodeId);
+      if (!node) {
+        $('node-detail').innerHTML = '<div class="detail-empty">Select a card to inspect it and access its Human Commands.</div>';
+        return;
+      }
+      const mergeLabel = mergeSelection.length ? mergeSelection.map((id) => nodeById(id)?.label || id).join(' → ') : '未選択';
+      let controls = '<div class="button-row">';
+      if (node.type === 'decision' && node.status === 'candidate') controls += commandButton('Confirm Decision', 'confirm_decision', node.id, 'primary');
+      if (node.type === 'decision' && node.status === 'confirmed') controls += commandButton('Revoke Decision', 'revoke_decision', node.id, 'danger');
+      if (node.type === 'open_item' && node.status === 'active') controls += commandButton('Resolve Open Item', 'resolve_open_item', node.id, 'primary');
+      if (node.type === 'open_item' && node.status === 'resolved') controls += commandButton('Reopen Open Item', 'reopen_open_item', node.id);
+      if (node.type === 'topic' && node.status === 'active') controls += commandButton('Set Current Topic', 'set_current_topic', node.id, 'primary');
+      if (node.status === 'parked') controls += commandButton('Restore', 'restore_from_parking_lot', node.id);
+      if (node.status !== 'archived') controls += commandButton('Rename', 'rename_node', node.id);
+      if (node.status !== 'archived' && node.status !== 'parked' && node.type !== 'decision') controls += commandButton('Move to Parking', 'move_to_parking_lot', node.id);
+      if (node.status !== 'archived') controls += commandButton('Archive', 'archive_node', node.id, 'danger');
+      if (node.type === 'action' && node.status !== 'archived') controls += commandButton('Update Action', 'update_action', node.id);
+      const latestEvent = model.events[model.events.length - 1];
+      if (model.can_undo && model.undo_target_event_id && latestEvent?.event_type === 'rename_node' && latestEvent.payload.node_id === node.id) controls += commandButton('Undo Latest Rename', 'undo_last_correction', node.id);
+      controls += `<button class="merge-select-button" data-merge-select="${escapeHtml(node.id)}">${mergeSelection.includes(node.id) ? 'Remove from Merge' : 'Select for Merge'}</button>`;
+      controls += '</div>';
+      const actionRow = node.type === 'action' ? `<tr><th>Action</th><td>${escapeHtml(node.action.description)}<br>Owner: ${escapeHtml(node.action.owner || 'unset')} · Due: ${escapeHtml(node.action.due_date || 'unset')} · ${escapeHtml(node.action.status)}</td></tr>` : '';
+      $('node-detail').innerHTML = `<div class="detail-title">${escapeHtml(node.label)}</div><table class="detail-table"><tr><th>Type</th><td>${escapeHtml(typeLabels[node.type] || node.type)}</td></tr><tr><th>Status</th><td>${escapeHtml(statusLabels[node.status] || node.status)}</td></tr><tr><th>Node ID</th><td>${escapeHtml(node.id)}</td></tr><tr><th>Evidence</th><td>${node.evidence_ids.length ? escapeHtml(node.evidence_ids.join(', ')) : 'なし'}</td></tr>${actionRow}</table><div class="command-area"><div class="field-label">Human Commands</div>${controls}</div><div class="merge-area"><div class="field-label">Merge selection</div><div class="merge-selection">${escapeHtml(mergeLabel)}</div>${mergeSelection.length === 2 ? '<div class="button-row"><button class="primary" id="merge-selected">Merge selected (first → second)</button></div>' : '<div class="subtle">2 Nodeを選択するとMergeできます。</div>'}</div>`;
+    }
+
+    function renderFlow() {
+      const flow = model.map.recent_flow;
+      $('recent-flow').innerHTML = `<span class="flow-label">Recent Flow</span>${flow.length ? flow.map((item, index) => `${index ? '<span class="flow-arrow">→</span>' : ''}<span class="flow-item">${escapeHtml(item.label)}</span>`).join('') : '<span class="subtle">Topic transitionはまだありません</span>'}`;
+    }
+
+    function renderDebug() {
+      $('graph-json').textContent = JSON.stringify(model.state.graph, null, 2);
+      $('event-log').innerHTML = `<table><tr><th>#</th><th>Actor</th><th>Event</th><th>Payload</th></tr>${model.events.map((event) => `<tr><td>${event.sequence}</td><td>${escapeHtml(event.actor)}</td><td>${escapeHtml(event.event_type)}</td><td>${escapeHtml(JSON.stringify(event.payload))}</td></tr>`).join('')}</table>`;
+    }
+
+    function renderTranscript() {
+      const replay = model.replay;
+      const indicator = $('analysis-status');
+      const content = $('current-utterance');
+      const observation = $('ai-observation');
+      if (model.live) {
+        const live = model.live_state || {};
+        const status = live.analyzer_status || live.stt_state || live.runtime_state || 'idle';
+        indicator.className = `analysis-indicator ${status === 'analyzing' ? 'analyzing' : status === 'updated' ? 'updated' : ''}`;
+        indicator.textContent = live.final_transcript ? (status === 'updated' ? 'Updated' : status === 'analyzing' ? 'Analyzing' : 'Final') : (live.stt_state || 'Listening');
+        const text = live.final_transcript || live.partial_transcript;
+        content.innerHTML = text
+          ? `<strong>${escapeHtml(text)}</strong><br><span class="transcript-evidence">Live ${live.final_transcript ? 'Final Utterance' : 'Partial Transcript (debug only)'}</span>`
+          : 'Start One Utterance後、Partialはdebug表示のみ、FinalだけがAnalyzerへ渡ります。';
+        observation.textContent = live.analysis_errors?.length
+          ? `Real Analyzer · ${live.analysis_errors.length} error(s) · Evidenceは保持、Graphは未変更`
+          : `Live Final → Normalization v2 → Real Analyzer → Event Store → Discussion Graph`;
+        return;
+      }
+      if (!['transcript', 'recorded_fake', 'real'].includes(replay.mode)) {
+        indicator.className = 'analysis-indicator';
+        indicator.textContent = 'Event Replay';
+        content.innerHTML = 'Transcript Replayを選択すると、Final UtteranceとAnalyzerの更新が表示されます。';
+        observation.textContent = 'Fake AnalyzerはCandidate Eventのみを生成します。';
+        return;
+      }
+      const status = replay.analysis_status || 'idle';
+      indicator.className = `analysis-indicator ${status === 'analyzing' ? 'analyzing' : status === 'updated' ? 'updated' : ''}`;
+      indicator.textContent = status === 'analyzing' ? 'Analyzing' : status === 'complete' ? 'Complete' : status === 'updated' ? 'Updated' : 'Ready';
+      const utterance = replay.current_utterance;
+      if (utterance) {
+        content.innerHTML = `<strong>${escapeHtml(utterance.text)}</strong><br><span class="transcript-evidence">Final Utterance · ${escapeHtml(utterance.id)} · Evidence: ${escapeHtml(utterance.evidence_ids.join(', '))}</span>`;
+      } else {
+        content.innerHTML = 'StepまたはPlayでFinal UtteranceをAnalyzerへ渡します。Partial Transcriptは表示しません。';
+      }
+      const errors = replay.analysis_errors || [];
+      const analyzerName = replay.mode === 'real' ? 'Real Analyzer' : 'Fake Analyzer';
+      const analyzerMeta = replay.analyzer ? ` · ${replay.analyzer.provider || analyzerName}` : '';
+      observation.textContent = errors.length
+        ? `${analyzerName}${analyzerMeta} · ${errors.length} error(s) · Graphは適用可能なEventのみ更新`
+        : `${analyzerName}${analyzerMeta} · Candidate Events → Event Store → Discussion Graph`;
+    }
+
+    function render() {
+      if (!model) return;
+      reconcilePresentationLanes(null, false);
+      renderMap(); renderRail(); renderFlow(); renderDebug(); renderTranscript();
+      const replay = model.replay;
+      $('replay-progress').textContent = ['transcript', 'recorded_fake', 'real'].includes(replay.mode)
+        ? `Transcript: ${replay.current_utterance_index} / ${replay.total_utterances} · Rev ${model.state.graph.revision}${replay.complete ? ' · complete' : ''}`
+        : `Replay: ${replay.current_sequence} / ${replay.total_sequence}${replay.complete ? ' · complete' : ''}`;
+      $('replay-step').disabled = !replay.enabled || replay.complete;
+      $('replay-play').disabled = !replay.enabled || replay.complete;
+      $('replay-reset').disabled = !replay.enabled;
+      bindMapEvents();
+    }
+
+    function reconcilePresentationLanes(previousCurrentLaneId, resetPresentation = false) {
+      const lanes = model?.map?.lanes || [];
+      const topicLanes = lanes.filter((lane) => lane.kind === 'topic' || lane.kind === 'unassigned');
+      const laneIds = new Set(lanes.map((lane) => lane.id));
+      if (resetPresentation) {
+        compactLanes = new Set(lanes.filter((lane) => !lane.current).map((lane) => lane.id));
+        manuallyExpandedLanes = new Set();
+      } else {
+        compactLanes = new Set([...compactLanes].filter((laneId) => laneIds.has(laneId)));
+        manuallyExpandedLanes = new Set([...manuallyExpandedLanes].filter((laneId) => laneIds.has(laneId)));
+      }
+      for (const lane of topicLanes) {
+        if (lane.id === model.map.current_lane_id) {
+          compactLanes.delete(lane.id);
+        } else if (!manuallyExpandedLanes.has(lane.id)) {
+          compactLanes.add(lane.id);
+        }
+      }
+      if (previousCurrentLaneId && previousCurrentLaneId !== model.map.current_lane_id && !manuallyExpandedLanes.has(previousCurrentLaneId)) {
+        compactLanes.add(previousCurrentLaneId);
+      }
+    }
+
+    function bindMapEvents() {
+      document.querySelectorAll('.node-card').forEach((element) => element.addEventListener('click', () => { selectedNodeId = element.dataset.nodeId; render(); }));
+      document.querySelectorAll('[data-collapse-lane]').forEach((element) => element.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const laneId = element.dataset.collapseLane;
+        if (laneId === model.map.current_lane_id) return;
+        if (['parking', 'archived'].includes(laneId)) {
+          if (manuallyExpandedLanes.has(laneId)) {
+            manuallyExpandedLanes.delete(laneId);
+            compactLanes.add(laneId);
+          } else {
+            manuallyExpandedLanes.add(laneId);
+            compactLanes.delete(laneId);
+          }
+        } else if (compactLanes.has(laneId)) {
+          compactLanes.delete(laneId);
+          manuallyExpandedLanes.add(laneId);
+        } else {
+          compactLanes.add(laneId);
+          manuallyExpandedLanes.delete(laneId);
+        }
+        renderMap();
+        bindMapEvents();
+      }));
+      document.querySelectorAll('[data-command]').forEach((element) => element.addEventListener('click', () => runNodeCommand(element.dataset.command, element.dataset.nodeId)));
+      document.querySelectorAll('.merge-select-button').forEach((element) => element.addEventListener('click', () => { const id = element.dataset.mergeSelect; mergeSelection = mergeSelection.includes(id) ? mergeSelection.filter((item) => item !== id) : [...mergeSelection, id].slice(-2); renderDetail(); bindMapEvents(); }));
+      const mergeButton = $('merge-selected');
+      if (mergeButton) mergeButton.addEventListener('click', () => { const selection = [...mergeSelection]; mergeSelection = []; sendCommand('merge_nodes', { source_node_id: selection[0], target_node_id: selection[1] }); });
+    }
+
+    async function runNodeCommand(command, nodeId) {
+      const node = nodeById(nodeId);
+      if (!node) return;
+      if (command === 'rename_node') {
+        const label = window.prompt('New node label', node.label);
+        if (label !== null) await sendCommand(command, { node_id: nodeId, label });
+      } else if (command === 'update_action') {
+        const owner = window.prompt('Owner (blank clears)', node.action.owner || ''); if (owner === null) return;
+        const due = window.prompt('Due date YYYY-MM-DD (blank clears)', node.action.due_date || ''); if (due === null) return;
+        const actionStatus = window.prompt('Status: open / completed / cancelled', node.action.status); if (actionStatus === null) return;
+        await sendCommand(command, { action_node_id: nodeId, owner: owner || null, due_date: due || null, status: actionStatus });
+      } else if (command === 'confirm_decision' || command === 'revoke_decision') {
+        await sendCommand(command, { decision_node_id: nodeId });
+      } else if (command === 'resolve_open_item' || command === 'reopen_open_item') {
+        await sendCommand(command, { open_item_node_id: nodeId });
+      } else if (command === 'set_current_topic') {
+        await sendCommand(command, { topic_id: nodeId });
+      } else if (command === 'undo_last_correction') {
+        await sendCommand(command, { target_event_id: model.undo_target_event_id });
+      } else {
+        await sendCommand(command, { node_id: nodeId });
+      }
+    }
+
+    $('load-final').onclick = loadFinal;
+    $('replay-reset').onclick = resetReplay;
+    $('replay-step').onclick = stepReplay;
+    $('replay-play').onclick = togglePlay;
+    $('zoom-out').onclick = () => { mapZoom = Math.max(.75, Number((mapZoom - .1).toFixed(2))); renderMap(); };
+    $('zoom-in').onclick = () => { mapZoom = Math.min(1.35, Number((mapZoom + .1).toFixed(2))); renderMap(); };
+    $('zoom-reset').onclick = () => { mapZoom = 1; renderMap(); };
+    $('fixture').onchange = () => { stopPlaying(); $('sequence').value = ''; loadFinal(); };
+    $('replay-mode').onchange = () => { stopPlaying(); $('sequence').value = ''; loadFinal(); };
+    $('live-start').onclick = startLiveOneUtterance;
+    $('live-start-continuous').onclick = startLiveContinuous;
+    $('live-stop').onclick = stopLiveOneUtterance;
+    $('live-commit').onclick = commitLiveUtterance;
+    $('live-end').onclick = endLiveContinuous;
+    $('live-retry').onclick = retryLiveAnalyzer;
+    $('evaluation-start').onclick = startEvaluation;
+    $('evaluation-end').onclick = endEvaluation;
+    document.querySelectorAll('[data-evaluation-marker]').forEach((button) => {
+      button.onclick = () => addEvaluationMarker(button.dataset.evaluationMarker);
+    });
+    $('evaluation-feedback-submit').onclick = saveEvaluationFeedback;
+    $('evaluation-review-submit').onclick = saveEvaluationReview;
+    $('evaluation-golden-submit').onclick = saveEvaluationGolden;
+    setEvaluationControls(false);
+
+    (async function init() {
+      try {
+        const body = await getJson('/api/fixtures');
+        const fixtures = body.fixtures.filter((fixture) => !fixture.has_invalid_cases && fixture.kind !== 'recorded');
+        const recorded = body.fixtures.filter((fixture) => !fixture.has_invalid_cases && fixture.kind === 'recorded');
+        $('fixture').innerHTML = '<optgroup label="Canonical Fixtures">' + fixtures.map((fixture) => `<option value="${escapeHtml(fixture.fixture_id)}">${escapeHtml(fixture.fixture_id)} — ${escapeHtml(fixture.name)}</option>`).join('') + '</optgroup>' + '<optgroup label="Recorded Analyzer Scenarios">' + recorded.map((scenario) => `<option value="${escapeHtml(scenario.fixture_id)}">${escapeHtml(scenario.fixture_id)} — ${escapeHtml(scenario.name)}</option>`).join('') + '</optgroup>';
+        await loadFinal();
+      } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+    })();
+  </script>
+</body>
+</html>

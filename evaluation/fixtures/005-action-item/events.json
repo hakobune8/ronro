@@ -1,0 +1,87 @@
+[
+  {
+    "event_id": "evt-001",
+    "session_id": "s-005",
+    "sequence": 1,
+    "event_type": "session_created",
+    "occurred_at": "2026-09-19T14:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {
+      "title": "Action Item",
+      "goal": "Actionの抽出境界を確認する"
+    }
+  },
+  {
+    "event_id": "evt-002",
+    "session_id": "s-005",
+    "sequence": 2,
+    "event_type": "session_started",
+    "occurred_at": "2026-09-19T14:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {}
+  },
+  {
+    "event_id": "evt-003",
+    "session_id": "s-005",
+    "sequence": 3,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T14:00:03Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-001"],
+    "payload": {
+      "node_type": "action",
+      "label": "Visual Prototypeを作成する",
+      "action": {
+        "owner": null,
+        "due_date": null
+      }
+    }
+  },
+  {
+    "event_id": "evt-004",
+    "session_id": "s-005",
+    "sequence": 4,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T14:00:04Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-002"],
+    "payload": {
+      "node_type": "open_item",
+      "label": "Visual Prototypeを作るべきか"
+    }
+  },
+  {
+    "event_id": "evt-005",
+    "session_id": "s-005",
+    "sequence": 5,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T14:00:05Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-003"],
+    "payload": {
+      "node_type": "action",
+      "label": "Prototypeを期限までに作成する",
+      "action": {
+        "owner": "山田さん",
+        "due_date": "2026-09-25"
+      }
+    }
+  },
+  {
+    "event_id": "evt-006",
+    "session_id": "s-005",
+    "sequence": 6,
+    "event_type": "update_action",
+    "occurred_at": "2026-09-19T14:00:06Z",
+    "actor": "human",
+    "source_evidence_ids": [],
+    "expected_revision": 5,
+    "payload": {
+      "action_node_id": "node:s-005:evt-005",
+      "owner": "山田さん",
+      "due_date": "2026-09-26"
+    }
+  }
+]

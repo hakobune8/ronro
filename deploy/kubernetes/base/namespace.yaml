@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: discussion-map-pilot
+  labels:
+    app.kubernetes.io/name: discussion-map-ai-facilitator
+    app.kubernetes.io/part-of: discussion-map-pilot

@@ -1,0 +1,118 @@
+[
+  {
+    "event_id": "evt-001",
+    "session_id": "s-006",
+    "sequence": 1,
+    "event_type": "session_created",
+    "occurred_at": "2026-09-19T15:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {
+      "title": "Human Correction",
+      "goal": "Rename、Merge、Archiveを確認する"
+    }
+  },
+  {
+    "event_id": "evt-002",
+    "session_id": "s-006",
+    "sequence": 2,
+    "event_type": "session_started",
+    "occurred_at": "2026-09-19T15:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {}
+  },
+  {
+    "event_id": "evt-003",
+    "session_id": "s-006",
+    "sequence": 3,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T15:00:03Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-001"],
+    "payload": {
+      "node_type": "topic",
+      "label": "価格モデル"
+    }
+  },
+  {
+    "event_id": "evt-004",
+    "session_id": "s-006",
+    "sequence": 4,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T15:00:04Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-002"],
+    "payload": {
+      "node_type": "topic",
+      "label": "Visual生成"
+    }
+  },
+  {
+    "event_id": "evt-005",
+    "session_id": "s-006",
+    "sequence": 5,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T15:00:05Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-003"],
+    "payload": {
+      "node_type": "topic",
+      "label": "イメージ生成"
+    }
+  },
+  {
+    "event_id": "evt-006",
+    "session_id": "s-006",
+    "sequence": 6,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T15:00:06Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-004"],
+    "payload": {
+      "node_type": "topic",
+      "label": "一時的なメモ"
+    }
+  },
+  {
+    "event_id": "evt-007",
+    "session_id": "s-006",
+    "sequence": 7,
+    "event_type": "rename_node",
+    "occurred_at": "2026-09-19T15:00:07Z",
+    "actor": "human",
+    "source_evidence_ids": [],
+    "expected_revision": 6,
+    "payload": {
+      "node_id": "node:s-006:evt-003",
+      "label": "料金体系"
+    }
+  },
+  {
+    "event_id": "evt-008",
+    "session_id": "s-006",
+    "sequence": 8,
+    "event_type": "merge_nodes",
+    "occurred_at": "2026-09-19T15:00:08Z",
+    "actor": "human",
+    "source_evidence_ids": [],
+    "expected_revision": 7,
+    "payload": {
+      "source_node_id": "node:s-006:evt-005",
+      "target_node_id": "node:s-006:evt-004"
+    }
+  },
+  {
+    "event_id": "evt-009",
+    "session_id": "s-006",
+    "sequence": 9,
+    "event_type": "archive_node",
+    "occurred_at": "2026-09-19T15:00:09Z",
+    "actor": "human",
+    "source_evidence_ids": [],
+    "expected_revision": 8,
+    "payload": {
+      "node_id": "node:s-006:evt-006"
+    }
+  }
+]

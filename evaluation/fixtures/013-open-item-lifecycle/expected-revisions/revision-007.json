@@ -1,0 +1,44 @@
+{
+  "session_id": "s-013",
+  "revision": 7,
+  "last_event_sequence": 7,
+  "nodes": [
+    {
+      "id": "node:s-013:evt-003",
+      "session_id": "s-013",
+      "type": "topic",
+      "label": "Visual Artifactの扱い",
+      "status": "active",
+      "created_at": "2026-09-19T18:00:03Z",
+      "updated_at": "2026-09-19T18:00:03Z",
+      "source_event_ids": ["evt-003"],
+      "evidence_ids": ["evd-001"]
+    },
+    {
+      "id": "node:s-013:evt-005",
+      "session_id": "s-013",
+      "type": "open_item",
+      "label": "Visual生成の完了条件",
+      "status": "resolved",
+      "created_at": "2026-09-19T18:00:05Z",
+      "updated_at": "2026-09-19T18:00:07Z",
+      "source_event_ids": ["evt-005", "evt-007"],
+      "evidence_ids": ["evd-002"]
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge:s-013:contains:node:s-013:evt-003:node:s-013:evt-005",
+      "source_node_id": "node:s-013:evt-003",
+      "target_node_id": "node:s-013:evt-005",
+      "type": "contains",
+      "source_event_ids": ["evt-006"]
+    }
+  ],
+  "current_topic": {
+    "primary_topic_id": "node:s-013:evt-003",
+    "mode": "derived",
+    "confidence": 0.95,
+    "source_event_ids": ["evt-004"]
+  }
+}

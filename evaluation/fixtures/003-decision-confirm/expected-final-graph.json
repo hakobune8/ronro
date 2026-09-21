@@ -1,0 +1,75 @@
+{
+  "session": {
+    "id": "s-003",
+    "title": "Decision Confirm",
+    "goal": "Candidate DecisionのHuman Confirmを確認する",
+    "status": "active",
+    "created_at": "2026-09-19T12:00:00Z",
+    "started_at": "2026-09-19T12:00:00Z",
+    "ended_at": null,
+    "graph_revision": 4
+  },
+  "evidence": [
+    {
+      "id": "evd-001",
+      "session_id": "s-003",
+      "sequence": 1,
+      "timestamp": "2026-09-19T12:00:01Z",
+      "speaker": "A",
+      "text": "スマホUIはMVPから外しましょう"
+    },
+    {
+      "id": "evd-002",
+      "session_id": "s-003",
+      "sequence": 2,
+      "timestamp": "2026-09-19T12:00:02Z",
+      "speaker": "B",
+      "text": "それでいきましょう"
+    }
+  ],
+  "utterances": [
+    {
+      "id": "utt-001",
+      "session_id": "s-003",
+      "sequence": 1,
+      "evidence_ids": ["evd-001"],
+      "text": "スマホUIはMVPから外しましょう",
+      "started_at": "2026-09-19T12:00:01Z",
+      "ended_at": "2026-09-19T12:00:01Z"
+    },
+    {
+      "id": "utt-002",
+      "session_id": "s-003",
+      "sequence": 2,
+      "evidence_ids": ["evd-002"],
+      "text": "それでいきましょう",
+      "started_at": "2026-09-19T12:00:02Z",
+      "ended_at": "2026-09-19T12:00:02Z"
+    }
+  ],
+  "graph": {
+    "session_id": "s-003",
+    "revision": 4,
+    "last_event_sequence": 4,
+    "nodes": [
+      {
+        "id": "node:s-003:evt-003",
+        "session_id": "s-003",
+        "type": "decision",
+        "label": "スマホUIはMVP対象外",
+        "status": "confirmed",
+        "created_at": "2026-09-19T12:00:03Z",
+        "updated_at": "2026-09-19T12:00:04Z",
+        "source_event_ids": ["evt-003", "evt-004"],
+        "evidence_ids": ["evd-001"]
+      }
+    ],
+    "edges": [],
+    "current_topic": {
+      "primary_topic_id": null,
+      "mode": "derived",
+      "source_event_ids": []
+    }
+  }
+}
+

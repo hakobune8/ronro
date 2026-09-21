@@ -1,0 +1,213 @@
+{
+  "dataset_version": "type-d-multiturn-spike-v1",
+  "description": "Offline Type D Proposal + Agreement spike. Proposal strength is annotation only; the detector receives only canonical-like nodes, events, and the agreement utterance.",
+  "cases": [
+    {
+      "case_id": "td-001-strong-cross-speaker",
+      "category": "strong_proposal_strong_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-001",
+      "meeting_goal": "MVP対象範囲を決める",
+      "topic": {"id": "topic-td-001", "label": "MVP範囲"},
+      "proposals": [{"id": "option-td-001", "type": "option", "label": "スマホ対応をMVPから外す案", "strength": "strong", "evidence_id": "td-001-e001"}],
+      "agreement": {"id": "td-001-u002", "sequence": 2, "speaker": "B", "text": "それでいきましょう。", "evidence_id": "td-001-e002"},
+      "expected": {"candidate": true, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-002-policy-agreement",
+      "category": "strong_proposal_strong_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-002",
+      "meeting_goal": "初期顧客の方針を決める",
+      "topic": {"id": "topic-td-002", "label": "初期顧客"},
+      "proposals": [{"id": "option-td-002", "type": "option", "label": "法人向けで進める案", "strength": "strong", "evidence_id": "td-002-e001"}],
+      "agreement": {"id": "td-002-u002", "sequence": 2, "speaker": "B", "text": "その方針で進めましょう。", "evidence_id": "td-002-e002"},
+      "expected": {"candidate": true, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-003-display-agreement",
+      "category": "strong_proposal_strong_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-003",
+      "meeting_goal": "共有ディスプレイ中心のMVPを検討する",
+      "topic": {"id": "topic-td-003", "label": "表示方式"},
+      "proposals": [{"id": "option-td-003", "type": "option", "label": "共有ディスプレイを中心にする案", "strength": "strong", "evidence_id": "td-003-e001"}],
+      "agreement": {"id": "td-003-u002", "sequence": 2, "speaker": "B", "text": "それでお願いします。", "evidence_id": "td-003-e002"},
+      "expected": {"candidate": true, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-004-visual-policy",
+      "category": "strong_proposal_strong_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-004",
+      "meeting_goal": "Visual生成の介入方法を決める",
+      "topic": {"id": "topic-td-004", "label": "Visual生成"},
+      "proposals": [{"id": "option-td-004", "type": "option", "label": "Visual生成は手動トリガーで進める案", "strength": "strong", "evidence_id": "td-004-e001"}],
+      "agreement": {"id": "td-004-u002", "sequence": 2, "speaker": "B", "text": "そうしましょう。", "evidence_id": "td-004-e002"},
+      "expected": {"candidate": true, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-005-scope-policy",
+      "category": "strong_proposal_strong_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-005",
+      "meeting_goal": "MVPの対象外範囲を決める",
+      "topic": {"id": "topic-td-005", "label": "MVP範囲"},
+      "proposals": [{"id": "option-td-005", "type": "idea", "label": "スマホUIをMVP対象外にする方針", "strength": "strong", "evidence_id": "td-005-e001"}],
+      "agreement": {"id": "td-005-u002", "sequence": 2, "speaker": "B", "text": "その方向で進めましょう。", "evidence_id": "td-005-e002"},
+      "expected": {"candidate": true, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-006-weak-proposal-1",
+      "category": "weak_proposal_strong_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-006",
+      "meeting_goal": "MVP対象を検討する",
+      "topic": {"id": "topic-td-006", "label": "MVP範囲"},
+      "proposals": [{"id": "option-td-006", "type": "option", "label": "スマホ対応をMVPに入れるか検討した方がよい案", "strength": "weak", "evidence_id": "td-006-e001"}],
+      "agreement": {"id": "td-006-u002", "sequence": 2, "speaker": "B", "text": "それでいきましょう。", "evidence_id": "td-006-e002"},
+      "expected": {"candidate": false, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-007-weak-proposal-2",
+      "category": "weak_proposal_strong_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-007",
+      "meeting_goal": "価格モデルを検討する",
+      "topic": {"id": "topic-td-007", "label": "価格モデル"},
+      "proposals": [{"id": "option-td-007", "type": "option", "label": "価格は月額が良さそうな案", "strength": "weak", "evidence_id": "td-007-e001"}],
+      "agreement": {"id": "td-007-u002", "sequence": 2, "speaker": "B", "text": "その方向で進めましょう。", "evidence_id": "td-007-e002"},
+      "expected": {"candidate": false, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-008-weak-proposal-3",
+      "category": "weak_proposal_strong_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-008",
+      "meeting_goal": "Visual生成の案を検討する",
+      "topic": {"id": "topic-td-008", "label": "Visual生成"},
+      "proposals": [{"id": "option-td-008", "type": "option", "label": "Visual生成も候補としてありそうな案", "strength": "weak", "evidence_id": "td-008-e001"}],
+      "agreement": {"id": "td-008-u002", "sequence": 2, "speaker": "B", "text": "それでお願いします。", "evidence_id": "td-008-e002"},
+      "expected": {"candidate": false, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-009-strong-proposal-weak-agreement",
+      "category": "strong_proposal_weak_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-009",
+      "meeting_goal": "MVP対象範囲を決める",
+      "topic": {"id": "topic-td-009", "label": "MVP範囲"},
+      "proposals": [{"id": "option-td-009", "type": "option", "label": "スマホ対応をMVPから外す案", "strength": "strong", "evidence_id": "td-009-e001"}],
+      "agreement": {"id": "td-009-u002", "sequence": 2, "speaker": "B", "text": "そうですね。", "evidence_id": "td-009-e002"},
+      "expected": {"candidate": false, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-010-strong-proposal-weak-agreement",
+      "category": "strong_proposal_weak_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-010",
+      "meeting_goal": "初期顧客の方針を決める",
+      "topic": {"id": "topic-td-010", "label": "初期顧客"},
+      "proposals": [{"id": "option-td-010", "type": "option", "label": "法人向けで進める案", "strength": "strong", "evidence_id": "td-010-e001"}],
+      "agreement": {"id": "td-010-u002", "sequence": 2, "speaker": "B", "text": "まあいいと思います。", "evidence_id": "td-010-e002"},
+      "expected": {"candidate": false, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-011-strong-proposal-weak-agreement",
+      "category": "strong_proposal_weak_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-011",
+      "meeting_goal": "表示方式を決める",
+      "topic": {"id": "topic-td-011", "label": "表示方式"},
+      "proposals": [{"id": "option-td-011", "type": "option", "label": "共有ディスプレイを中心にする案", "strength": "strong", "evidence_id": "td-011-e001"}],
+      "agreement": {"id": "td-011-u002", "sequence": 2, "speaker": "B", "text": "ありですね。", "evidence_id": "td-011-e002"},
+      "expected": {"candidate": false, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-012-ambiguous-options",
+      "category": "multiple_proposals",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-012",
+      "meeting_goal": "MVPのスマホ対応を決める",
+      "topic": {"id": "topic-td-012", "label": "MVP範囲"},
+      "proposals": [
+        {"id": "option-td-012-a", "type": "option", "label": "スマホをMVPから外す案", "strength": "strong", "evidence_id": "td-012-e001"},
+        {"id": "option-td-012-b", "type": "option", "label": "スマホを機能限定で残す案", "strength": "strong", "evidence_id": "td-012-e002"}
+      ],
+      "agreement": {"id": "td-012-u003", "sequence": 3, "speaker": "B", "text": "それでいきましょう。", "evidence_id": "td-012-e003"},
+      "expected": {"candidate": false, "ambiguous": true, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-013-ambiguous-pricing",
+      "category": "multiple_proposals",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-013",
+      "meeting_goal": "価格モデルを決める",
+      "topic": {"id": "topic-td-013", "label": "価格モデル"},
+      "proposals": [
+        {"id": "option-td-013-a", "type": "option", "label": "月額で進める案", "strength": "strong", "evidence_id": "td-013-e001"},
+        {"id": "option-td-013-b", "type": "option", "label": "従量課金で進める案", "strength": "strong", "evidence_id": "td-013-e002"}
+      ],
+      "agreement": {"id": "td-013-u003", "sequence": 3, "speaker": "B", "text": "その方向で進めましょう。", "evidence_id": "td-013-e003"},
+      "expected": {"candidate": false, "ambiguous": true, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-014-existing-candidate",
+      "category": "existing_candidate_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-014",
+      "meeting_goal": "MVP対象範囲を確定する",
+      "topic": {"id": "topic-td-014", "label": "MVP範囲"},
+      "proposals": [{"id": "option-td-014", "type": "option", "label": "スマホ対応をMVPから外す案", "strength": "strong", "evidence_id": "td-014-e001"}],
+      "existing_candidate": {"id": "decision-td-014", "label": "スマホ対応をMVP対象外", "evidence_id": "td-014-e002"},
+      "agreement": {"id": "td-014-u003", "sequence": 3, "speaker": "B", "text": "それでいきましょう。", "evidence_id": "td-014-e003"},
+      "expected": {"candidate": false, "ambiguous": false, "existing_candidate": true}
+    },
+    {
+      "case_id": "td-015-topic-change",
+      "category": "topic_change_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-015",
+      "meeting_goal": "MVPと価格を順に検討する",
+      "topic": {"id": "topic-td-015-mvp", "label": "MVP範囲"},
+      "additional_topics": [{"id": "topic-td-015-price", "label": "価格モデル"}],
+      "current_topic_id": "topic-td-015-price",
+      "proposals": [{"id": "option-td-015", "type": "option", "label": "スマホ対応をMVPから外す案", "strength": "strong", "evidence_id": "td-015-e001", "topic_id": "topic-td-015-mvp"}],
+      "agreement": {"id": "td-015-u003", "sequence": 3, "speaker": "B", "text": "その方針で進めましょう。", "evidence_id": "td-015-e003"},
+      "expected": {"candidate": false, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-016-no-proposal",
+      "category": "no_proposal_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-016",
+      "meeting_goal": "MVP範囲を議論する",
+      "topic": {"id": "topic-td-016", "label": "MVP範囲"},
+      "proposals": [],
+      "agreement": {"id": "td-016-u002", "sequence": 2, "speaker": "B", "text": "それでいきましょう。", "evidence_id": "td-016-e002"},
+      "expected": {"candidate": false, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-017-no-proposal-weak-trigger",
+      "category": "no_proposal_agreement",
+      "speaker_pattern": "cross_speaker",
+      "session_id": "td-017",
+      "meeting_goal": "Architectureを検討する",
+      "topic": {"id": "topic-td-017", "label": "Architecture"},
+      "proposals": [],
+      "agreement": {"id": "td-017-u002", "sequence": 2, "speaker": "B", "text": "その方向で進めましょう。", "evidence_id": "td-017-e002"},
+      "expected": {"candidate": false, "ambiguous": false, "existing_candidate": false}
+    },
+    {
+      "case_id": "td-018-same-speaker-substantive",
+      "category": "same_speaker_not_type_d",
+      "speaker_pattern": "same_speaker",
+      "session_id": "td-018",
+      "meeting_goal": "MVP対象範囲を決める",
+      "topic": {"id": "topic-td-018", "label": "MVP範囲"},
+      "proposals": [{"id": "option-td-018", "type": "option", "label": "スマホ対応をMVPから外す案", "strength": "strong", "evidence_id": "td-018-e001"}],
+      "agreement": {"id": "td-018-u002", "sequence": 2, "speaker": "A", "text": "スマホを外す案で、まあそれでいきましょう。", "evidence_id": "td-018-e002"},
+      "expected": {"candidate": false, "ambiguous": false, "existing_candidate": false, "normal_analyzer_owns": true}
+    }
+  ]
+}

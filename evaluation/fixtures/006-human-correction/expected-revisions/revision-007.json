@@ -1,0 +1,57 @@
+{
+  "session_id": "s-006",
+  "revision": 7,
+  "last_event_sequence": 7,
+  "nodes": [
+    {
+      "id": "node:s-006:evt-003",
+      "session_id": "s-006",
+      "type": "topic",
+      "label": "料金体系",
+      "status": "active",
+      "created_at": "2026-09-19T15:00:03Z",
+      "updated_at": "2026-09-19T15:00:07Z",
+      "source_event_ids": ["evt-003", "evt-007"],
+      "evidence_ids": ["evd-001"]
+    },
+    {
+      "id": "node:s-006:evt-004",
+      "session_id": "s-006",
+      "type": "topic",
+      "label": "Visual生成",
+      "status": "active",
+      "created_at": "2026-09-19T15:00:04Z",
+      "updated_at": "2026-09-19T15:00:04Z",
+      "source_event_ids": ["evt-004"],
+      "evidence_ids": ["evd-002"]
+    },
+    {
+      "id": "node:s-006:evt-005",
+      "session_id": "s-006",
+      "type": "topic",
+      "label": "イメージ生成",
+      "status": "active",
+      "created_at": "2026-09-19T15:00:05Z",
+      "updated_at": "2026-09-19T15:00:05Z",
+      "source_event_ids": ["evt-005"],
+      "evidence_ids": ["evd-003"]
+    },
+    {
+      "id": "node:s-006:evt-006",
+      "session_id": "s-006",
+      "type": "topic",
+      "label": "一時的なメモ",
+      "status": "active",
+      "created_at": "2026-09-19T15:00:06Z",
+      "updated_at": "2026-09-19T15:00:06Z",
+      "source_event_ids": ["evt-006"],
+      "evidence_ids": ["evd-004"]
+    }
+  ],
+  "edges": [],
+  "current_topic": {
+    "primary_topic_id": null,
+    "mode": "derived",
+    "source_event_ids": []
+  }
+}

@@ -1,0 +1,94 @@
+[
+  {
+    "case_id": "has-option-to-idea",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "invalid-013",
+        "session_id": "s-012",
+        "sequence": 13,
+        "event_type": "relation_detected",
+        "occurred_at": "2026-09-19T21:00:13Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-002"],
+        "payload": {
+          "source_node_id": "node:s-012:evt-003",
+          "target_node_id": "node:s-012:evt-004",
+          "relation_type": "has_option"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "unsupported_relation",
+    "expected_state": "STATE_UNCHANGED"
+  },
+  {
+    "case_id": "supports-from-topic",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "invalid-013",
+        "session_id": "s-012",
+        "sequence": 13,
+        "event_type": "relation_detected",
+        "occurred_at": "2026-09-19T21:00:13Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-001"],
+        "payload": {
+          "source_node_id": "node:s-012:evt-003",
+          "target_node_id": "node:s-012:evt-006",
+          "relation_type": "supports"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "unsupported_relation",
+    "expected_state": "STATE_UNCHANGED"
+  },
+  {
+    "case_id": "opposes-to-topic",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "invalid-013",
+        "session_id": "s-012",
+        "sequence": 13,
+        "event_type": "relation_detected",
+        "occurred_at": "2026-09-19T21:00:13Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-002"],
+        "payload": {
+          "source_node_id": "node:s-012:evt-004",
+          "target_node_id": "node:s-012:evt-003",
+          "relation_type": "opposes"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "unsupported_relation",
+    "expected_state": "STATE_UNCHANGED"
+  },
+  {
+    "case_id": "self-related-to",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "invalid-013",
+        "session_id": "s-012",
+        "sequence": 13,
+        "event_type": "relation_detected",
+        "occurred_at": "2026-09-19T21:00:13Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-002"],
+        "payload": {
+          "source_node_id": "node:s-012:evt-004",
+          "target_node_id": "node:s-012:evt-004",
+          "relation_type": "related_to"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "unsupported_relation",
+    "expected_state": "STATE_UNCHANGED"
+  }
+]

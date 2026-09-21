@@ -1,0 +1,170 @@
+{
+  "scenario_id": "m6-e2e",
+  "name": "Transcript to Discussion Map with Human Confirmation",
+  "session": {
+    "id": "s-m6-e2e",
+    "title": "M6 Fake Analyzer E2E",
+    "goal": "Fixed TranscriptからDiscussion Mapが育つことを確認する",
+    "created_at": "2026-09-19T18:00:00Z",
+    "started_at": "2026-09-19T18:00:00Z"
+  },
+  "evidence": [
+    {
+      "id": "evd-m6-001",
+      "session_id": "s-m6-e2e",
+      "sequence": 1,
+      "timestamp": "2026-09-19T18:00:01Z",
+      "speaker": "A",
+      "text": "MVPはDiscussion Mapを中心にしましょう"
+    },
+    {
+      "id": "evd-m6-002",
+      "session_id": "s-m6-e2e",
+      "sequence": 2,
+      "timestamp": "2026-09-19T18:00:02Z",
+      "speaker": "B",
+      "text": "文字起こしも必要ですよね"
+    },
+    {
+      "id": "evd-m6-003",
+      "session_id": "s-m6-e2e",
+      "sequence": 3,
+      "timestamp": "2026-09-19T18:00:03Z",
+      "speaker": "A",
+      "text": "スマホUIはMVPから外しましょう"
+    },
+    {
+      "id": "evd-m6-004",
+      "session_id": "s-m6-e2e",
+      "sequence": 4,
+      "timestamp": "2026-09-19T18:00:04Z",
+      "speaker": "B",
+      "text": "それでいきましょう"
+    },
+    {
+      "id": "evd-m6-005",
+      "session_id": "s-m6-e2e",
+      "sequence": 5,
+      "timestamp": "2026-09-19T18:00:05Z",
+      "speaker": "A",
+      "text": "料金モデルについても考えましょう"
+    },
+    {
+      "id": "evd-m6-006",
+      "session_id": "s-m6-e2e",
+      "sequence": 6,
+      "timestamp": "2026-09-19T18:00:06Z",
+      "speaker": "B",
+      "text": "料金モデルはいったん後回しにしましょう"
+    },
+    {
+      "id": "evd-m6-007",
+      "session_id": "s-m6-e2e",
+      "sequence": 7,
+      "timestamp": "2026-09-19T18:00:07Z",
+      "speaker": "A",
+      "text": "Discussion Mapの話に戻りましょう"
+    },
+    {
+      "id": "evd-m6-008",
+      "session_id": "s-m6-e2e",
+      "sequence": 8,
+      "timestamp": "2026-09-19T18:00:08Z",
+      "speaker": "B",
+      "text": "次回までにVisual Prototypeを作ります"
+    }
+  ],
+  "utterances": [
+    {
+      "id": "utt-m6-001",
+      "session_id": "s-m6-e2e",
+      "sequence": 1,
+      "evidence_ids": ["evd-m6-001"],
+      "text": "MVPはDiscussion Mapを中心にしましょう",
+      "started_at": "2026-09-19T18:00:01Z",
+      "ended_at": "2026-09-19T18:00:01Z"
+    },
+    {
+      "id": "utt-m6-002",
+      "session_id": "s-m6-e2e",
+      "sequence": 2,
+      "evidence_ids": ["evd-m6-002"],
+      "text": "文字起こしも必要ですよね",
+      "started_at": "2026-09-19T18:00:02Z",
+      "ended_at": "2026-09-19T18:00:02Z"
+    },
+    {
+      "id": "utt-m6-003",
+      "session_id": "s-m6-e2e",
+      "sequence": 3,
+      "evidence_ids": ["evd-m6-003"],
+      "text": "スマホUIはMVPから外しましょう",
+      "started_at": "2026-09-19T18:00:03Z",
+      "ended_at": "2026-09-19T18:00:03Z"
+    },
+    {
+      "id": "utt-m6-004",
+      "session_id": "s-m6-e2e",
+      "sequence": 4,
+      "evidence_ids": ["evd-m6-004"],
+      "text": "それでいきましょう",
+      "started_at": "2026-09-19T18:00:04Z",
+      "ended_at": "2026-09-19T18:00:04Z"
+    },
+    {
+      "id": "utt-m6-005",
+      "session_id": "s-m6-e2e",
+      "sequence": 5,
+      "evidence_ids": ["evd-m6-005"],
+      "text": "料金モデルについても考えましょう",
+      "started_at": "2026-09-19T18:00:05Z",
+      "ended_at": "2026-09-19T18:00:05Z"
+    },
+    {
+      "id": "utt-m6-006",
+      "session_id": "s-m6-e2e",
+      "sequence": 6,
+      "evidence_ids": ["evd-m6-006"],
+      "text": "料金モデルはいったん後回しにしましょう",
+      "started_at": "2026-09-19T18:00:06Z",
+      "ended_at": "2026-09-19T18:00:06Z"
+    },
+    {
+      "id": "utt-m6-007",
+      "session_id": "s-m6-e2e",
+      "sequence": 7,
+      "evidence_ids": ["evd-m6-007"],
+      "text": "Discussion Mapの話に戻りましょう",
+      "started_at": "2026-09-19T18:00:07Z",
+      "ended_at": "2026-09-19T18:00:07Z"
+    },
+    {
+      "id": "utt-m6-008",
+      "session_id": "s-m6-e2e",
+      "sequence": 8,
+      "evidence_ids": ["evd-m6-008"],
+      "text": "次回までにVisual Prototypeを作ります",
+      "started_at": "2026-09-19T18:00:08Z",
+      "ended_at": "2026-09-19T18:00:08Z"
+    }
+  ],
+  "human_commands": [
+    {
+      "after_utterance": 3,
+      "command_type": "confirm_decision",
+      "target_label": "スマホUIはMVP対象外"
+    },
+    {
+      "after_utterance": 6,
+      "command_type": "move_to_parking_lot",
+      "target_label": "料金モデル"
+    }
+  ],
+  "expected": {
+    "confirmed_decision_labels": ["スマホUIはMVP対象外"],
+    "parked_topic_labels": ["料金モデル"],
+    "current_topic_label": "Discussion Map",
+    "action_labels": ["Visual Prototypeを作成する"],
+    "must_not_confirm_from_transcript": true
+  }
+}

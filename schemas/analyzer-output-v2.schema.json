@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:discussion-map:analyzer-output-v2",
+  "title": "Discussion Analyzer Provider Output v2",
+  "description": "Small provider-facing intent format. It is not the canonical Event envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["events"],
+  "properties": {
+    "events": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/intent"}
+    }
+  },
+  "$defs": {
+    "evidenceIds": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1
+    },
+    "nodeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["existing_node_id", "new_node_index"],
+      "properties": {
+        "existing_node_id": {"type": ["string", "null"]},
+        "new_node_index": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "actionFields": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "due_date"],
+      "properties": {
+        "owner": {"type": ["string", "null"]},
+        "due_date": {
+          "anyOf": [
+            {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "nodeIntentNonAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "node_type", "label", "existing_node_id", "source_evidence_ids"],
+      "properties": {
+        "kind": {"enum": ["node"]},
+        "node_type": {"enum": ["topic", "idea", "option", "concern", "open_item", "decision"]},
+        "label": {"type": "string", "minLength": 1},
+        "existing_node_id": {"type": ["string", "null"]},
+        "source_evidence_ids": {"$ref": "#/$defs/evidenceIds"}
+      }
+    },
+    "nodeIntentAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "node_type", "label", "existing_node_id", "source_evidence_ids", "action"],
+      "properties": {
+        "kind": {"enum": ["node"]},
+        "node_type": {"enum": ["action"]},
+        "label": {"type": "string", "minLength": 1},
+        "existing_node_id": {"type": ["string", "null"]},
+        "source_evidence_ids": {"$ref": "#/$defs/evidenceIds"},
+        "action": {"$ref": "#/$defs/actionFields"}
+      }
+    },
+    "nodeIntent": {
+      "anyOf": [
+        {"$ref": "#/$defs/nodeIntentNonAction"},
+        {"$ref": "#/$defs/nodeIntentAction"}
+      ]
+    },
+    "relationIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "source", "target", "relation_type", "source_evidence_ids"],
+      "properties": {
+        "kind": {"enum": ["relation"]},
+        "source": {"$ref": "#/$defs/nodeRef"},
+        "target": {"$ref": "#/$defs/nodeRef"},
+        "relation_type": {"enum": ["contains", "has_option", "supports", "opposes", "related_to"]},
+        "source_evidence_ids": {"$ref": "#/$defs/evidenceIds"}
+      }
+    },
+    "focusIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "topic", "confidence", "source_evidence_ids"],
+      "properties": {
+        "kind": {"enum": ["topic_focus"]},
+        "topic": {"$ref": "#/$defs/nodeRef"},
+        "confidence": {
+          "anyOf": [
+            {"type": "number", "minimum": 0, "maximum": 1},
+            {"type": "null"}
+          ]
+        },
+        "source_evidence_ids": {"$ref": "#/$defs/evidenceIds"}
+      }
+    },
+    "intent": {
+      "anyOf": [
+        {"$ref": "#/$defs/nodeIntent"},
+        {"$ref": "#/$defs/relationIntent"},
+        {"$ref": "#/$defs/focusIntent"}
+      ]
+    }
+  }
+}

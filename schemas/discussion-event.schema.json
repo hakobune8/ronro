@@ -1,0 +1,912 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:discussion-map:discussion-event",
+  "title": "Discussion Map MVP Event",
+  "description": "An ordered, append-only event used to materialize Discussion Graph state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "session_id",
+    "sequence",
+    "event_type",
+    "occurred_at",
+    "actor",
+    "source_evidence_ids",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "$ref": "#/$defs/id"
+    },
+    "session_id": {
+      "$ref": "#/$defs/id"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "event_type": {
+      "$ref": "#/$defs/eventType"
+    },
+    "occurred_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "actor": {
+      "$ref": "#/$defs/actor"
+    },
+    "source_evidence_ids": {
+      "$ref": "#/$defs/idArray"
+    },
+    "causation_id": {
+      "$ref": "#/$defs/id"
+    },
+    "correlation_id": {
+      "$ref": "#/$defs/id"
+    },
+    "expected_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "expected_revision"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "actor": {
+            "const": "analyzer"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_evidence_ids": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "session_created"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "system"
+          },
+          "payload": {
+            "$ref": "#/$defs/sessionCreatedPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "session_started"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "system"
+          },
+          "payload": {
+            "$ref": "#/$defs/emptyPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "session_finalizing"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "system"
+          },
+          "payload": {
+            "$ref": "#/$defs/sessionFinalizingPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "session_ended"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "system"
+          },
+          "payload": {
+            "$ref": "#/$defs/sessionEndedPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "node_detected"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "analyzer"
+          },
+          "payload": {
+            "$ref": "#/$defs/nodeDetectedPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "relation_detected"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "analyzer"
+          },
+          "payload": {
+            "$ref": "#/$defs/relationDetectedPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "topic_focus_changed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "analyzer"
+          },
+          "payload": {
+            "$ref": "#/$defs/topicFocusChangedPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "confirm_decision"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/confirmDecisionPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "revoke_decision"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/revokeDecisionPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "resolve_open_item"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/resolveOpenItemPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "reopen_open_item"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/reopenOpenItemPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "rename_node"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/renameNodePayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "archive_node"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/archiveNodePayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "merge_nodes"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/mergeNodesPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "move_to_parking_lot"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/nodeIdPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "restore_from_parking_lot"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/nodeIdPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "update_action"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/updateActionPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "set_current_topic"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/setCurrentTopicPayload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "undo_last_correction"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": {
+            "const": "human"
+          },
+          "payload": {
+            "$ref": "#/$defs/undoLastCorrectionPayload"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "idArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/id"
+      },
+      "uniqueItems": true
+    },
+    "actor": {
+      "type": "string",
+      "enum": [
+        "analyzer",
+        "human",
+        "system"
+      ]
+    },
+    "nodeType": {
+      "type": "string",
+      "enum": [
+        "topic",
+        "idea",
+        "option",
+        "concern",
+        "open_item",
+        "decision",
+        "action"
+      ]
+    },
+    "edgeType": {
+      "type": "string",
+      "description": "Prototype 1 relation matrix: supports accepts source idea or option and target idea, option, or decision. The Materializer enforces node-type combinations because this Event Schema carries IDs only.",
+      "enum": [
+        "contains",
+        "has_option",
+        "supports",
+        "opposes",
+        "related_to"
+      ]
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "session_created",
+        "session_started",
+        "session_finalizing",
+        "session_ended",
+        "node_detected",
+        "relation_detected",
+        "topic_focus_changed",
+        "confirm_decision",
+        "revoke_decision",
+        "resolve_open_item",
+        "reopen_open_item",
+        "rename_node",
+        "archive_node",
+        "merge_nodes",
+        "move_to_parking_lot",
+        "restore_from_parking_lot",
+        "update_action",
+        "set_current_topic",
+        "undo_last_correction"
+      ]
+    },
+    "nodeDetectedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_type",
+        "label"
+      ],
+      "properties": {
+        "node_type": {
+          "$ref": "#/$defs/nodeType"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "$ref": "#/$defs/actionDetectedDetails"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "node_type": {
+                "const": "action"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "action"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "action"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "actionDetectedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "due_date"
+      ],
+      "description": "Analyzer-provided Action metadata. Non-null values are allowed only when explicitly supported by the event envelope source_evidence_ids; null means not stated and must not be inferred.",
+      "properties": {
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "due_date": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "relationDetectedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_node_id",
+        "target_node_id",
+        "relation_type"
+      ],
+      "properties": {
+        "source_node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "target_node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "relation_type": {
+          "$ref": "#/$defs/edgeType"
+        }
+      }
+    },
+    "topicFocusChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "topic_id"
+      ],
+      "properties": {
+        "topic_id": {
+          "$ref": "#/$defs/id"
+        },
+        "previous_topic_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "sessionCreatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "goal"
+      ],
+      "properties": {
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "goal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "emptyPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 0
+    },
+    "sessionFinalizingPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "last_evidence_sequence"
+      ],
+      "properties": {
+        "last_evidence_sequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "sessionEndedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "drain_status",
+        "final_graph_revision",
+        "pending_analysis"
+      ],
+      "properties": {
+        "drain_status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "failed"
+          ]
+        },
+        "final_graph_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending_analysis": {
+          "type": "boolean"
+        }
+      }
+    },
+    "confirmDecisionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_node_id",
+        "expected_status"
+      ],
+      "properties": {
+        "decision_node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "expected_status": {
+          "const": "candidate"
+        }
+      }
+    },
+    "revokeDecisionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_node_id",
+        "expected_status"
+      ],
+      "properties": {
+        "decision_node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "expected_status": {
+          "const": "confirmed"
+        }
+      }
+    },
+    "resolveOpenItemPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "open_item_node_id",
+        "expected_status"
+      ],
+      "properties": {
+        "open_item_node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "expected_status": {
+          "const": "active"
+        }
+      }
+    },
+    "reopenOpenItemPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "open_item_node_id",
+        "expected_status"
+      ],
+      "properties": {
+        "open_item_node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "expected_status": {
+          "const": "resolved"
+        }
+      }
+    },
+    "renameNodePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id",
+        "label"
+      ],
+      "properties": {
+        "node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "archiveNodePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id"
+      ],
+      "properties": {
+        "node_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "mergeNodesPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_node_id",
+        "target_node_id"
+      ],
+      "properties": {
+        "source_node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "target_node_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "nodeIdPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id"
+      ],
+      "properties": {
+        "node_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "updateActionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_node_id"
+      ],
+      "properties": {
+        "action_node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "due_date": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "completed",
+            "cancelled"
+          ]
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "description"
+          ]
+        },
+        {
+          "required": [
+            "owner"
+          ]
+        },
+        {
+          "required": [
+            "due_date"
+          ]
+        },
+        {
+          "required": [
+            "status"
+          ]
+        }
+      ]
+    },
+    "setCurrentTopicPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "topic_id"
+      ],
+      "properties": {
+        "topic_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "undoLastCorrectionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_event_id"
+      ],
+      "properties": {
+        "target_event_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    }
+  }
+}

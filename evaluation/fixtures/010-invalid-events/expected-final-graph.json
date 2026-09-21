@@ -1,0 +1,58 @@
+{
+  "session": {
+    "id": "s-010",
+    "title": "Invalid Events",
+    "goal": "Materializerの拒否条件を確認する",
+    "status": "active",
+    "created_at": "2026-09-19T19:00:00Z",
+    "started_at": "2026-09-19T19:00:00Z",
+    "ended_at": null,
+    "graph_revision": 3
+  },
+  "evidence": [
+    {
+      "id": "evd-001",
+      "session_id": "s-010",
+      "sequence": 1,
+      "timestamp": "2026-09-19T19:00:01Z",
+      "speaker": "A",
+      "text": "MVP範囲"
+    }
+  ],
+  "utterances": [
+    {
+      "id": "utt-001",
+      "session_id": "s-010",
+      "sequence": 1,
+      "evidence_ids": ["evd-001"],
+      "text": "MVP範囲",
+      "started_at": "2026-09-19T19:00:01Z",
+      "ended_at": "2026-09-19T19:00:01Z"
+    }
+  ],
+  "graph": {
+    "session_id": "s-010",
+    "revision": 3,
+    "last_event_sequence": 3,
+    "nodes": [
+      {
+        "id": "node:s-010:evt-003",
+        "session_id": "s-010",
+        "type": "topic",
+        "label": "MVP範囲",
+        "status": "active",
+        "created_at": "2026-09-19T19:00:03Z",
+        "updated_at": "2026-09-19T19:00:03Z",
+        "source_event_ids": ["evt-003"],
+        "evidence_ids": ["evd-001"]
+      }
+    ],
+    "edges": [],
+    "current_topic": {
+      "primary_topic_id": null,
+      "mode": "derived",
+      "source_event_ids": []
+    }
+  }
+}
+

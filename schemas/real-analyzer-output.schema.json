@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:discussion-map:real-analyzer-output",
+  "title": "Recorded Real Analyzer Structured Output",
+  "description": "Provider-facing intent format. The application converts this format to the canonical Discussion Event envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["events"],
+  "properties": {
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/intent"
+      }
+    }
+  },
+  "$defs": {
+    "evidenceIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "nodeType": {
+      "type": "string",
+      "enum": [
+        "topic",
+        "idea",
+        "option",
+        "concern",
+        "open_item",
+        "decision",
+        "action"
+      ]
+    },
+    "nodeRef": {
+      "type": "object",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "required": ["existing_node_id"],
+          "properties": {
+            "existing_node_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["new_node_index"],
+          "properties": {
+            "new_node_index": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ]
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "due_date"],
+      "properties": {
+        "owner": {
+          "type": ["string", "null"]
+        },
+        "due_date": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      }
+    },
+    "nodeIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "node_type", "label", "source_evidence_ids"],
+      "properties": {
+        "kind": {
+          "const": "node"
+        },
+        "node_type": {
+          "$ref": "#/$defs/nodeType"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "existing_node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_evidence_ids": {
+          "$ref": "#/$defs/evidenceIds"
+        },
+        "action": {
+          "$ref": "#/$defs/action"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "node_type": {
+                "const": "action"
+              }
+            }
+          },
+          "then": {
+            "required": ["action"]
+          },
+          "else": {
+            "not": {
+              "required": ["action"]
+            }
+          }
+        }
+      ]
+    },
+    "relationIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "source", "target", "relation_type", "source_evidence_ids"],
+      "properties": {
+        "kind": {
+          "const": "relation"
+        },
+        "source": {
+          "$ref": "#/$defs/nodeRef"
+        },
+        "target": {
+          "$ref": "#/$defs/nodeRef"
+        },
+        "relation_type": {
+          "type": "string",
+          "enum": ["contains", "has_option", "supports", "opposes", "related_to"]
+        },
+        "source_evidence_ids": {
+          "$ref": "#/$defs/evidenceIds"
+        }
+      }
+    },
+    "focusIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "topic", "source_evidence_ids"],
+      "properties": {
+        "kind": {
+          "const": "topic_focus"
+        },
+        "topic": {
+          "$ref": "#/$defs/nodeRef"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "source_evidence_ids": {
+          "$ref": "#/$defs/evidenceIds"
+        }
+      }
+    },
+    "intent": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/nodeIntent"
+        },
+        {
+          "$ref": "#/$defs/relationIntent"
+        },
+        {
+          "$ref": "#/$defs/focusIntent"
+        }
+      ]
+    }
+  }
+}

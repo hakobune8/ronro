@@ -1,0 +1,66 @@
+[
+  {
+    "event_id": "evt-001",
+    "session_id": "s-004",
+    "sequence": 1,
+    "event_type": "session_created",
+    "occurred_at": "2026-09-19T13:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {
+      "title": "Decision Revoke",
+      "goal": "Confirmed Decisionの解除を確認する"
+    }
+  },
+  {
+    "event_id": "evt-002",
+    "session_id": "s-004",
+    "sequence": 2,
+    "event_type": "session_started",
+    "occurred_at": "2026-09-19T13:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {}
+  },
+  {
+    "event_id": "evt-003",
+    "session_id": "s-004",
+    "sequence": 3,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T13:00:03Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-001"],
+    "payload": {
+      "node_type": "decision",
+      "label": "Visual生成はMVPに含める"
+    }
+  },
+  {
+    "event_id": "evt-004",
+    "session_id": "s-004",
+    "sequence": 4,
+    "event_type": "confirm_decision",
+    "occurred_at": "2026-09-19T13:00:04Z",
+    "actor": "human",
+    "source_evidence_ids": [],
+    "expected_revision": 3,
+    "payload": {
+      "decision_node_id": "node:s-004:evt-003",
+      "expected_status": "candidate"
+    }
+  },
+  {
+    "event_id": "evt-005",
+    "session_id": "s-004",
+    "sequence": 5,
+    "event_type": "revoke_decision",
+    "occurred_at": "2026-09-19T13:00:05Z",
+    "actor": "human",
+    "source_evidence_ids": ["evd-002"],
+    "expected_revision": 4,
+    "payload": {
+      "decision_node_id": "node:s-004:evt-003",
+      "expected_status": "confirmed"
+    }
+  }
+]

@@ -1,0 +1,44 @@
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+.ruff_cache/
+.DS_Store
+
+# Local runtime output and logs
+tmp/
+*.log
+
+# Credentials and private deployment material
+*.pem
+*.key
+*.crt
+secrets*.yaml
+secret*.yaml
+!secret.example.yaml
+
+# Evaluation artifacts are local by default. Only repository-authored,
+# provenance-confirmed synthetic data is eligible for the initial public tree.
+# The following paths remain on disk for local tests but are excluded from the
+# initial public package until provenance/re-distribution review is complete.
+evaluation/live/preflight/
+evaluation/live/sessions/
+evaluation/live/*real*.json
+evaluation/30min/
+evaluation/real-analyzer/
+evaluation/golden/v2/
+evaluation/context-spike/
+evaluation/**/raw/
+evaluation/**/audio/
+evaluation/**/recordings/
+evaluation/**/*.m4a
+evaluation/**/*.wav
+evaluation/**/*.mp3
+evaluation/stt/
+evaluation/runs/
+evaluation/rescored/

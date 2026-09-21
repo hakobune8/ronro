@@ -1,0 +1,38 @@
+[
+  {
+    "event_id": "evt-001",
+    "session_id": "s-010",
+    "sequence": 1,
+    "event_type": "session_created",
+    "occurred_at": "2026-09-19T19:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {
+      "title": "Invalid Events",
+      "goal": "Materializerの拒否条件を確認する"
+    }
+  },
+  {
+    "event_id": "evt-002",
+    "session_id": "s-010",
+    "sequence": 2,
+    "event_type": "session_started",
+    "occurred_at": "2026-09-19T19:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {}
+  },
+  {
+    "event_id": "evt-003",
+    "session_id": "s-010",
+    "sequence": 3,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T19:00:03Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-001"],
+    "payload": {
+      "node_type": "topic",
+      "label": "MVP範囲"
+    }
+  }
+]

@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: discussion-map-pilot
+
+resources:
+  - ../base
+
+images:
+  - name: registry.example.invalid/discussion-map-ai-facilitator
+    newName: registry.example.invalid/discussion-map-ai-facilitator
+    newTag: pilot-001

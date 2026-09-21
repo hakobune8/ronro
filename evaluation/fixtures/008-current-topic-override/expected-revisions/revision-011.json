@@ -1,0 +1,54 @@
+{
+  "session_id": "s-008",
+  "revision": 11,
+  "last_event_sequence": 11,
+  "nodes": [
+    {
+      "id": "node:s-008:evt-003",
+      "session_id": "s-008",
+      "type": "topic",
+      "label": "Pricing",
+      "status": "active",
+      "created_at": "2026-09-19T17:00:03Z",
+      "updated_at": "2026-09-19T17:00:03Z",
+      "source_event_ids": ["evt-003"],
+      "evidence_ids": ["evd-001"]
+    },
+    {
+      "id": "node:s-008:evt-004",
+      "session_id": "s-008",
+      "type": "topic",
+      "label": "MVP範囲",
+      "status": "active",
+      "created_at": "2026-09-19T17:00:04Z",
+      "updated_at": "2026-09-19T17:00:11Z",
+      "source_event_ids": ["evt-004", "evt-006", "evt-009", "evt-010", "evt-011"],
+      "evidence_ids": ["evd-002"]
+    },
+    {
+      "id": "node:s-008:evt-007",
+      "session_id": "s-008",
+      "type": "idea",
+      "label": "価格の表示方式を検討する",
+      "status": "active",
+      "created_at": "2026-09-19T17:00:07Z",
+      "updated_at": "2026-09-19T17:00:07Z",
+      "source_event_ids": ["evt-007"],
+      "evidence_ids": ["evd-003"]
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge:s-008:contains:node:s-008:evt-003:node:s-008:evt-007",
+      "source_node_id": "node:s-008:evt-003",
+      "target_node_id": "node:s-008:evt-007",
+      "type": "contains",
+      "source_event_ids": ["evt-008"]
+    }
+  ],
+  "current_topic": {
+    "primary_topic_id": "node:s-008:evt-004",
+    "mode": "human_corrected",
+    "source_event_ids": ["evt-011"]
+  }
+}

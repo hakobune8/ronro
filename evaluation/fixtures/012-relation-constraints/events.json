@@ -1,0 +1,160 @@
+[
+  {
+    "event_id": "evt-001",
+    "session_id": "s-012",
+    "sequence": 1,
+    "event_type": "session_created",
+    "occurred_at": "2026-09-19T21:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {
+      "title": "Relation Constraints",
+      "goal": "Relation Matrixを確認する"
+    }
+  },
+  {
+    "event_id": "evt-002",
+    "session_id": "s-012",
+    "sequence": 2,
+    "event_type": "session_started",
+    "occurred_at": "2026-09-19T21:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {}
+  },
+  {
+    "event_id": "evt-003",
+    "session_id": "s-012",
+    "sequence": 3,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T21:00:03Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-001"],
+    "payload": {
+      "node_type": "topic",
+      "label": "MVP"
+    }
+  },
+  {
+    "event_id": "evt-004",
+    "session_id": "s-012",
+    "sequence": 4,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T21:00:04Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-002"],
+    "payload": {
+      "node_type": "idea",
+      "label": "Map中心"
+    }
+  },
+  {
+    "event_id": "evt-005",
+    "session_id": "s-012",
+    "sequence": 5,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T21:00:05Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-003"],
+    "payload": {
+      "node_type": "option",
+      "label": "Mapのみ案"
+    }
+  },
+  {
+    "event_id": "evt-006",
+    "session_id": "s-012",
+    "sequence": 6,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T21:00:06Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-004"],
+    "payload": {
+      "node_type": "decision",
+      "label": "スマホUIは対象外"
+    }
+  },
+  {
+    "event_id": "evt-007",
+    "session_id": "s-012",
+    "sequence": 7,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T21:00:07Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-005"],
+    "payload": {
+      "node_type": "concern",
+      "label": "更新頻度が高いと見づらい"
+    }
+  },
+  {
+    "event_id": "evt-008",
+    "session_id": "s-012",
+    "sequence": 8,
+    "event_type": "relation_detected",
+    "occurred_at": "2026-09-19T21:00:08Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-002"],
+    "payload": {
+      "source_node_id": "node:s-012:evt-003",
+      "target_node_id": "node:s-012:evt-004",
+      "relation_type": "contains"
+    }
+  },
+  {
+    "event_id": "evt-009",
+    "session_id": "s-012",
+    "sequence": 9,
+    "event_type": "relation_detected",
+    "occurred_at": "2026-09-19T21:00:09Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-003"],
+    "payload": {
+      "source_node_id": "node:s-012:evt-003",
+      "target_node_id": "node:s-012:evt-005",
+      "relation_type": "has_option"
+    }
+  },
+  {
+    "event_id": "evt-010",
+    "session_id": "s-012",
+    "sequence": 10,
+    "event_type": "relation_detected",
+    "occurred_at": "2026-09-19T21:00:10Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-002", "evd-004"],
+    "payload": {
+      "source_node_id": "node:s-012:evt-004",
+      "target_node_id": "node:s-012:evt-006",
+      "relation_type": "supports"
+    }
+  },
+  {
+    "event_id": "evt-011",
+    "session_id": "s-012",
+    "sequence": 11,
+    "event_type": "relation_detected",
+    "occurred_at": "2026-09-19T21:00:11Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-005", "evd-003"],
+    "payload": {
+      "source_node_id": "node:s-012:evt-007",
+      "target_node_id": "node:s-012:evt-005",
+      "relation_type": "opposes"
+    }
+  },
+  {
+    "event_id": "evt-012",
+    "session_id": "s-012",
+    "sequence": 12,
+    "event_type": "relation_detected",
+    "occurred_at": "2026-09-19T21:00:12Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-002", "evd-005"],
+    "payload": {
+      "source_node_id": "node:s-012:evt-004",
+      "target_node_id": "node:s-012:evt-007",
+      "relation_type": "related_to"
+    }
+  }
+]

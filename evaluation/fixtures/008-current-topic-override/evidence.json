@@ -1,0 +1,26 @@
+[
+  {
+    "id": "evd-001",
+    "session_id": "s-008",
+    "sequence": 1,
+    "timestamp": "2026-09-19T17:00:01Z",
+    "speaker": "A",
+    "text": "価格について話していました"
+  },
+  {
+    "id": "evd-002",
+    "session_id": "s-008",
+    "sequence": 2,
+    "timestamp": "2026-09-19T17:00:02Z",
+    "speaker": "Human",
+    "text": "いまはMVP範囲の話をしています"
+  },
+  {
+    "id": "evd-003",
+    "session_id": "s-008",
+    "sequence": 3,
+    "timestamp": "2026-09-19T17:00:03Z",
+    "speaker": "A",
+    "text": "価格の表示方式も検討したい"
+  }
+]

@@ -1,0 +1,24 @@
+{
+  "session_id": "s-003",
+  "revision": 4,
+  "last_event_sequence": 4,
+  "nodes": [
+    {
+      "id": "node:s-003:evt-003",
+      "session_id": "s-003",
+      "type": "decision",
+      "label": "スマホUIはMVP対象外",
+      "status": "confirmed",
+      "created_at": "2026-09-19T12:00:03Z",
+      "updated_at": "2026-09-19T12:00:04Z",
+      "source_event_ids": ["evt-003", "evt-004"],
+      "evidence_ids": ["evd-001"]
+    }
+  ],
+  "edges": [],
+  "current_topic": {
+    "primary_topic_id": null,
+    "mode": "derived",
+    "source_event_ids": []
+  }
+}

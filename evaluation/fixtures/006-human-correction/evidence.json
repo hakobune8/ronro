@@ -1,0 +1,34 @@
+[
+  {
+    "id": "evd-001",
+    "session_id": "s-006",
+    "sequence": 1,
+    "timestamp": "2026-09-19T15:00:01Z",
+    "speaker": "AI",
+    "text": "価格モデル"
+  },
+  {
+    "id": "evd-002",
+    "session_id": "s-006",
+    "sequence": 2,
+    "timestamp": "2026-09-19T15:00:02Z",
+    "speaker": "AI",
+    "text": "Visual生成"
+  },
+  {
+    "id": "evd-003",
+    "session_id": "s-006",
+    "sequence": 3,
+    "timestamp": "2026-09-19T15:00:03Z",
+    "speaker": "AI",
+    "text": "イメージ生成"
+  },
+  {
+    "id": "evd-004",
+    "session_id": "s-006",
+    "sequence": 4,
+    "timestamp": "2026-09-19T15:00:04Z",
+    "speaker": "AI",
+    "text": "一時的なメモ"
+  }
+]

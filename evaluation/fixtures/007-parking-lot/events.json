@@ -1,0 +1,90 @@
+[
+  {
+    "event_id": "evt-001",
+    "session_id": "s-007",
+    "sequence": 1,
+    "event_type": "session_created",
+    "occurred_at": "2026-09-19T16:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {
+      "title": "Parking Lot",
+      "goal": "Parking LotとRestoreを確認する"
+    }
+  },
+  {
+    "event_id": "evt-002",
+    "session_id": "s-007",
+    "sequence": 2,
+    "event_type": "session_started",
+    "occurred_at": "2026-09-19T16:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {}
+  },
+  {
+    "event_id": "evt-003",
+    "session_id": "s-007",
+    "sequence": 3,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T16:00:03Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-001"],
+    "payload": {
+      "node_type": "topic",
+      "label": "Teams連携"
+    }
+  },
+  {
+    "event_id": "evt-004",
+    "session_id": "s-007",
+    "sequence": 4,
+    "event_type": "topic_focus_changed",
+    "occurred_at": "2026-09-19T16:00:04Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-001"],
+    "payload": {
+      "topic_id": "node:s-007:evt-003",
+      "confidence": 0.9
+    }
+  },
+  {
+    "event_id": "evt-005",
+    "session_id": "s-007",
+    "sequence": 5,
+    "event_type": "move_to_parking_lot",
+    "occurred_at": "2026-09-19T16:00:05Z",
+    "actor": "human",
+    "source_evidence_ids": [],
+    "expected_revision": 4,
+    "payload": {
+      "node_id": "node:s-007:evt-003"
+    }
+  },
+  {
+    "event_id": "evt-006",
+    "session_id": "s-007",
+    "sequence": 6,
+    "event_type": "restore_from_parking_lot",
+    "occurred_at": "2026-09-19T16:00:06Z",
+    "actor": "human",
+    "source_evidence_ids": [],
+    "expected_revision": 5,
+    "payload": {
+      "node_id": "node:s-007:evt-003"
+    }
+  },
+  {
+    "event_id": "evt-007",
+    "session_id": "s-007",
+    "sequence": 7,
+    "event_type": "topic_focus_changed",
+    "occurred_at": "2026-09-19T16:00:07Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-002"],
+    "payload": {
+      "topic_id": "node:s-007:evt-003",
+      "confidence": 0.94
+    }
+  }
+]

@@ -1,0 +1,94 @@
+{
+  "session": {
+    "id": "s-013",
+    "title": "Open Item Lifecycle",
+    "goal": "Open Itemの解決と再開をReplay可能にする",
+    "status": "active",
+    "created_at": "2026-09-19T18:00:00Z",
+    "started_at": "2026-09-19T18:00:00Z",
+    "ended_at": null,
+    "graph_revision": 9
+  },
+  "evidence": [
+    {
+      "id": "evd-001",
+      "session_id": "s-013",
+      "sequence": 1,
+      "timestamp": "2026-09-19T18:00:01Z",
+      "speaker": "A",
+      "text": "Visual Artifactの扱いを確認します"
+    },
+    {
+      "id": "evd-002",
+      "session_id": "s-013",
+      "sequence": 2,
+      "timestamp": "2026-09-19T18:00:02Z",
+      "speaker": "B",
+      "text": "Visual生成の完了条件は何ですか？"
+    }
+  ],
+  "utterances": [
+    {
+      "id": "utt-001",
+      "session_id": "s-013",
+      "sequence": 1,
+      "evidence_ids": ["evd-001"],
+      "text": "Visual Artifactの扱いを確認します",
+      "started_at": "2026-09-19T18:00:01Z",
+      "ended_at": "2026-09-19T18:00:01Z"
+    },
+    {
+      "id": "utt-002",
+      "session_id": "s-013",
+      "sequence": 2,
+      "evidence_ids": ["evd-002"],
+      "text": "Visual生成の完了条件は何ですか？",
+      "started_at": "2026-09-19T18:00:02Z",
+      "ended_at": "2026-09-19T18:00:02Z"
+    }
+  ],
+  "graph": {
+    "session_id": "s-013",
+    "revision": 9,
+    "last_event_sequence": 9,
+    "nodes": [
+      {
+        "id": "node:s-013:evt-003",
+        "session_id": "s-013",
+        "type": "topic",
+        "label": "Visual Artifactの扱い",
+        "status": "active",
+        "created_at": "2026-09-19T18:00:03Z",
+        "updated_at": "2026-09-19T18:00:03Z",
+        "source_event_ids": ["evt-003"],
+        "evidence_ids": ["evd-001"]
+      },
+      {
+        "id": "node:s-013:evt-005",
+        "session_id": "s-013",
+        "type": "open_item",
+        "label": "Visual生成の完了条件",
+        "status": "resolved",
+        "created_at": "2026-09-19T18:00:05Z",
+        "updated_at": "2026-09-19T18:00:09Z",
+        "source_event_ids": ["evt-005", "evt-007", "evt-008", "evt-009"],
+        "evidence_ids": ["evd-002"]
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge:s-013:contains:node:s-013:evt-003:node:s-013:evt-005",
+        "source_node_id": "node:s-013:evt-003",
+        "target_node_id": "node:s-013:evt-005",
+        "type": "contains",
+        "source_event_ids": ["evt-006"]
+      }
+    ],
+    "current_topic": {
+      "primary_topic_id": "node:s-013:evt-003",
+      "mode": "derived",
+      "confidence": 0.95,
+      "source_event_ids": ["evt-004"]
+    }
+  }
+}

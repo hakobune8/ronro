@@ -1,0 +1,231 @@
+[
+  {
+    "case_id": "duplicate-event-id",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "evt-003",
+        "session_id": "s-010",
+        "sequence": 4,
+        "event_type": "node_detected",
+        "occurred_at": "2026-09-19T19:00:04Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-001"],
+        "payload": {
+          "node_type": "idea",
+          "label": "重複Event"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "duplicate_event_id",
+    "expected_state": "STATE_UNCHANGED"
+  },
+  {
+    "case_id": "sequence-gap",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "evt-005",
+        "session_id": "s-010",
+        "sequence": 5,
+        "event_type": "node_detected",
+        "occurred_at": "2026-09-19T19:00:05Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-001"],
+        "payload": {
+          "node_type": "idea",
+          "label": "Sequence Gap"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "sequence_gap",
+    "expected_state": "STATE_UNCHANGED"
+  },
+  {
+    "case_id": "out-of-order-sequence",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "evt-out-of-order",
+        "session_id": "s-010",
+        "sequence": 2,
+        "event_type": "node_detected",
+        "occurred_at": "2026-09-19T19:00:06Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-001"],
+        "payload": {
+          "node_type": "idea",
+          "label": "Out of Order"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "duplicate_sequence",
+    "expected_state": "STATE_UNCHANGED"
+  },
+  {
+    "case_id": "expected-revision-mismatch",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "evt-004",
+        "session_id": "s-010",
+        "sequence": 4,
+        "event_type": "rename_node",
+        "occurred_at": "2026-09-19T19:00:04Z",
+        "actor": "human",
+        "source_evidence_ids": [],
+        "expected_revision": 99,
+        "payload": {
+          "node_id": "node:s-010:evt-003",
+          "label": "MVP範囲修正"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "revision_mismatch",
+    "expected_state": "STATE_UNCHANGED"
+  },
+  {
+    "case_id": "missing-node",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "evt-004",
+        "session_id": "s-010",
+        "sequence": 4,
+        "event_type": "relation_detected",
+        "occurred_at": "2026-09-19T19:00:04Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-001"],
+        "payload": {
+          "source_node_id": "node:s-010:evt-003",
+          "target_node_id": "node:s-010:missing",
+          "relation_type": "contains"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "missing_reference",
+    "expected_state": "STATE_UNCHANGED"
+  },
+  {
+    "case_id": "invalid-decision-transition",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "evt-004",
+        "session_id": "s-010",
+        "sequence": 4,
+        "event_type": "node_detected",
+        "occurred_at": "2026-09-19T19:00:04Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-001"],
+        "payload": {
+          "node_type": "decision",
+          "label": "未Confirm Decision"
+        }
+      },
+      {
+        "event_id": "evt-005",
+        "session_id": "s-010",
+        "sequence": 5,
+        "event_type": "revoke_decision",
+        "occurred_at": "2026-09-19T19:00:05Z",
+        "actor": "human",
+        "source_evidence_ids": [],
+        "expected_revision": 4,
+        "payload": {
+          "decision_node_id": "node:s-010:evt-004",
+          "expected_status": "confirmed"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "invalid_transition",
+    "expected_state": "STATE_UNCHANGED_AFTER_REJECT"
+  },
+  {
+    "case_id": "relation-missing-node",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "evt-004",
+        "session_id": "s-010",
+        "sequence": 4,
+        "event_type": "relation_detected",
+        "occurred_at": "2026-09-19T19:00:04Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-001"],
+        "payload": {
+          "source_node_id": "node:s-010:missing-source",
+          "target_node_id": "node:s-010:evt-003",
+          "relation_type": "related_to"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "missing_reference",
+    "expected_state": "STATE_UNCHANGED"
+  },
+  {
+    "case_id": "invalid-node-type",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "evt-004",
+        "session_id": "s-010",
+        "sequence": 4,
+        "event_type": "node_detected",
+        "occurred_at": "2026-09-19T19:00:04Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-001"],
+        "payload": {
+          "node_type": "unsupported_node",
+          "label": "Schema Invalid"
+        }
+      }
+    ],
+    "expected": "SCHEMA_REJECT",
+    "expected_error_code": "schema_invalid",
+    "expected_state": "STATE_UNCHANGED"
+  },
+  {
+    "case_id": "invalid-relation-combination",
+    "base_events_file": "events.json",
+    "suffix_events": [
+      {
+        "event_id": "evt-004",
+        "session_id": "s-010",
+        "sequence": 4,
+        "event_type": "node_detected",
+        "occurred_at": "2026-09-19T19:00:04Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-001"],
+        "payload": {
+          "node_type": "topic",
+          "label": "別Topic"
+        }
+      },
+      {
+        "event_id": "evt-005",
+        "session_id": "s-010",
+        "sequence": 5,
+        "event_type": "relation_detected",
+        "occurred_at": "2026-09-19T19:00:05Z",
+        "actor": "analyzer",
+        "source_evidence_ids": ["evd-001"],
+        "payload": {
+          "source_node_id": "node:s-010:evt-003",
+          "target_node_id": "node:s-010:evt-004",
+          "relation_type": "has_option"
+        }
+      }
+    ],
+    "expected": "REJECT_EVENT",
+    "expected_error_code": "unsupported_relation",
+    "expected_state": "STATE_UNCHANGED_AFTER_REJECT"
+  }
+]

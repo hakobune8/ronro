@@ -1,0 +1,206 @@
+{
+  "session": {
+    "id": "s-012",
+    "title": "Relation Constraints",
+    "goal": "Relation Matrixを確認する",
+    "status": "active",
+    "created_at": "2026-09-19T21:00:00Z",
+    "started_at": "2026-09-19T21:00:00Z",
+    "ended_at": null,
+    "graph_revision": 12
+  },
+  "evidence": [
+    {
+      "id": "evd-001",
+      "session_id": "s-012",
+      "sequence": 1,
+      "timestamp": "2026-09-19T21:00:01Z",
+      "speaker": "A",
+      "text": "MVP"
+    },
+    {
+      "id": "evd-002",
+      "session_id": "s-012",
+      "sequence": 2,
+      "timestamp": "2026-09-19T21:00:02Z",
+      "speaker": "B",
+      "text": "Map中心"
+    },
+    {
+      "id": "evd-003",
+      "session_id": "s-012",
+      "sequence": 3,
+      "timestamp": "2026-09-19T21:00:03Z",
+      "speaker": "C",
+      "text": "Mapのみ案"
+    },
+    {
+      "id": "evd-004",
+      "session_id": "s-012",
+      "sequence": 4,
+      "timestamp": "2026-09-19T21:00:04Z",
+      "speaker": "A",
+      "text": "スマホUIは対象外"
+    },
+    {
+      "id": "evd-005",
+      "session_id": "s-012",
+      "sequence": 5,
+      "timestamp": "2026-09-19T21:00:05Z",
+      "speaker": "B",
+      "text": "更新頻度が高いと見づらい"
+    }
+  ],
+  "utterances": [
+    {
+      "id": "utt-001",
+      "session_id": "s-012",
+      "sequence": 1,
+      "evidence_ids": ["evd-001"],
+      "text": "MVP",
+      "started_at": "2026-09-19T21:00:01Z",
+      "ended_at": "2026-09-19T21:00:01Z"
+    },
+    {
+      "id": "utt-002",
+      "session_id": "s-012",
+      "sequence": 2,
+      "evidence_ids": ["evd-002"],
+      "text": "Map中心",
+      "started_at": "2026-09-19T21:00:02Z",
+      "ended_at": "2026-09-19T21:00:02Z"
+    },
+    {
+      "id": "utt-003",
+      "session_id": "s-012",
+      "sequence": 3,
+      "evidence_ids": ["evd-003"],
+      "text": "Mapのみ案",
+      "started_at": "2026-09-19T21:00:03Z",
+      "ended_at": "2026-09-19T21:00:03Z"
+    },
+    {
+      "id": "utt-004",
+      "session_id": "s-012",
+      "sequence": 4,
+      "evidence_ids": ["evd-004"],
+      "text": "スマホUIは対象外",
+      "started_at": "2026-09-19T21:00:04Z",
+      "ended_at": "2026-09-19T21:00:04Z"
+    },
+    {
+      "id": "utt-005",
+      "session_id": "s-012",
+      "sequence": 5,
+      "evidence_ids": ["evd-005"],
+      "text": "更新頻度が高いと見づらい",
+      "started_at": "2026-09-19T21:00:05Z",
+      "ended_at": "2026-09-19T21:00:05Z"
+    }
+  ],
+  "graph": {
+    "session_id": "s-012",
+    "revision": 12,
+    "last_event_sequence": 12,
+    "nodes": [
+      {
+        "id": "node:s-012:evt-003",
+        "session_id": "s-012",
+        "type": "topic",
+        "label": "MVP",
+        "status": "active",
+        "created_at": "2026-09-19T21:00:03Z",
+        "updated_at": "2026-09-19T21:00:03Z",
+        "source_event_ids": ["evt-003"],
+        "evidence_ids": ["evd-001"]
+      },
+      {
+        "id": "node:s-012:evt-004",
+        "session_id": "s-012",
+        "type": "idea",
+        "label": "Map中心",
+        "status": "active",
+        "created_at": "2026-09-19T21:00:04Z",
+        "updated_at": "2026-09-19T21:00:04Z",
+        "source_event_ids": ["evt-004"],
+        "evidence_ids": ["evd-002"]
+      },
+      {
+        "id": "node:s-012:evt-005",
+        "session_id": "s-012",
+        "type": "option",
+        "label": "Mapのみ案",
+        "status": "active",
+        "created_at": "2026-09-19T21:00:05Z",
+        "updated_at": "2026-09-19T21:00:05Z",
+        "source_event_ids": ["evt-005"],
+        "evidence_ids": ["evd-003"]
+      },
+      {
+        "id": "node:s-012:evt-006",
+        "session_id": "s-012",
+        "type": "decision",
+        "label": "スマホUIは対象外",
+        "status": "candidate",
+        "created_at": "2026-09-19T21:00:06Z",
+        "updated_at": "2026-09-19T21:00:06Z",
+        "source_event_ids": ["evt-006"],
+        "evidence_ids": ["evd-004"]
+      },
+      {
+        "id": "node:s-012:evt-007",
+        "session_id": "s-012",
+        "type": "concern",
+        "label": "更新頻度が高いと見づらい",
+        "status": "active",
+        "created_at": "2026-09-19T21:00:07Z",
+        "updated_at": "2026-09-19T21:00:07Z",
+        "source_event_ids": ["evt-007"],
+        "evidence_ids": ["evd-005"]
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge:s-012:contains:node:s-012:evt-003:node:s-012:evt-004",
+        "source_node_id": "node:s-012:evt-003",
+        "target_node_id": "node:s-012:evt-004",
+        "type": "contains",
+        "source_event_ids": ["evt-008"]
+      },
+      {
+        "id": "edge:s-012:has_option:node:s-012:evt-003:node:s-012:evt-005",
+        "source_node_id": "node:s-012:evt-003",
+        "target_node_id": "node:s-012:evt-005",
+        "type": "has_option",
+        "source_event_ids": ["evt-009"]
+      },
+      {
+        "id": "edge:s-012:supports:node:s-012:evt-004:node:s-012:evt-006",
+        "source_node_id": "node:s-012:evt-004",
+        "target_node_id": "node:s-012:evt-006",
+        "type": "supports",
+        "source_event_ids": ["evt-010"]
+      },
+      {
+        "id": "edge:s-012:opposes:node:s-012:evt-007:node:s-012:evt-005",
+        "source_node_id": "node:s-012:evt-007",
+        "target_node_id": "node:s-012:evt-005",
+        "type": "opposes",
+        "source_event_ids": ["evt-011"]
+      },
+      {
+        "id": "edge:s-012:related_to:node:s-012:evt-004:node:s-012:evt-007",
+        "source_node_id": "node:s-012:evt-004",
+        "target_node_id": "node:s-012:evt-007",
+        "type": "related_to",
+        "source_event_ids": ["evt-012"]
+      }
+    ],
+    "current_topic": {
+      "primary_topic_id": null,
+      "mode": "derived",
+      "source_event_ids": []
+    }
+  }
+}
+

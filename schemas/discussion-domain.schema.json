@@ -1,0 +1,503 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:discussion-map:discussion-domain",
+  "title": "Discussion Map MVP Domain State",
+  "description": "Canonical domain state materialized from an ordered Discussion Event Stream.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session",
+    "evidence",
+    "utterances",
+    "graph"
+  ],
+  "properties": {
+    "session": {
+      "$ref": "#/$defs/session"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/transcriptEvidence"
+      },
+      "uniqueItems": true
+    },
+    "utterances": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/utterance"
+      },
+      "uniqueItems": true
+    },
+    "graph": {
+      "$ref": "#/$defs/discussionGraph"
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sessionStatus": {
+      "type": "string",
+      "enum": [
+        "created",
+        "active",
+        "finalizing",
+        "ended"
+      ]
+    },
+    "nodeType": {
+      "type": "string",
+      "enum": [
+        "topic",
+        "idea",
+        "option",
+        "concern",
+        "open_item",
+        "decision",
+        "action"
+      ]
+    },
+    "nodeStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "candidate",
+        "confirmed",
+        "revoked",
+        "resolved",
+        "parked",
+        "completed",
+        "archived"
+      ]
+    },
+    "actionStatus": {
+      "type": "string",
+      "enum": [
+        "open",
+        "completed",
+        "cancelled"
+      ]
+    },
+    "edgeType": {
+      "type": "string",
+      "description": "Prototype 1 relation matrix: supports accepts source idea or option and target idea, option, or decision. The Materializer enforces node-type combinations.",
+      "enum": [
+        "contains",
+        "has_option",
+        "supports",
+        "opposes",
+        "related_to"
+      ]
+    },
+    "idArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/id"
+      },
+      "uniqueItems": true
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "goal",
+        "status",
+        "created_at",
+        "started_at",
+        "ended_at",
+        "graph_revision"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "goal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/sessionStatus"
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "graph_revision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "transcriptEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "session_id",
+        "sequence",
+        "timestamp",
+        "speaker",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/id"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timestamp": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "speaker": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "utterance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "session_id",
+        "sequence",
+        "evidence_ids",
+        "text",
+        "started_at",
+        "ended_at"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/id"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "evidence_ids": {
+          "$ref": "#/$defs/idArray",
+          "minItems": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "started_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "ended_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "actionDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "description",
+        "owner",
+        "due_date",
+        "status"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "due_date": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/actionStatus"
+        }
+      }
+    },
+    "discussionNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "session_id",
+        "type",
+        "label",
+        "status",
+        "created_at",
+        "updated_at",
+        "source_event_ids",
+        "evidence_ids"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "$ref": "#/$defs/nodeType"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "$ref": "#/$defs/nodeStatus"
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "source_event_ids": {
+          "$ref": "#/$defs/idArray"
+        },
+        "evidence_ids": {
+          "$ref": "#/$defs/idArray"
+        },
+        "action": {
+          "$ref": "#/$defs/actionDetails"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "decision"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "candidate",
+                  "confirmed",
+                  "revoked",
+                  "archived"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "action"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "action"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "action"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source_node_id",
+        "target_node_id",
+        "type",
+        "source_event_ids"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "source_node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "target_node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "$ref": "#/$defs/edgeType"
+        },
+        "source_event_ids": {
+          "$ref": "#/$defs/idArray"
+        }
+      }
+    },
+    "currentTopic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primary_topic_id",
+        "mode",
+        "source_event_ids"
+      ],
+      "properties": {
+        "primary_topic_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "derived",
+            "human_corrected"
+          ]
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_event_ids": {
+          "$ref": "#/$defs/idArray"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "primary_topic_id": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "mode": {
+                "const": "derived"
+              }
+            }
+          }
+        }
+      ],
+      "description": "When the focused Topic is parked, primary_topic_id is null and the human override is cleared. Restoring a parked Node does not refocus it."
+    },
+    "discussionGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "revision",
+        "last_event_sequence",
+        "nodes",
+        "edges",
+        "current_topic"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/id"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_event_sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/discussionNode"
+          },
+          "uniqueItems": true
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge"
+          },
+          "uniqueItems": true
+        },
+        "current_topic": {
+          "$ref": "#/$defs/currentTopic"
+        }
+      }
+    }
+  }
+}

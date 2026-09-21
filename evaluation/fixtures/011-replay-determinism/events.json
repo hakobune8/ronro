@@ -1,0 +1,78 @@
+[
+  {
+    "event_id": "evt-001",
+    "session_id": "s-011",
+    "sequence": 1,
+    "event_type": "session_created",
+    "occurred_at": "2026-09-19T20:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {
+      "title": "Replay Determinism",
+      "goal": "Replay結果の完全一致を確認する"
+    }
+  },
+  {
+    "event_id": "evt-002",
+    "session_id": "s-011",
+    "sequence": 2,
+    "event_type": "session_started",
+    "occurred_at": "2026-09-19T20:00:00Z",
+    "actor": "system",
+    "source_evidence_ids": [],
+    "payload": {}
+  },
+  {
+    "event_id": "evt-003",
+    "session_id": "s-011",
+    "sequence": 3,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T20:00:03Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-001"],
+    "payload": {
+      "node_type": "topic",
+      "label": "MVPの中心価値"
+    }
+  },
+  {
+    "event_id": "evt-004",
+    "session_id": "s-011",
+    "sequence": 4,
+    "event_type": "topic_focus_changed",
+    "occurred_at": "2026-09-19T20:00:04Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-001"],
+    "payload": {
+      "topic_id": "node:s-011:evt-003",
+      "confidence": 0.94
+    }
+  },
+  {
+    "event_id": "evt-005",
+    "session_id": "s-011",
+    "sequence": 5,
+    "event_type": "node_detected",
+    "occurred_at": "2026-09-19T20:00:05Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-002"],
+    "payload": {
+      "node_type": "idea",
+      "label": "Mapを見ながら話せる"
+    }
+  },
+  {
+    "event_id": "evt-006",
+    "session_id": "s-011",
+    "sequence": 6,
+    "event_type": "relation_detected",
+    "occurred_at": "2026-09-19T20:00:06Z",
+    "actor": "analyzer",
+    "source_evidence_ids": ["evd-002"],
+    "payload": {
+      "source_node_id": "node:s-011:evt-003",
+      "target_node_id": "node:s-011:evt-005",
+      "relation_type": "contains"
+    }
+  }
+]

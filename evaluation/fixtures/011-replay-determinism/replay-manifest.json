@@ -1,0 +1,22 @@
+{
+  "event_stream_file": "events.json",
+  "runs": [
+    {
+      "run_id": "run-a",
+      "input": "events.json"
+    },
+    {
+      "run_id": "run-b",
+      "input": "events.json"
+    }
+  ],
+  "expected_output": "expected-final-graph.json",
+  "comparison": [
+    "semantic_graph",
+    "node_ids",
+    "edge_ids",
+    "revision",
+    "last_event_sequence",
+    "current_topic"
+  ]
+}

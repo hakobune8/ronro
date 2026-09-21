@@ -1,0 +1,26 @@
+[
+  {
+    "id": "evd-001",
+    "session_id": "s-001",
+    "sequence": 1,
+    "timestamp": "2026-09-19T10:00:01Z",
+    "speaker": "A",
+    "text": "MVPはDiscussion Mapを中心にしたいです"
+  },
+  {
+    "id": "evd-002",
+    "session_id": "s-001",
+    "sequence": 2,
+    "timestamp": "2026-09-19T10:00:02Z",
+    "speaker": "B",
+    "text": "文字起こしも必要ですよね"
+  },
+  {
+    "id": "evd-003",
+    "session_id": "s-001",
+    "sequence": 3,
+    "timestamp": "2026-09-19T10:00:03Z",
+    "speaker": "A",
+    "text": "必要ですが、中心価値ではないと思います"
+  }
+]

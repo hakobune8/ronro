@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>論路 — 論点図</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Yu Gothic", YuGothic, sans-serif;
+      --ink: #17202a;
+      --muted: #596a7b;
+      --line: #d9e1e9;
+      --canvas: #f5f8fb;
+      --panel: #ffffff;
+      --blue: #2563eb;
+      --blue-soft: #eaf2ff;
+      --amber: #a16207;
+      --amber-soft: #fffdf8;
+      --violet: #6d4bcc;
+      --violet-soft: #faf7ff;
+      --green: #18824b;
+      --green-soft: #f4fbf7;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; }
+    body { margin: 0; overflow: hidden; background: var(--canvas); color: var(--ink); }
+    .shared-shell { display: grid; grid-template-rows: 86px 46px minmax(0, 1fr) 54px; width: 100vw; height: 100vh; padding: 0 34px 18px; }
+    .shared-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+    .brand-name { font-size: 28px; font-weight: 780; letter-spacing: -.03em; white-space: nowrap; }
+    .brand-goal { color: var(--muted); font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .shared-status { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; padding: 10px 15px; border: 1px solid #cbd7e3; border-radius: 999px; background: #fff; color: #36516d; font-size: 18px; line-height: 1.4; font-weight: 700; }
+    .shared-status.busy { border-color: #e6c778; background: var(--amber-soft); color: #8a5b07; }
+    .shared-status.updated { border-color: #a9d8bd; background: var(--green-soft); color: #146b3d; }
+    .shared-status.delayed { border-color: #e6b0a6; background: #fff4f1; color: #9d3528; }
+    .flow-band { display: flex; align-items: center; gap: 16px; min-width: 0; border-bottom: 1px solid var(--line); color: var(--muted); }
+    .flow-title { flex: 0 0 auto; font-size: 20px; font-weight: 750; white-space: nowrap; }
+    .flow-list { display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
+    .flow-item { flex: 0 0 auto; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 2px 6px; border-bottom: 2px solid transparent; border-radius: 3px; background: transparent; color: #40586f; font-size: 20px; line-height: 1.4; }
+    .flow-item.current { border-bottom-color: #9bb9eb; color: #174ea6; font-weight: 750; }
+    .flow-item.ellipsis { max-width: 28px; color: #728496; font-size: 22px; letter-spacing: .08em; }
+    .flow-arrow { flex: 0 0 auto; color: #728496; font-size: 22px; }
+    .shared-main { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 24px; min-height: 0; padding: 24px 0 18px; }
+    .topic-hero { display: flex; min-width: 0; min-height: 0; flex-direction: column; justify-content: space-between; padding: 34px 38px 28px; border: 1px solid #bcd2f3; border-radius: 20px; background: linear-gradient(145deg, #ffffff 0%, #f8fbff 100%); box-shadow: 0 8px 24px rgba(45, 77, 112, .05); }
+    .topic-kicker { color: var(--blue); font-size: 20px; font-weight: 750; letter-spacing: .02em; }
+    .topic-title { max-width: 1000px; margin: 12px 0 28px; font-size: 60px; font-weight: 800; letter-spacing: -.045em; line-height: 1.15; overflow-wrap: anywhere; }
+    .topic-items { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-content: start; max-width: 1080px; }
+    .topic-item { min-height: 82px; padding: 16px 18px; border: 1px solid #d3deea; border-radius: 13px; background: #fff; color: #273d52; font-size: 24px; font-weight: 650; line-height: 1.42; overflow-wrap: anywhere; }
+    .topic-item.idea { border-left: 4px solid #8ea3b8; }
+    .topic-item.option { border-left: 4px solid #8c9bd0; }
+    .topic-item.concern { border-left: 4px solid #c29a52; background: #fffefa; }
+    .topic-empty { padding: 18px 20px; border: 1px dashed #c6d4e2; border-radius: 12px; color: var(--muted); font-size: 20px; line-height: 1.45; }
+    .topic-more { grid-column: 1 / -1; padding: 2px 4px; color: #53697d; font-size: 18px; line-height: 1.4; }
+    .past-section { margin-top: 22px; }
+    .section-label { margin-bottom: 9px; color: #4f6374; font-size: 18px; font-weight: 750; }
+    .past-topics { display: flex; flex-wrap: wrap; gap: 9px; }
+    .past-topic { padding: 8px 14px; border: 1px solid #d4dee8; border-radius: 999px; background: #f7f9fb; color: #53697d; font-size: 18px; line-height: 1.4; }
+    .side-stack { display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 14px; min-height: 0; }
+    .side-card { min-height: 0; overflow: hidden; padding: 22px 24px; border: 1px solid #dfe5eb; border-left-width: 4px; border-radius: 14px; background: #fff; box-shadow: none; }
+    .side-card h2 { margin: 0 0 7px; font-size: 26px; line-height: 1.2; letter-spacing: -.02em; }
+    .side-card.candidate { border-left-color: #c8a14d; }
+    .side-card.open { border-left-color: #9b87d2; }
+    .side-card.action { border-left-color: #79b28f; }
+    .side-subtitle { margin-bottom: 12px; color: #5f6f7e; font-size: 18px; line-height: 1.4; }
+    .candidate .side-subtitle { color: #876d2c; }
+    .side-list { display: flex; flex-direction: column; gap: 9px; margin: 0; padding: 0; list-style: none; }
+    .side-list li { display: flex; gap: 10px; align-items: flex-start; color: #293e52; font-size: 22px; font-weight: 650; line-height: 1.42; overflow-wrap: anywhere; }
+    .side-list li::before { flex: 0 0 auto; font-size: 22px; line-height: 1.42; }
+    .candidate .side-list li::before { content: "◇"; color: var(--amber); }
+    .open .side-list li::before { content: "?"; color: var(--violet); font-weight: 800; }
+    .action .side-list li::before { content: "→"; color: var(--green); font-weight: 800; }
+    .confirmed-line { margin-bottom: 12px; color: #176b3d; font-size: 20px; line-height: 1.4; font-weight: 700; }
+    .confirmed-line::before { content: "✓ "; }
+    .side-empty { color: var(--muted); font-size: 20px; line-height: 1.45; }
+    .more-hint { color: #53697d !important; font-size: 18px !important; font-weight: 600 !important; }
+    .more-hint::before { content: none !important; }
+    .parking-line { margin-top: 16px; padding: 10px 13px; border-top: 1px solid #d5dde5; color: #53697d; font-size: 18px; line-height: 1.45; }
+    .shared-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--line); color: var(--muted); }
+    .footer-note { font-size: 18px; line-height: 1.45; }
+    .footer-status { flex: 0 0 auto; font-size: 18px; opacity: .45; }
+    .error-state { grid-column: 1 / -1; display: grid; place-items: center; min-height: 240px; border: 1px dashed #c7d3df; border-radius: 18px; color: var(--muted); font-size: 22px; text-align: center; }
+    html.capture-1920, html.capture-1920 body { width: 1920px; height: 1080px; min-width: 1920px; min-height: 1080px; }
+    html.capture-1920 .shared-shell { width: 1920px; height: 1080px; }
+    @media (max-width: 1350px) {
+      .shared-shell { padding-left: 22px; padding-right: 22px; }
+      .shared-main { grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
+      .topic-hero { padding: 28px; }
+      .topic-item { font-size: 22px; }
+      .side-list li { font-size: 20px; }
+    }
+    html.capture-1920 .shared-shell { padding-left: 34px; padding-right: 34px; }
+    html.capture-1920 .shared-main { grid-template-columns: minmax(0, 1fr) 420px; gap: 24px; }
+    html.capture-1920 .topic-hero { padding: 34px 38px 28px; }
+    html.capture-1920 .topic-item { font-size: 24px; }
+    html.capture-1920 .side-list li { font-size: 22px; }
+  </style>
+</head>
+<body>
+  <div class="shared-shell" aria-label="論点図">
+    <header class="shared-header">
+      <div class="brand">
+        <div class="brand-name">論路</div>
+        <div class="brand-goal" id="session-goal">議論の現在地を共有する</div>
+      </div>
+      <div id="shared-status" class="shared-status">● 待機中</div>
+    </header>
+    <div class="flow-band">
+      <div class="flow-title">話の流れ</div>
+      <div class="flow-list" id="flow-list"><span class="side-empty">議論が始まると表示されます</span></div>
+    </div>
+    <main class="shared-main" id="shared-main">
+      <section class="topic-hero">
+        <div>
+          <div class="topic-kicker">今話していること</div>
+          <h1 class="topic-title" id="current-topic">議論の現在地を整理しています</h1>
+          <div class="topic-items" id="topic-items"></div>
+        </div>
+        <div class="past-section">
+          <div class="section-label">これまでに話したこと</div>
+          <div class="past-topics" id="past-topics"></div>
+        </div>
+      </section>
+      <aside class="side-stack">
+        <section class="side-card candidate">
+          <h2>決定候補</h2>
+          <div class="side-subtitle">まだ確定ではありません</div>
+          <div class="confirmed-line" id="confirmed-list" hidden></div>
+          <ul class="side-list" id="candidate-list"></ul>
+        </section>
+        <section class="side-card open">
+          <h2>未解決事項</h2>
+          <ul class="side-list" id="open-list"></ul>
+        </section>
+        <section class="side-card action">
+          <h2>次の対応</h2>
+          <ul class="side-list" id="action-list"></ul>
+          <div class="parking-line" id="parking-line" hidden></div>
+        </section>
+      </aside>
+    </main>
+    <footer class="shared-footer">
+      <div class="footer-note">普段どおりに話してください。論点図は議論とともに更新されます。</div>
+      <div class="footer-status" id="footer-status">共有画面</div>
+    </footer>
+  </div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const demoFixture = params.get('fixture');
+    const demoSequence = params.get('sequence');
+    if (params.get('viewport') === '1920x1080') document.documentElement.classList.add('capture-1920');
+    const $ = (id) => document.getElementById(id);
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+    }
+    function nodeById(graph, id) { return (graph?.nodes || []).find((node) => node.id === id); }
+    function activeNode(node) { return node && !['archived', 'revoked', 'resolved', 'completed'].includes(node.status); }
+    function labelForNode(node) { return node?.label || ''; }
+    function uniqueNodes(nodes) { return Array.from(new Map(nodes.filter(Boolean).map((node) => [node.id, node])).values()); }
+
+    function statusFor(snapshot, isDemo) {
+      if (isDemo) return { text: '● 更新しました', className: 'updated' };
+      const live = snapshot?.live_state || {};
+      const state = live.runtime_state || 'idle';
+      if (live.error || live.queue?.delayed_state === 'critical') return { text: '● 遅れています', className: 'delayed' };
+      if (state === 'finalizing') return { text: '● 仕上げています', className: 'busy' };
+      if (['capturing', 'active', 'connected'].includes(state)) {
+        if (live.analyzer_status === 'analyzing' || live.stt_state === 'committing') return { text: '● 整理中…', className: 'busy' };
+        return { text: '● 聞いています', className: '' };
+      }
+      if (state === 'ended' || state === 'ended_with_incomplete_processing') return { text: '● 更新しました', className: 'updated' };
+      return { text: '● 待機中', className: '' };
+    }
+
+    function renderList(element, nodes, emptyText, limit = 3) {
+      const all = uniqueNodes(nodes);
+      const values = all.slice(0, limit);
+      const remaining = Math.max(0, all.length - values.length);
+      element.innerHTML = values.length
+        ? values.map((node) => `<li>${escapeHtml(labelForNode(node))}</li>`).join('')
+          + (remaining ? `<li class="more-hint">＋ほか${remaining}件</li>` : '')
+        : `<li class="side-empty">${escapeHtml(emptyText)}</li>`;
+    }
+
+    function renderShared(snapshot, isDemo = false) {
+      const graph = snapshot?.state?.graph;
+      const map = snapshot?.map;
+      if (!graph || !map) {
+        $('current-topic').textContent = '議論の現在地を整理しています';
+        $('topic-items').innerHTML = '<div class="topic-empty">発言が整理されると、ここに現在のトピックが表示されます。</div>';
+        $('past-topics').innerHTML = '';
+        renderList($('candidate-list'), [], 'まだありません', 2);
+        renderList($('open-list'), [], 'まだありません');
+        renderList($('action-list'), [], 'まだありません', 1);
+        $('parking-line').hidden = true;
+        return;
+      }
+      $('session-goal').textContent = snapshot.state.session?.goal || '議論の現在地を共有する';
+      const currentId = graph.current_topic?.primary_topic_id;
+      const current = nodeById(graph, currentId);
+      $('current-topic').textContent = current?.label || '現在のトピックを整理しています';
+
+      const nodes = (graph.nodes || []).filter(activeNode);
+      const currentLane = (map.lanes || []).find((lane) => lane.current);
+      const currentLaneNodes = currentLane
+        ? currentLane.node_ids.map((id) => nodeById(graph, id)).filter(activeNode)
+        : [];
+      const currentLaneIds = new Set(currentLaneNodes.map((node) => node.id));
+      const currentFirst = (items) => [
+        ...items.filter((node) => currentLaneIds.has(node.id)),
+        ...items.filter((node) => !currentLaneIds.has(node.id)),
+      ];
+      const allTopicItems = currentLaneNodes.filter((node) => ['idea', 'option', 'concern'].includes(node.type));
+      const topicItems = allTopicItems.slice(0, 6);
+      const topicRemaining = Math.max(0, allTopicItems.length - topicItems.length);
+      $('topic-items').innerHTML = topicItems.length
+        ? topicItems.map((node) => `<div class="topic-item ${escapeHtml(node.type)}">${escapeHtml(node.label)}</div>`).join('')
+          + (topicRemaining ? `<div class="topic-more">＋ほか${topicRemaining}件</div>` : '')
+        : '<div class="topic-empty">このトピックの内容が整理されると、ここに表示されます。</div>';
+
+      const currentTopicIds = new Set((map.lanes || []).filter((lane) => lane.current).flatMap((lane) => lane.node_ids));
+      const pastTopics = nodes.filter((node) => node.type === 'topic' && node.id !== currentId && !currentTopicIds.has(node.id) && node.status !== 'parked').slice(-5);
+      $('past-topics').innerHTML = pastTopics.length
+        ? pastTopics.map((node) => `<span class="past-topic">${escapeHtml(node.label)}</span>`).join('')
+        : '<span class="side-empty">まだありません</span>';
+
+      const decisions = nodes.filter((node) => node.type === 'decision');
+      const confirmed = decisions.filter((node) => node.status === 'confirmed');
+      const candidates = decisions.filter((node) => node.status === 'candidate');
+      const confirmedLine = $('confirmed-list');
+      if (confirmed.length) {
+        confirmedLine.hidden = false;
+        confirmedLine.textContent = confirmed.slice(0, 1).map(labelForNode).join(' / ');
+      } else {
+        confirmedLine.hidden = true;
+        confirmedLine.textContent = '';
+      }
+      renderList($('candidate-list'), currentFirst(candidates), 'まだありません', 2);
+      renderList($('open-list'), currentFirst(nodes.filter((node) => node.type === 'open_item' && node.status === 'active')), 'まだありません');
+      renderList($('action-list'), currentFirst(nodes.filter((node) => node.type === 'action' && !['archived', 'completed'].includes(node.status))), 'まだありません', 2);
+
+      const parked = nodes.filter((node) => node.status === 'parked' || (map.lanes || []).some((lane) => lane.kind === 'parking' && lane.node_ids.includes(node.id)));
+      const parkingLine = $('parking-line');
+      parkingLine.hidden = !parked.length;
+      parkingLine.textContent = parked.length ? `あとで話すこと：${parked.slice(0, 2).map(labelForNode).join('、')}` : '';
+
+      const allFlow = map.recent_flow || [];
+      const flow = allFlow.length > 6 ? [{ label: '…', ellipsis: true }, ...allFlow.slice(-6)] : allFlow;
+      $('flow-list').innerHTML = flow.length
+        ? flow.map((item, index) => `${index ? '<span class="flow-arrow">→</span>' : ''}<span class="flow-item${item.ellipsis ? ' ellipsis' : ''}${item.label === current?.label ? ' current' : ''}">${escapeHtml(item.label)}</span>`).join('')
+        : '<span class="side-empty">議論が始まると表示されます</span>';
+      const status = statusFor(snapshot, isDemo);
+      $('shared-status').textContent = status.text;
+      $('shared-status').className = `shared-status ${status.className}`;
+      $('footer-status').textContent = '';
+    }
+
+    async function fetchDemo() {
+      const fixture = encodeURIComponent(demoFixture || '001');
+      const query = demoSequence === null ? '?mode=events' : `?mode=events&sequence=${encodeURIComponent(demoSequence)}`;
+      const response = await fetch(`/api/sessions/${fixture}${query}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('demo snapshot unavailable');
+      return response.json();
+    }
+
+    async function fetchLive() {
+      const response = await fetch('/api/live', { cache: 'no-store' });
+      if (!response.ok) throw new Error('live snapshot unavailable');
+      return response.json();
+    }
+
+    async function refresh() {
+      try {
+        const snapshot = demoFixture ? await fetchDemo() : await fetchLive();
+        renderShared(snapshot, Boolean(demoFixture));
+      } catch (_) {
+        if (!demoFixture) renderShared(null, false);
+      }
+    }
+    refresh();
+    if (!demoFixture) window.setInterval(refresh, 1000);
+  </script>
+</body>
+</html>
