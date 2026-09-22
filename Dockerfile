@@ -27,6 +27,11 @@ COPY prototype ./prototype
 COPY schemas ./schemas
 COPY evaluation/fixtures ./evaluation/fixtures
 
+# The developer UI expects the excluded real-analyzer dataset directory to
+# exist at startup. Keep the dataset out of the public image while preserving
+# a valid empty runtime directory for the live application.
+RUN mkdir -p /app/evaluation/real-analyzer
+
 RUN chown -R appuser:appuser /app
 
 USER 10001:10001

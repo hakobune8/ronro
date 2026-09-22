@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 
 from prototype.live_stt import (
+    DEFAULT_KEYWORDS,
+    DEFAULT_STT_PROMPT,
     DEFAULT_STT_MODEL,
     RealtimeSTTConfig,
     adapt_realtime_event,
@@ -33,6 +35,29 @@ class LiveSTTAdapterTests(unittest.TestCase):
         self.assertEqual(build_append_event(b"\x00\x00")['type'], "input_audio_buffer.append")
         self.assertEqual(build_commit_event()["type"], "input_audio_buffer.commit")
 
+    def test_default_realtime_context_is_generic_and_not_demo_seeded(self) -> None:
+        self.assertIn("忠実に文字起こし", DEFAULT_STT_PROMPT)
+        self.assertIn("補完しない", DEFAULT_STT_PROMPT)
+        self.assertNotIn("Discussion Map AI Facilitator", DEFAULT_STT_PROMPT)
+        self.assertNotIn("MVP", DEFAULT_STT_PROMPT)
+        self.assertEqual(DEFAULT_KEYWORDS, ("論路",))
+
+    def test_provider_identifiers_are_preserved_when_available(self) -> None:
+        event = adapt_realtime_event(
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "event_id": "evt-1",
+                "item_id": "item-1",
+                "transcript_id": "transcript-1",
+                "commit_id": "commit-1",
+                "transcript": "会議の音声を確認します",
+            }
+        )
+        self.assertEqual(event["event_id"], "evt-1")
+        self.assertEqual(event["item_id"], "item-1")
+        self.assertEqual(event["transcript_id"], "transcript-1")
+        self.assertEqual(event["commit_id"], "commit-1")
+
     def test_partial_event_is_runtime_only(self) -> None:
         value = adapt_realtime_event({
             "type": "conversation.item.input_audio_transcription.delta",
@@ -46,6 +71,7 @@ class LiveSTTAdapterTests(unittest.TestCase):
         seen: set[str] = set()
         raw = {
             "type": "conversation.item.input_audio_transcription.completed",
+            "event_id": "evt-1",
             "item_id": "item-1",
             "transcript": "Discussion Mapを中心に検討します",
         }

@@ -22,8 +22,8 @@ data:
   OPENAI_REALTIME_STT_MODEL: gpt-transcribe
   OPENAI_REALTIME_LANGUAGE: ja
   OPENAI_REALTIME_TIMEOUT_SECONDS: "45"
-  OPENAI_REALTIME_PROMPT: "日本語の技術会議。Discussion Map AI FacilitatorのMVPについて、Discussion Map、Visual Artifact、Current Topic、STT、AI Analyzer、Candidate Decision、Open Item、Action Item、Parking Lotが話題になります。"
-  OPENAI_REALTIME_KEYWORDS: '["Discussion Map","MVP","Visual Artifact","Current Topic","STT","GPT-5.6 Luna","Candidate Decision","Open Item","Action Item","Parking Lot"]'
+  OPENAI_REALTIME_PROMPT: "日本語の会議・打ち合わせの音声です。発話内容を忠実に文字起こしし、音声として確認できない内容を補完しないでください。"
+  OPENAI_REALTIME_KEYWORDS: '["論路"]'
 
   REAL_ANALYZER_MODEL: gpt-5.6-luna
   REAL_ANALYZER_REASONING_EFFORT: medium

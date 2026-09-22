@@ -782,6 +782,22 @@ class LiveSessionManager:
             session.accept_audio_chunk(chunk)
             return session.snapshot()
 
+    def record_audio_diagnostics(self, metadata: Mapping[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            session = self._require()
+            recorder = getattr(session, "record_audio_diagnostics", None)
+            if recorder is not None:
+                recorder(metadata)
+            return session.snapshot()
+
+    def record_transport_diagnostics(self, metadata: Mapping[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            session = self._require()
+            recorder = getattr(session, "record_transport_diagnostics", None)
+            if recorder is not None:
+                recorder(metadata)
+            return session.snapshot()
+
     def record_partial(self, text: str) -> dict[str, Any]:
         with self._lock:
             session = self._require()

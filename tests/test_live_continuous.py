@@ -178,6 +178,49 @@ class LiveContinuousSessionTests(unittest.TestCase):
         self.assertIsNotNone(completed_item["map_rendered_at"])
         self.assertIsNotNone(completed_item["end_to_end_seconds"])
 
+    def test_audio_and_provider_metadata_are_correlated_without_raw_audio(self) -> None:
+        self.session = make_session()
+        activate(self.session)
+        self.session.record_audio_diagnostics(
+            {
+                "track_label": "BlackHole 2ch",
+                "kind": "audio",
+                "ready_state": "live",
+                "muted": False,
+                "enabled": True,
+                "sample_rate": 48_000,
+                "channel_count": 2,
+                "device_id_present": True,
+                "device_id": "must-not-be-retained",
+            }
+        )
+        self.session.record_transport_diagnostics({"connection_id": "stt-conn-test"})
+        self.session.accept_audio_chunk(
+            AudioChunk(sequence=0, audio_start_seconds=0.0, pcm16le=b"\x00\x00" * 240)
+        )
+        snapshot = self.session.process_final_transcript(
+            raw_text="音声経路を確認します",
+            item_id="item-7",
+            provider_event={
+                "type": "final_transcript",
+                "item_id": "item-7",
+                "event_id": "evt-7",
+                "transcript_id": "transcript-7",
+                "commit_id": "provider-commit-7",
+                "_transport": {"connection_id": "stt-conn-test", "local_commit_sequence": 1},
+            },
+        )
+        trace = snapshot["live_state"]["evidence_traces"][0]
+        self.assertEqual(trace["audio_connection_id"], "stt-conn-test")
+        self.assertEqual(trace["audio_frame_sequence_start"], 0)
+        self.assertEqual(trace["audio_frame_sequence_end"], 0)
+        self.assertEqual(trace["provider_item_id"], "item-7")
+        self.assertEqual(trace["provider_event_id"], "evt-7")
+        self.assertEqual(trace["provider_transcript_id"], "transcript-7")
+        self.assertEqual(trace["provider_commit_id"], "provider-commit-7")
+        self.assertEqual(trace["local_commit_sequence"], 1)
+        self.assertNotIn("device_id", snapshot["live_state"]["audio_diagnostics"])
+
     def test_human_command_renders_immediately(self) -> None:
         self.session = make_session()
         activate(self.session)

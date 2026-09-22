@@ -119,6 +119,13 @@ The API key is injected only into the backend container through `envFrom`. It is
 
 `deploy/kubernetes/base/configmap.yaml` contains non-secret runtime configuration. Model, prompt, terminology, language, timeout, configuration version, PVC paths, and presentation settings are visible by design.
 
+The Realtime STT prompt is a short generic Japanese meeting context. It is an
+audio-recognition hint only: it must not contain a demo scenario, expected
+transcript, analyzer semantics, or evaluation answers. `OPENAI_REALTIME_KEYWORDS`
+is reserved for a small terminology hint list; it must not be used to seed
+sentences or topic content. The current pilot baseline uses `論路` as the only
+product terminology hint.
+
 ## Storage
 
 The PVC `discussion-map-pilot-evaluation` requests 1Gi with `ReadWriteOnce`. It is used for:

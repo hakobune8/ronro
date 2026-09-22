@@ -46,6 +46,9 @@ class LiveWebSocketGateway:
             await connection.send(_json({"type": "runtime_snapshot", "snapshot": snapshot}))
             provider = OpenAIRealtimeTranscriptionClient(self.stt_config)
             await provider.connect()
+            diagnostic_context = getattr(provider, "diagnostic_context", None)
+            if callable(diagnostic_context):
+                self.manager.record_transport_diagnostics(diagnostic_context())
             await connection.send(_json({"type": "stt_connected", "config": self.stt_config.public_dict()}))
             if getattr(session, "mode", "one_utterance") == "continuous":
                 snapshot = self.manager.activate()
@@ -102,7 +105,13 @@ class LiveWebSocketGateway:
             if message is None:
                 return
             if not isinstance(message, bytes):
-                await self._safe_send(connection, {"type": "error", "code": "unexpected_control_message", "message": "Audio WebSocket accepts binary audio frames only"})
+                control = self._parse_control_message(message)
+                if control.get("type") == "audio_diagnostics":
+                    track = control.get("track", {})
+                    snapshot = self.manager.record_audio_diagnostics(track if isinstance(track, dict) else {})
+                    await self._safe_send(connection, {"type": "audio_diagnostics_recorded", "snapshot": snapshot})
+                else:
+                    await self._safe_send(connection, {"type": "error", "code": "unexpected_control_message", "message": "Supported controls are audio_diagnostics"})
                 continue
             chunk = decode_audio_frame(message)
             snapshot = self.manager.accept_chunk(chunk)
@@ -143,7 +152,7 @@ class LiveWebSocketGateway:
                 snapshot = self.manager.process_final(
                     raw_text=str(event["text"]),
                     item_id=event.get("item_id"),
-                    provider_event=event,
+                    provider_event=self._with_transport_diagnostics(event, provider),
                 )
                 await self._safe_send(connection, {"type": "live_complete", "snapshot": snapshot})
                 return
@@ -224,7 +233,11 @@ class LiveWebSocketGateway:
                     else:
                         control = self._parse_control_message(message)
                         control_type = control.get("type")
-                        if control_type == "commit" and not stop_seen and not commit_pending:
+                        if control_type == "audio_diagnostics":
+                            track = control.get("track", {})
+                            snapshot = self.manager.record_audio_diagnostics(track if isinstance(track, dict) else {})
+                            await self._safe_send(connection, {"type": "audio_diagnostics_recorded", "snapshot": snapshot})
+                        elif control_type == "commit" and not stop_seen and not commit_pending:
                             commit_pending = await self._request_continuous_commit(provider, connection)
                         elif control_type == "stop" and not stop_seen:
                             self.manager.request_stop(controller_id=controller_id)
@@ -233,7 +246,7 @@ class LiveWebSocketGateway:
                             if not commit_pending:
                                 self.manager.mark_stt_finalization_complete()
                         elif control_type not in {"commit", "stop"}:
-                            await self._safe_send(connection, {"type": "error", "code": "unexpected_control_message", "message": "Supported controls are commit and stop"})
+                            await self._safe_send(connection, {"type": "error", "code": "unexpected_control_message", "message": "Supported controls are audio_diagnostics, commit and stop"})
 
                 if provider_task in done:
                     event = provider_task.result()
@@ -247,7 +260,7 @@ class LiveWebSocketGateway:
                         snapshot = self.manager.process_final(
                             raw_text=str(event["text"]),
                             item_id=event.get("item_id"),
-                            provider_event=event,
+                            provider_event=self._with_transport_diagnostics(event, provider),
                         )
                         await self._safe_send(connection, {"type": "final_transcript", "text": event["text"], "snapshot": snapshot})
                         had_commit = commit_pending
@@ -285,6 +298,17 @@ class LiveWebSocketGateway:
     async def _drain_and_send(self, connection: ServerConnection, *, allow_without_stt: bool = False) -> None:
         snapshot = await asyncio.to_thread(self.manager.drain, allow_without_stt=allow_without_stt)
         await self._safe_send(connection, {"type": "session_ended", "snapshot": snapshot})
+
+    @staticmethod
+    def _with_transport_diagnostics(
+        event: dict[str, Any],
+        provider: OpenAIRealtimeTranscriptionClient,
+    ) -> dict[str, Any]:
+        value = dict(event)
+        diagnostic_context = getattr(provider, "diagnostic_context", None)
+        if callable(diagnostic_context):
+            value["_transport"] = diagnostic_context()
+        return value
 
     async def _send_coalesced_render(self, connection: ServerConnection) -> None:
         snapshot = self.manager.poll_render()

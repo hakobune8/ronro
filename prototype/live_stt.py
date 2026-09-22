@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Protocol
 
@@ -23,21 +24,11 @@ except ImportError:  # pragma: no cover - exercised only before dependency insta
 DEFAULT_REALTIME_ENDPOINT = "wss://api.openai.com/v1/realtime?intent=transcription"
 DEFAULT_STT_MODEL = "gpt-transcribe"
 DEFAULT_STT_PROMPT = (
-    "日本語の技術会議。Discussion Map AI FacilitatorのMVPについて、"
-    "Discussion Map、Visual Artifact、Current Topic、STT、AI Analyzer、"
-    "Candidate Decision、Open Item、Action Item、Parking Lotが話題になります。"
+    "日本語の会議・打ち合わせの音声です。"
+    "発話内容を忠実に文字起こしし、音声として確認できない内容を補完しないでください。"
 )
 DEFAULT_KEYWORDS = (
-    "Discussion Map",
-    "MVP",
-    "Visual Artifact",
-    "Current Topic",
-    "STT",
-    "GPT-5.6 Luna",
-    "Candidate Decision",
-    "Open Item",
-    "Action Item",
-    "Parking Lot",
+    "論路",
 )
 
 
@@ -165,6 +156,7 @@ def adapt_realtime_event(raw: Mapping[str, Any], *, seen_final_item_ids: set[str
             "type": "partial_transcript",
             "text": str(raw.get("delta", "")),
             "item_id": raw.get("item_id"),
+            "event_id": raw.get("event_id"),
             "raw_type": event_type,
         }
     if event_type == "conversation.item.input_audio_transcription.completed":
@@ -173,6 +165,7 @@ def adapt_realtime_event(raw: Mapping[str, Any], *, seen_final_item_ids: set[str
             return {
                 "type": "duplicate_final",
                 "item_id": item_id,
+                "event_id": raw.get("event_id"),
                 "raw_type": event_type,
             }
         if seen_final_item_ids is not None and item_id:
@@ -183,12 +176,17 @@ def adapt_realtime_event(raw: Mapping[str, Any], *, seen_final_item_ids: set[str
                 "type": "stt_error",
                 "code": "empty_final_transcript",
                 "message": "Provider completed a turn without transcript text",
+                "item_id": raw.get("item_id"),
+                "event_id": raw.get("event_id"),
                 "raw_type": event_type,
             }
         return {
             "type": "final_transcript",
             "text": transcript.strip(),
             "item_id": raw.get("item_id"),
+            "event_id": raw.get("event_id"),
+            "transcript_id": raw.get("transcript_id"),
+            "commit_id": raw.get("commit_id"),
             "languages": raw.get("languages", []),
             "usage": raw.get("usage"),
             "raw_type": event_type,
@@ -228,6 +226,11 @@ class OpenAIRealtimeTranscriptionClient:
         self.config = config
         self._connection: Any = None
         self._seen_final_item_ids: set[str] = set()
+        # Local diagnostic identity. This is intentionally distinct from any
+        # provider identifier and is safe to expose in a private evaluation
+        # artifact without persisting audio or credentials.
+        self.connection_id = f"stt-conn-{uuid.uuid4().hex[:12]}"
+        self._commit_sequence = 0
 
     async def connect(self) -> None:
         if connect is None:  # pragma: no cover
@@ -264,7 +267,16 @@ class OpenAIRealtimeTranscriptionClient:
         await self._send(build_append_event(pcm16le))
 
     async def commit(self) -> None:
+        self._commit_sequence += 1
         await self._send(build_commit_event())
+
+    def diagnostic_context(self) -> dict[str, Any]:
+        """Return non-secret local metadata for correlating provider events."""
+
+        return {
+            "connection_id": self.connection_id,
+            "local_commit_sequence": self._commit_sequence,
+        }
 
     async def receive_until_final(self) -> list[dict[str, Any]]:
         if self._connection is None:
