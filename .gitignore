@@ -42,3 +42,7 @@ evaluation/**/*.mp3
 evaluation/stt/
 evaluation/runs/
 evaluation/rescored/
+
+# Evaluation-only official-playback loopback runner output and dependencies
+evaluation/real-world/t1a-auto/runtime/
+evaluation/real-world/t1a-auto/node_modules/

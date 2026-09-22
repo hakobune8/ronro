@@ -119,6 +119,19 @@ The API key is injected only into the backend container through `envFrom`. It is
 
 `deploy/kubernetes/base/configmap.yaml` contains non-secret runtime configuration. Model, prompt, terminology, language, timeout, configuration version, PVC paths, and presentation settings are visible by design.
 
+The Realtime STT prompt is a short generic Japanese meeting context. It is an
+audio-recognition hint only: it must not contain a demo scenario, expected
+transcript, analyzer semantics, or evaluation answers. `OPENAI_REALTIME_KEYWORDS`
+is reserved for a small terminology hint list; the Pilot candidate uses `論路`
+as the only product terminology hint.
+
+The generic code default remains `OPENAI_REALTIME_FINALIZATION_MODE=none` for
+compatibility. The validated Pilot candidate explicitly selects
+`OPENAI_REALTIME_FINALIZATION_MODE=server_vad_bounded` and
+`OPENAI_REALTIME_PERIODIC_COMMIT_SECONDS=30`. Provider `server_vad` handles
+normal turns; the bound is only a safety fallback for a long unfinalized turn.
+Keep the `none` mode available for non-Pilot usage and experiments.
+
 ## Storage
 
 The PVC `discussion-map-pilot-evaluation` requests 1Gi with `ReadWriteOnce`. It is used for:
@@ -269,6 +282,12 @@ Record these values in the Pilot artifact and release note before Pilot #1:
 - reasoning `medium`
 
 ## Known limitations
+
+Long continuous turns can make the bounded fallback exceed the normal live
+latency target. The validation reference was p50 9.063 seconds and p95
+13.838 seconds. Record VAD, bounded-fallback, and session-end boundary counts
+and maximum unfinalized duration during a Pilot; do not retune thresholds
+automatically during the session.
 
 - Current cluster access is not authorized from this workstation, so this pass could not verify cluster-specific Ingress/TLS/StorageClass/registry values.
 - Container runtime is not running locally, so an image build/push could not be executed here.

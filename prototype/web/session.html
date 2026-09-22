@@ -198,6 +198,23 @@
       if (!stream) {
         stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       }
+      const track = stream.getAudioTracks()[0];
+      if (track && socket?.readyState === WebSocket.OPEN) {
+        const settings = track.getSettings ? track.getSettings() : {};
+        socket.send(JSON.stringify({
+          type: 'audio_diagnostics',
+          track: {
+            track_label: track.label || null,
+            kind: track.kind || null,
+            ready_state: track.readyState || null,
+            muted: Boolean(track.muted),
+            enabled: Boolean(track.enabled),
+            sample_rate: settings.sampleRate || null,
+            channel_count: settings.channelCount || null,
+            device_id_present: Boolean(settings.deviceId),
+          },
+        }));
+      }
       context = new AudioContext();
       await context.resume();
       await context.audioWorklet.addModule('/static/live-audio-worklet.js');

@@ -1,0 +1,13 @@
+{
+  "name": "ronro-t1a-auto-evaluation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preflight": "node runner.mjs --mode preflight",
+    "sanity": "node runner.mjs --mode sanity",
+    "t1a": "node runner.mjs --mode t1-a --confirm-15-minute-run"
+  },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Protocol
 
@@ -23,22 +24,13 @@ except ImportError:  # pragma: no cover - exercised only before dependency insta
 DEFAULT_REALTIME_ENDPOINT = "wss://api.openai.com/v1/realtime?intent=transcription"
 DEFAULT_STT_MODEL = "gpt-transcribe"
 DEFAULT_STT_PROMPT = (
-    "日本語の技術会議。Discussion Map AI FacilitatorのMVPについて、"
-    "Discussion Map、Visual Artifact、Current Topic、STT、AI Analyzer、"
-    "Candidate Decision、Open Item、Action Item、Parking Lotが話題になります。"
+    "日本語の会議・打ち合わせの音声です。"
+    "発話内容を忠実に文字起こしし、音声として確認できない内容を補完しないでください。"
 )
 DEFAULT_KEYWORDS = (
-    "Discussion Map",
-    "MVP",
-    "Visual Artifact",
-    "Current Topic",
-    "STT",
-    "GPT-5.6 Luna",
-    "Candidate Decision",
-    "Open Item",
-    "Action Item",
-    "Parking Lot",
+    "論路",
 )
+FINALIZATION_MODES = frozenset({"none", "server_vad", "semantic_vad", "bounded", "server_vad_bounded"})
 
 
 class RealtimeSTTFailure(RuntimeError):
@@ -59,6 +51,12 @@ class RealtimeSTTConfig:
     prompt: str | None
     keywords: tuple[str, ...]
     timeout_seconds: float
+    finalization_mode: str = "none"
+    vad_threshold: float = 0.5
+    vad_prefix_padding_ms: int = 300
+    vad_silence_duration_ms: int = 500
+    semantic_vad_eagerness: str = "auto"
+    periodic_commit_seconds: float = 30.0
 
     @classmethod
     def from_environment(cls) -> "RealtimeSTTConfig":
@@ -78,6 +76,38 @@ class RealtimeSTTConfig:
             timeout = float(timeout_raw)
         except ValueError:
             timeout = 45.0
+        finalization_mode = _parse_finalization_mode(
+            os.getenv("OPENAI_REALTIME_FINALIZATION_MODE")
+            or os.getenv("LIVE_STT_FINALIZATION_MODE")
+            or "none"
+        )
+        vad_threshold = _bounded_float(
+            os.getenv("OPENAI_REALTIME_VAD_THRESHOLD")
+            or os.getenv("LIVE_STT_VAD_THRESHOLD"),
+            default=0.5,
+            minimum=0.0,
+            maximum=1.0,
+        )
+        vad_prefix_padding_ms = _positive_int(
+            os.getenv("OPENAI_REALTIME_VAD_PREFIX_PADDING_MS")
+            or os.getenv("LIVE_STT_VAD_PREFIX_PADDING_MS"),
+            default=300,
+        )
+        vad_silence_duration_ms = _positive_int(
+            os.getenv("OPENAI_REALTIME_VAD_SILENCE_DURATION_MS")
+            or os.getenv("LIVE_STT_VAD_SILENCE_DURATION_MS"),
+            default=500,
+        )
+        semantic_vad_eagerness = _parse_semantic_vad_eagerness(
+            os.getenv("OPENAI_REALTIME_SEMANTIC_VAD_EAGERNESS")
+            or os.getenv("LIVE_STT_SEMANTIC_VAD_EAGERNESS")
+            or "auto"
+        )
+        periodic_commit_seconds = _positive_float(
+            os.getenv("OPENAI_REALTIME_PERIODIC_COMMIT_SECONDS")
+            or os.getenv("LIVE_STT_PERIODIC_COMMIT_SECONDS"),
+            default=30.0,
+        )
         return cls(
             endpoint=endpoint,
             api_key=api_key,
@@ -86,6 +116,12 @@ class RealtimeSTTConfig:
             prompt=prompt,
             keywords=tuple(keywords),
             timeout_seconds=max(1.0, timeout),
+            finalization_mode=finalization_mode,
+            vad_threshold=vad_threshold,
+            vad_prefix_padding_ms=vad_prefix_padding_ms,
+            vad_silence_duration_ms=vad_silence_duration_ms,
+            semantic_vad_eagerness=semantic_vad_eagerness,
+            periodic_commit_seconds=periodic_commit_seconds,
         )
 
     @property
@@ -102,6 +138,12 @@ class RealtimeSTTConfig:
             "prompt_configured": bool(self.prompt),
             "keywords": list(self.keywords),
             "timeout_seconds": self.timeout_seconds,
+            "finalization_mode": self.finalization_mode,
+            "vad_threshold": self.vad_threshold,
+            "vad_prefix_padding_ms": self.vad_prefix_padding_ms,
+            "vad_silence_duration_ms": self.vad_silence_duration_ms,
+            "semantic_vad_eagerness": self.semantic_vad_eagerness,
+            "periodic_commit_seconds": self.periodic_commit_seconds,
             "configured": self.configured,
         }
 
@@ -114,6 +156,58 @@ def _parse_keywords(value: str) -> tuple[str, ...]:
     except json.JSONDecodeError:
         pass
     return tuple(item.strip() for item in value.replace("\n", ",").split(",") if item.strip())
+
+
+def _positive_float(value: str | None, *, default: float) -> float:
+    try:
+        parsed = float(value) if value is not None else default
+    except (TypeError, ValueError):
+        parsed = default
+    return parsed if parsed > 0 else default
+
+
+def _positive_int(value: str | None, *, default: int) -> int:
+    try:
+        parsed = int(value) if value is not None else default
+    except (TypeError, ValueError):
+        parsed = default
+    return parsed if parsed > 0 else default
+
+
+def _bounded_float(value: str | None, *, default: float, minimum: float, maximum: float) -> float:
+    try:
+        parsed = float(value) if value is not None else default
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _parse_finalization_mode(value: str) -> str:
+    normalized = str(value or "none").strip().lower()
+    return normalized if normalized in FINALIZATION_MODES else "none"
+
+
+def _parse_semantic_vad_eagerness(value: str) -> str:
+    normalized = str(value or "auto").strip().lower()
+    return normalized if normalized in {"auto", "low", "medium", "high"} else "auto"
+
+
+def build_turn_detection(config: RealtimeSTTConfig) -> dict[str, Any] | None:
+    """Build the provider turn detector without changing the default baseline."""
+
+    if config.finalization_mode in {"server_vad", "server_vad_bounded"}:
+        return {
+            "type": "server_vad",
+            "threshold": config.vad_threshold,
+            "prefix_padding_ms": config.vad_prefix_padding_ms,
+            "silence_duration_ms": config.vad_silence_duration_ms,
+        }
+    if config.finalization_mode == "semantic_vad":
+        return {
+            "type": "semantic_vad",
+            "eagerness": config.semantic_vad_eagerness,
+        }
+    return None
 
 
 def build_session_update(config: RealtimeSTTConfig) -> dict[str, Any]:
@@ -134,9 +228,7 @@ def build_session_update(config: RealtimeSTTConfig) -> dict[str, Any]:
                 "input": {
                     "format": {"type": "audio/pcm", "rate": TARGET_SAMPLE_RATE},
                     "transcription": transcription,
-                    # L1/L2 uses explicit Stop → commit.  Server VAD is not
-                    # needed for the one-utterance slice.
-                    "turn_detection": None,
+                    "turn_detection": build_turn_detection(config),
                 }
             },
         },
@@ -165,6 +257,7 @@ def adapt_realtime_event(raw: Mapping[str, Any], *, seen_final_item_ids: set[str
             "type": "partial_transcript",
             "text": str(raw.get("delta", "")),
             "item_id": raw.get("item_id"),
+            "event_id": raw.get("event_id"),
             "raw_type": event_type,
         }
     if event_type == "conversation.item.input_audio_transcription.completed":
@@ -173,6 +266,7 @@ def adapt_realtime_event(raw: Mapping[str, Any], *, seen_final_item_ids: set[str
             return {
                 "type": "duplicate_final",
                 "item_id": item_id,
+                "event_id": raw.get("event_id"),
                 "raw_type": event_type,
             }
         if seen_final_item_ids is not None and item_id:
@@ -183,12 +277,19 @@ def adapt_realtime_event(raw: Mapping[str, Any], *, seen_final_item_ids: set[str
                 "type": "stt_error",
                 "code": "empty_final_transcript",
                 "message": "Provider completed a turn without transcript text",
+                "item_id": raw.get("item_id"),
+                "event_id": raw.get("event_id"),
+                "transcript_id": raw.get("transcript_id"),
+                "commit_id": raw.get("commit_id"),
                 "raw_type": event_type,
             }
         return {
             "type": "final_transcript",
             "text": transcript.strip(),
             "item_id": raw.get("item_id"),
+            "event_id": raw.get("event_id"),
+            "transcript_id": raw.get("transcript_id"),
+            "commit_id": raw.get("commit_id"),
             "languages": raw.get("languages", []),
             "usage": raw.get("usage"),
             "raw_type": event_type,
@@ -228,6 +329,17 @@ class OpenAIRealtimeTranscriptionClient:
         self.config = config
         self._connection: Any = None
         self._seen_final_item_ids: set[str] = set()
+        # Local diagnostic identity.  This is intentionally distinct from any
+        # provider identifier and is safe to expose in a private evaluation
+        # artifact without persisting audio or credentials.
+        self.connection_id = f"stt-conn-{uuid.uuid4().hex[:12]}"
+        self._commit_sequence = 0
+        self._last_boundary_reason = "session_start"
+        self._last_boundary_event_id: str | None = None
+        self._vad_boundary_seen = False
+        self._vad_speech_active = False
+        self._pending_vad_completions = 0
+        self._provider_event_counts: dict[str, int] = {}
 
     async def connect(self) -> None:
         if connect is None:  # pragma: no cover
@@ -264,7 +376,85 @@ class OpenAIRealtimeTranscriptionClient:
         await self._send(build_append_event(pcm16le))
 
     async def commit(self) -> None:
+        self._commit_sequence += 1
         await self._send(build_commit_event())
+
+    def mark_boundary_reason(self, reason: str) -> None:
+        """Attach a local, non-semantic reason to the next Final trace."""
+
+        self._last_boundary_reason = str(reason)
+
+    @property
+    def vad_enabled(self) -> bool:
+        return self.config.finalization_mode in {"server_vad", "semantic_vad", "server_vad_bounded"}
+
+    def has_pending_vad_completion(self) -> bool:
+        return self._pending_vad_completions > 0
+
+    def should_commit_bounded_fallback(
+        self,
+        *,
+        has_audio_buffer: bool,
+        meaningful_audio: bool,
+    ) -> bool:
+        """Guard the bounded fallback with the provider's VAD state.
+
+        A loopback can contain non-zero device noise after a VAD turn has
+        already completed.  Local PCM energy alone must not turn that trailing
+        noise into an explicit commit against an already-empty provider
+        buffer.  For non-VAD bounded mode, the existing local signal guard is
+        sufficient.
+        """
+
+        if not has_audio_buffer or not meaningful_audio:
+            return False
+        if self.vad_enabled:
+            return self._vad_speech_active
+        return True
+
+    def should_commit_at_session_end(
+        self,
+        *,
+        has_audio_buffer: bool,
+        meaningful_audio: bool,
+    ) -> bool:
+        """Return whether an explicit stop commit is still needed.
+
+        VAD owns normal turn boundaries.  A session-end commit remains the
+        fallback for speech that is still active, for a provider that has not
+        emitted a VAD boundary yet, or for non-VAD mode.  Once a VAD boundary
+        has completed and only trailing silence remains, sending another
+        commit can produce an empty provider completion.
+        """
+
+        if self.config.finalization_mode == "bounded":
+            return meaningful_audio
+        if not self.vad_enabled:
+            return has_audio_buffer
+        if self._pending_vad_completions > 0:
+            return False
+        if meaningful_audio:
+            return True
+        if self._vad_speech_active:
+            return has_audio_buffer
+        if self._vad_boundary_seen:
+            return False
+        return meaningful_audio
+
+    def diagnostic_context(self) -> dict[str, Any]:
+        """Return non-secret local metadata for correlating provider events."""
+
+        return {
+            "connection_id": self.connection_id,
+            "local_commit_sequence": self._commit_sequence,
+            "finalization_mode": self.config.finalization_mode,
+            "boundary_reason": self._last_boundary_reason,
+            "boundary_event_id": self._last_boundary_event_id,
+            "vad_boundary_seen": self._vad_boundary_seen,
+            "vad_speech_active": self._vad_speech_active,
+            "pending_vad_completions": self._pending_vad_completions,
+            "provider_event_counts": dict(self._provider_event_counts),
+        }
 
     async def receive_until_final(self) -> list[dict[str, Any]]:
         if self._connection is None:
@@ -316,7 +506,31 @@ class OpenAIRealtimeTranscriptionClient:
                 "code": "malformed_provider_event",
                 "message": "Provider event must be an object",
             }
-        return adapt_realtime_event(raw, seen_final_item_ids=self._seen_final_item_ids)
+        raw_type = raw.get("type")
+        if raw_type:
+            self._provider_event_counts[str(raw_type)] = self._provider_event_counts.get(str(raw_type), 0) + 1
+        if raw_type in {"input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped"}:
+            self._last_boundary_event_id = str(raw.get("event_id")) if raw.get("event_id") else None
+            if raw_type.endswith("speech_started"):
+                self._vad_speech_active = True
+                self._last_boundary_reason = "speech_started"
+            else:
+                self._vad_speech_active = False
+                self._vad_boundary_seen = True
+                self._pending_vad_completions += 1
+                self._last_boundary_reason = (
+                    "semantic_vad" if self.config.finalization_mode == "semantic_vad" else "server_vad"
+                )
+        runtime_event = adapt_realtime_event(raw, seen_final_item_ids=self._seen_final_item_ids)
+        if raw_type == "conversation.item.input_audio_transcription.completed":
+            self._pending_vad_completions = max(0, self._pending_vad_completions - 1)
+        if runtime_event.get("type") == "stt_error":
+            runtime_event["item_id"] = raw.get("item_id")
+            runtime_event["event_id"] = raw.get("event_id")
+            runtime_event["transcript_id"] = raw.get("transcript_id")
+            runtime_event["commit_id"] = raw.get("commit_id")
+            runtime_event["_transport"] = self.diagnostic_context()
+        return runtime_event
 
     async def close(self) -> None:
         connection = self._connection

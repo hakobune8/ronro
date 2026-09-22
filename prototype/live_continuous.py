@@ -19,7 +19,7 @@ from typing import Any, Callable, Mapping
 from .analyzer import TranscriptReplaySession
 from .errors import PrototypeError
 from .layout import StableLayout, map_projection
-from .live_audio import AudioChunk, TARGET_SAMPLE_RATE
+from .live_audio import AudioChunk, TARGET_SAMPLE_RATE, is_silent_pcm16le
 from .live_queue import LiveAnalyzerRuntime, LiveQueueItem, QueueError
 from .live_render import PresentationRenderCoalescer
 from .replay import ReplayRunner
@@ -84,6 +84,8 @@ class LiveContinuousSession:
         self.stt_finalization_complete = False
         self.capture_stopped = False
         self.audio_chunk_sequence = -1
+        self._current_audio_start_sequence: int | None = None
+        self._current_audio_end_sequence: int | None = None
         self.audio_start_seconds: float | None = None
         self.audio_end_seconds: float | None = None
         self.audio_start_at: str | None = None
@@ -91,6 +93,8 @@ class LiveContinuousSession:
         self._audio_end_monotonic: float | None = None
         self._current_audio_start_seconds = 0.0
         self._current_audio_bytes = bytearray()
+        self._current_audio_has_meaningful_signal = False
+        self._max_unfinalized_audio_seconds = 0.0
         self._live_evidence: dict[str, Any] | None = None
         self._live_evidence_history: list[dict[str, Any]] = []
         self._evidence: list[dict[str, Any]] = []
@@ -108,10 +112,13 @@ class LiveContinuousSession:
         self._rendered_at: str | None = None
         self._graph_update_count = 0
         self._stt_failure_count = 0
+        self._empty_final_count = 0
         self._transport_failure_count = 0
         self._forced_incomplete = False
         self._drain_result: dict[str, Any] | None = None
         self._drain_duration_seconds: float | None = None
+        self._audio_diagnostics: dict[str, Any] = {}
+        self._transport_diagnostics: dict[str, Any] = {}
         self._replay_session = self._build_replay_session()
         self._queue_runtime = LiveAnalyzerRuntime(
             session_id=self.session_id,
@@ -175,6 +182,40 @@ class LiveContinuousSession:
             if self.runtime_state in {"starting", "active"}:
                 self.stt_state = "disconnected"
 
+    def record_audio_diagnostics(self, metadata: Mapping[str, Any]) -> None:
+        """Keep safe browser track metadata for private runtime diagnostics.
+
+        Device identifiers are intentionally reduced to a presence flag.  Raw
+        audio and browser credentials never enter this snapshot.
+        """
+
+        allowed = {
+            "track_label",
+            "kind",
+            "ready_state",
+            "muted",
+            "enabled",
+            "sample_rate",
+            "channel_count",
+            "device_id_present",
+        }
+        with self._lock:
+            self._audio_diagnostics = {
+                key: metadata[key]
+                for key in allowed
+                if key in metadata and metadata[key] is not None
+            }
+
+    def record_transport_diagnostics(self, metadata: Mapping[str, Any]) -> None:
+        """Record local transport identity without inventing provider IDs."""
+
+        with self._lock:
+            self._transport_diagnostics = {
+                key: metadata[key]
+                for key in ("connection_id",)
+                if metadata.get(key)
+            }
+
     def activate(self) -> None:
         with self._lock:
             if self.runtime_state != "starting":
@@ -207,11 +248,19 @@ class LiveContinuousSession:
             # chunks within the same span keep the original start.
             if not self._current_audio_bytes:
                 self._current_audio_start_seconds = chunk.audio_start_seconds
+                self._current_audio_start_sequence = chunk.sequence
             self.audio_chunk_sequence = chunk.sequence
+            self._current_audio_end_sequence = chunk.sequence
             self.audio_end_seconds = chunk.audio_end_seconds
             self.audio_end_at = utc_now()
             self._audio_end_monotonic = time.monotonic()
             self._current_audio_bytes.extend(chunk.pcm16le)
+            if not is_silent_pcm16le(chunk.pcm16le):
+                self._current_audio_has_meaningful_signal = True
+            self._max_unfinalized_audio_seconds = max(
+                self._max_unfinalized_audio_seconds,
+                max(0.0, self.audio_end_seconds - self._current_audio_start_seconds),
+            )
             self.stt_state = "streaming"
 
     def record_partial(self, text: str) -> None:
@@ -225,6 +274,24 @@ class LiveContinuousSession:
     def has_audio_buffer(self) -> bool:
         with self._lock:
             return bool(self._current_audio_bytes)
+
+    def has_meaningful_audio_buffer(self) -> bool:
+        """Return whether the current unfinalized buffer contains signal.
+
+        This is a scalar diagnostic/guard only; raw PCM remains in the
+        existing in-memory transport buffer and is not persisted.
+        """
+
+        with self._lock:
+            return self._current_audio_has_meaningful_signal
+
+    def audio_buffer_duration_seconds(self) -> float:
+        """Return the unfinalized audio duration without exposing raw audio."""
+
+        with self._lock:
+            if self._current_audio_start_seconds is None or self.audio_end_seconds is None:
+                return 0.0
+            return max(0.0, self.audio_end_seconds - self._current_audio_start_seconds)
 
     def begin_stop(self) -> None:
         with self._lock:
@@ -257,6 +324,17 @@ class LiveContinuousSession:
             self._forced_incomplete = True
             self.runtime_state = "finalizing"
 
+    def record_empty_final_ignored(self) -> None:
+        """Record a provider VAD completion that carried no transcript.
+
+        A VAD completion is not an Evidence boundary unless it contains
+        transcript text.  The count is retained for evaluation diagnostics;
+        it never creates a Canonical Event or Evidence item.
+        """
+
+        with self._lock:
+            self._empty_final_count += 1
+
     def process_final_transcript(
         self,
         *,
@@ -266,7 +344,6 @@ class LiveContinuousSession:
     ) -> dict[str, Any]:
         """Normalize and enqueue one Final transcript without waiting."""
 
-        del item_id
         text = str(raw_text).strip()
         with self._lock:
             if self.runtime_state not in {"active", "finalizing"}:
@@ -293,6 +370,23 @@ class LiveContinuousSession:
                 return self.snapshot()
             normalized_item = normalized[0]
             now = utc_now()
+            provider_value = dict(provider_event or {})
+            transport = provider_value.get("_transport")
+            transport = transport if isinstance(transport, Mapping) else {}
+            provider_metadata = {
+                "provider_item_id": provider_value.get("item_id") or item_id,
+                "provider_event_id": provider_value.get("event_id"),
+                "provider_transcript_id": provider_value.get("transcript_id"),
+                "provider_commit_id": provider_value.get("commit_id"),
+                "audio_connection_id": transport.get("connection_id") or self._transport_diagnostics.get("connection_id"),
+                "local_commit_sequence": transport.get("local_commit_sequence"),
+                "boundary_reason": transport.get("boundary_reason"),
+                "boundary_event_id": transport.get("boundary_event_id"),
+                "finalization_mode": transport.get("finalization_mode"),
+            }
+            provider_metadata = {
+                key: value for key, value in provider_metadata.items() if value is not None
+            }
             evidence_id = f"live-evidence:{self.session_id}:{sequence}"
             utterance_id = f"live-utterance:{self.session_id}:{sequence}"
             evidence = {
@@ -322,8 +416,11 @@ class LiveContinuousSession:
                 "raw_stt_text": text,
                 "normalized_text": normalized_item.text,
                 "utterance_sequence": sequence,
+                "audio_frame_sequence_start": self._current_audio_start_sequence,
+                "audio_frame_sequence_end": self._current_audio_end_sequence,
                 "raw_segment_ids": list(normalized_item.raw_segment_ids),
                 "normalization_diagnostics": diagnostics,
+                **provider_metadata,
             }
             self._evidence.append(evidence)
             self._utterances.append(utterance)
@@ -342,7 +439,10 @@ class LiveContinuousSession:
             self.analyzer_status = "queued"
             self.partial_transcript = ""
             self._current_audio_start_seconds = audio_end
+            self._current_audio_start_sequence = None
+            self._current_audio_end_sequence = None
             self._current_audio_bytes.clear()
+            self._current_audio_has_meaningful_signal = False
             try:
                 item = self._queue_runtime.register_utterance(
                     evidence=evidence,
@@ -430,12 +530,15 @@ class LiveContinuousSession:
                 "final_utterance_count": len(self._utterances),
                 "partial_count": self._partial_count,
                 "stt_failures": self._stt_failure_count,
+                "empty_final_count": self._empty_final_count,
                 "analyzer_calls": len([item for item in queue["items"] if item["analyzer_start_at"]]),
                 "analyzer_failures": queue["failed"],
                 "queue_max_depth": queue["max_depth"],
                 "queue_wait": latency["queue_wait"],
                 "analyzer_latency": latency["analyzer"],
                 "e2e_latency": latency["end_to_end"],
+                "max_unfinalized_audio_seconds": round(self._max_unfinalized_audio_seconds, 6),
+                "current_unfinalized_audio_seconds": round(self.audio_buffer_duration_seconds(), 6),
                 "graph_update_count": self._graph_update_count,
                 "map_render_count": self._coalescer.snapshot()["render_count"],
                 "canonical_graph_revision": graph["revision"],
@@ -484,6 +587,10 @@ class LiveContinuousSession:
                     "render_status": "Updating" if coalescing["render_pending"] else "Updated",
                     "map_updated": coalescing["rendered_revision"] == graph["revision"],
                     "audio_chunk_sequence": self.audio_chunk_sequence,
+                    "audio_buffer_duration_seconds": round(self.audio_buffer_duration_seconds(), 6),
+                    "meaningful_audio_buffer": self._current_audio_has_meaningful_signal,
+                    "audio_diagnostics": copy.deepcopy(self._audio_diagnostics),
+                    "transport_diagnostics": copy.deepcopy(self._transport_diagnostics),
                     "queue": queue,
                     "queue_latency": self._queue_runtime.latency_metrics(),
                     "evidence_traces": copy.deepcopy(self._live_evidence_history),

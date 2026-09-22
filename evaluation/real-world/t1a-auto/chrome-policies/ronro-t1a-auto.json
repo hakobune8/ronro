@@ -1,0 +1,7 @@
+{
+  "AudioCaptureAllowed": false,
+  "AudioCaptureAllowedUrls": [
+    "https://ronro.hakobune8.com/*",
+    "http://host.docker.internal:8010/*"
+  ]
+}
