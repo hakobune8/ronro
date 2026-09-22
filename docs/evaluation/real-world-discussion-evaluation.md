@@ -68,6 +68,21 @@ The evaluation runner under `evaluation/real-world/t1a-auto/` is optional,
 evaluation-only tooling. It must not be copied into the product image. Its
 runtime output is ignored and must remain private.
 
+## Latest provenance gate result
+
+The candidate was not advanced to the fixed 15-minute T1-A interval. A short
+official-player diagnostic confirmed the loopback signal path: the browser
+track was `RONRO_T1A_Input`, playback produced non-silent monitor energy,
+Pause reduced the energy to silence, and Resume restored it. However, the
+YouTube watch-page video element later reset from the selected position to
+`currentTime=0` with `readyState=0` and no main-frame navigation. The short
+run therefore did not establish three consecutive source-matching Finals.
+
+This is classified as an **evaluation player lifecycle failure**, not as a
+failure of the validated `server_vad_bounded` product configuration. The
+fixed `01:24:00–01:39:00` run remains pending. No source audio, video, full
+transcript, or long verbatim excerpt was persisted or committed.
+
 ## Public artifact policy
 
 Public-safe artifacts are limited to source metadata, configuration policy,
