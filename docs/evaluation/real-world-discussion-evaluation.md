@@ -2586,9 +2586,32 @@ is confirmed and a safety-preserving behavioral fix passes short controls.
 An additional opt-in `RONRO_STT_ITEM_TRACE=1` emits only lifecycle identities,
 VAD offsets, local commit reason/range, completion emptiness and transcript
 length to private server logs. It is off by default, does not log transcript or
-audio content, and does not affect STT decisions. This code is local only;
-the currently deployed T2 candidate has not been replaced by this diagnostic.
-Separately, the Shared View locally highlights only newly added/updated visible
+audio content, and does not affect STT decisions.
+Separately, the Shared View highlights only newly added/updated visible
 discussion or persistent-state items and a newly focused Topic for about 4.5s;
 it does not flash on initial load, repeated polling, or a new session. It changes no
-Canonical content or selection rule. Neither change is deployed here.
+Canonical content or selection rule.
+
+### T2 diagnostic RC deployment and short acceptance
+
+The existing GitHub Actions publish workflow built tag
+`v0.1.1-pilot-t2diag-rc1` from branch `t2-retry-rc1`, commit `511f594`, in
+[run 35838365389](https://github.com/hakobune8/ronro/actions/runs/35838365389).
+The unique image digest is
+`ghcr.io/hakobune8/ronro@sha256:921a10cc546da783dd947e1d68e2341dd18cb0412fccaadda26229b4cf40f28f`.
+It replaced the previous digest-pinned pilot evaluation Pod, with one replica,
+`Recreate`, Ready 1/1 and zero restarts. The private deployment enables the
+content-free item lifecycle trace; code defaults remain unchanged. Health,
+readiness, `/`, `/shared`, `/control` and `/session` returned HTTP 200.
+
+A separate 101.9-second human-owned synthetic PCM acceptance over `/live`
+produced seven Finals, 395 Partials, five automatic VAD boundaries and two
+bounded fallback commits. The lifecycle trace captured seven committed and
+seven completed Provider items. The session ended with queue pending,
+processing and failed all zero; Graph/Render revisions were 15/15. No STT or
+Analyzer failure was observed. This is deployment/observability acceptance,
+**not** a reproduction or fix of T2's failed item. No T2 source audio was run.
+The Shared View update cue is included in this RC, but it does not change
+Projection selection or Canonical meaning. Full T2 retry remains **NOT READY**
+until an official-source failure item can be classified and any required
+behavioral correction passes short validation.
