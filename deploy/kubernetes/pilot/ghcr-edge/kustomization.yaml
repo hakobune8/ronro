@@ -9,7 +9,7 @@ resources:
 images:
   - name: registry.example.invalid/discussion-map-ai-facilitator
     newName: ghcr.io/hakobune8/ronro
-    digest: sha256:92009e70a61543d44775cf6c69439c93c96b0bd2a24875a7612c1d1f841bf451
+    digest: sha256:f604803515bcb021f3262fe6c5713a610796224663df84dd5b47497324a17118
 
 patches:
   - path: deployment-patch.yaml
