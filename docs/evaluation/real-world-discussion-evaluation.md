@@ -2615,3 +2615,9 @@ The Shared View update cue is included in this RC, but it does not change
 Projection selection or Canonical meaning. Full T2 retry remains **NOT READY**
 until an official-source failure item can be classified and any required
 behavioral correction passes short validation.
+
+During follow-up tests, a malformed Provider `error` payload exposed a small
+error-handler robustness issue: the receiver assumed `error` was an object.
+The local follow-up guards that shape and ensures opt-in tracing cannot fail
+the Provider path. This is defensive handling, **not** the T2 empty-Final fix,
+and is not part of the running digest above.

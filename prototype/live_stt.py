@@ -356,10 +356,15 @@ class OpenAIRealtimeTranscriptionClient:
         self.turns = TurnLedger('semantic_vad' if config.finalization_mode == 'semantic_vad' else 'server_vad')
 
     def _trace_lifecycle(self, kind: str, **fields: Any) -> None:
-        if self._trace_item_lifecycle:
+        if not self._trace_item_lifecycle:
+            return
+        try:
             _logger.warning("stt_item_lifecycle %s", json.dumps({
                 "kind": kind, "connection_id": self.connection_id, **fields,
             }, ensure_ascii=False, separators=(",", ":")))
+        except (TypeError, ValueError):
+            # Opt-in diagnostics must not change Provider event handling.
+            pass
 
     async def connect(self) -> None:
         if connect is None:  # pragma: no cover
@@ -559,7 +564,7 @@ class OpenAIRealtimeTranscriptionClient:
                 fields["transcript_length"] = len(transcript) if isinstance(transcript, str) else None
                 fields["turn"] = self.turns.context(raw.get("item_id"))
             elif raw_type == "error":
-                error = raw.get("error") or {}
+                error = raw.get("error") if isinstance(raw.get("error"), Mapping) else {}
                 fields["error_code"] = error.get("code")
                 fields["related_event_id"] = error.get("event_id")
             self._trace_lifecycle(str(raw_type), **fields)
@@ -578,8 +583,9 @@ class OpenAIRealtimeTranscriptionClient:
                     "semantic_vad" if self.config.finalization_mode == "semantic_vad" else "server_vad"
                 )
         runtime_event = adapt_realtime_event(raw, seen_final_item_ids=self._seen_final_item_ids)
-        if raw_type == 'error' and (raw.get('error') or {}).get('code') == 'input_audio_buffer_commit_empty':
-            if self.turns.reconcile_empty_commit((raw.get('error') or {}).get('event_id')):
+        provider_error = raw.get('error') if isinstance(raw.get('error'), Mapping) else {}
+        if raw_type == 'error' and provider_error.get('code') == 'input_audio_buffer_commit_empty':
+            if self.turns.reconcile_empty_commit(provider_error.get('event_id')):
                 runtime_event = dict(type='ignored', raw_type=raw_type, reason='commit_superseded_by_vad', event_id=raw.get('event_id'))
         item_id = raw.get("item_id")
         if raw_type == "conversation.item.input_audio_transcription.completed" and runtime_event.get("type") != "duplicate_final":

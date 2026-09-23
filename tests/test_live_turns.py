@@ -259,6 +259,12 @@ class ProviderItemTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('非公開の発話本文', log)
         self.assertNotIn('"transcript":', log)
 
+    async def test_trace_does_not_break_malformed_provider_error(self):
+        self.client._trace_item_lifecycle = True
+        with self.assertLogs('prototype.live_stt', level='WARNING'):
+            event = await self.event('error', error='unexpected shape')
+        self.assertEqual(event['type'], 'stt_error')
+
     async def test_r3_empty_b_waits_for_a_and_remains_item_scoped(self):
         await self.client.append_audio(pcm(30))
         self.client.mark_boundary_reason('bounded_fallback')
