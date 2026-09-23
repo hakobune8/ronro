@@ -92,6 +92,21 @@ class TurnLedgerTests(unittest.TestCase):
         self.assertEqual(self.ledger.context('b')['boundary_reason'], 'server_vad')
         self.assertIsNone(self.ledger.context('b')['local_commit_sequence'])
 
+    def test_empty_item_diagnostic_keeps_vad_and_delta_identity(self):
+        self.ledger.append(pcm(1))
+        self.ledger.observe(dict(type='input_audio_buffer.speech_stopped', item_id='tail',
+                                 audio_end_ms=1000))
+        self.ledger.observe(dict(type='input_audio_buffer.committed', item_id='tail',
+                                 previous_item_id='explicit'))
+        context = self.ledger.context('tail')
+        self.assertIsNone(context['vad_start_ms'])
+        self.assertEqual(context['vad_end_ms'], 1000)
+        self.assertEqual(context['provider_previous_item_id'], 'explicit')
+        self.assertEqual(context['delta_count'], 0)
+        self.ledger.observe(dict(type='conversation.item.input_audio_transcription.delta',
+                                 item_id='tail'))
+        self.assertEqual(self.ledger.context('tail')['delta_count'], 1)
+
     def test_two_items_pending(self):
         self.ledger.append(pcm(2))
         self.commit('a', 1)
@@ -225,6 +240,24 @@ class ProviderItemTests(unittest.IsolatedAsyncioTestCase):
     async def event(self, typ, **fields):
         await self.client._connection.events.put(json.dumps(dict(type=typ, **fields)))
         return await self.client.receive_event()
+
+    async def test_opt_in_item_trace_records_identity_without_content(self):
+        self.client._trace_item_lifecycle = True
+        with self.assertLogs('prototype.live_stt', level='WARNING') as captured:
+            await self.client.append_audio(pcm(1))
+            self.client.mark_boundary_reason('bounded_fallback')
+            await self.client.commit()
+            await self.event('input_audio_buffer.committed', item_id='item-a',
+                             event_id='commit-a')
+            await self.event('conversation.item.input_audio_transcription.completed',
+                             item_id='item-a', event_id='complete-a',
+                             transcript='非公開の発話本文')
+        log = '\n'.join(captured.output)
+        self.assertIn('explicit_commit_requested', log)
+        self.assertIn('item-a', log)
+        self.assertIn('"transcript_length":8', log)
+        self.assertNotIn('非公開の発話本文', log)
+        self.assertNotIn('"transcript":', log)
 
     async def test_r3_empty_b_waits_for_a_and_remains_item_scoped(self):
         await self.client.append_audio(pcm(30))

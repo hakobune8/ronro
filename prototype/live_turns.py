@@ -81,6 +81,8 @@ class TurnLedger:
         elif typ == 'input_audio_buffer.speech_stopped':
             item['vad_end'] = raw.get('audio_end_ms')
             item['vad_event_id'] = raw.get('event_id')
+        elif typ == 'conversation.item.input_audio_transcription.delta':
+            item['delta_count'] = item.get('delta_count', 0) + 1
         elif typ == 'input_audio_buffer.committed' and 'start' not in item:
             item['previous'] = raw.get('previous_item_id')
             item['boundary_event_id'] = item.get('vad_event_id') or raw.get('event_id')
@@ -115,7 +117,11 @@ class TurnLedger:
                     meaningful=self.meaningful(start, end) if known else None,
                     boundary_reason=item.get('reason', 'unknown'),
                     boundary_event_id=item.get('boundary_event_id'),
-                    local_commit_sequence=item.get('sequence'))
+                    local_commit_sequence=item.get('sequence'),
+                    provider_previous_item_id=item.get('previous'),
+                    vad_start_ms=item.get('vad_start'),
+                    vad_end_ms=item.get('vad_end'),
+                    delta_count=item.get('delta_count', 0))
 
     def complete(self, key, event):
         item = self.items.setdefault(key, {})

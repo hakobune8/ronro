@@ -2405,3 +2405,190 @@ silent-pre-roll/first-speech and long-turn smoke with the real Analyzer, then
 official Safari → BlackHole → Chrome provenance. Only that accepted same digest
 may be used for the frozen 00:57:00–01:27:00 retry. No deploy, T2, T3, Pilot or
 release was performed in this repair task. RFC-0006 remains pending.
+
+## T2 Retry 2 — silent-pre-roll candidate deployment and safe stop
+
+This is a separate run; both earlier T2 failures remain immutable.
+
+### Candidate and acceptance
+
+- Branch `t2-retry-rc1`, candidate ref `t2-retry-rc2`.
+- Source `2131aa041612abda0b42efff78a01024340b42ef`.
+- [Existing CI publish run](https://github.com/hakobune8/ronro/actions/runs/35831612788).
+- Image `ghcr.io/hakobune8/ronro:t2-retry-rc2`, deployed by digest
+  `sha256:fc51a3032a292e109f4eeea97af5c7b5ab110c3a3f88821f661ccf7b5f95c0e0`.
+
+Public-safe audit and **214 PASS / 21 skip** preceded publication. No private
+evaluation data, raw media, transcript or credentials was committed. Existing
+CI authentication was used; no local registry-write credential was introduced.
+Ready 1/1, restart 0; six HTTP routes returned 200 and normal `/live` WSS passed.
+Single-replica/Recreate/storage/network/security configuration was preserved.
+STT remained `server_vad_bounded`/30s, Generic Context and `["論路"]`; Analyzer
+v3 remained explicitly selected. No rebuild or configuration change during run.
+
+Deployed acceptance used 154.854s owned synthetic PCM including 53s leading
+silence, normal turns and long speech. **7 Finals / 388 Partials**, 5 VAD and
+2 fallback Finals; STT/Analyzer/queue errors 0, pending/processing/failed 0,
+`ended`, Graph/Render **17/17**. Raw maximum pending duration 60.1s includes
+leading silence, not 60.1s of unfinalized speech. Generated labels and a rejected
+temporal-state label's Canonical fallback were observed. This passed the repaired
+startup and long-turn acceptance but does not guarantee arbitrary long-run safety.
+
+Official provenance used fresh Safari → BlackHole → Chrome capture outside the
+evaluation interval. Actual BlackHole track was 48kHz mono. Playing RMS roughly
+0.045–0.088, paused RMS 0, resumed roughly 0.055–0.110. Three consecutive Finals
+matched caption/explanation anchors: damage/non-damage mechanisms, interim
+findings, then standards-review progress. This was visual/caption comparison,
+not a claim of direct auditory review. Buffered Final completion stopped at four
+during pause; Finals resumed afterward. Player resets 0; no Demo contamination
+observed. Provenance ended with **6 Finals / 644 Partials**, errors 0 and
+Graph/Render **14/14**. **Provenance PASS.**
+
+### Fixed-interval retry and stop
+
+A completely fresh session began with Evidence/Utterance/Graph/Queue 0 and WSS
+ready. Official playback began at **00:57:00**, about 2ms after the scheduled
+start. The target remained **01:27:00**, with no seek, speed change or tuning.
+
+At about **9m05s of source playback**, the Provider's empty transcription
+completion caused **`empty_final_transcript`** and a safe incomplete stop.
+This is **not** `input_audio_buffer_commit_empty`: the silent-pre-roll startup
+repair passed in both acceptance and official playback. Do not assume that the
+new empty completion has the same cause as an earlier failure without item-level
+evidence. Application completion/queue drain ended around elapsed 9m11s. The
+Player continued normally until stopped at **01:06:32.29**. No source reset,
+unexpected pause or unready sample was observed. Player duration is not equal
+to accepted audio duration.
+
+Backend accepted frame sequence ended at 5988 (about 598.9s PCM including roughly
+53.65s pre-roll). Source audio coverage is approximately 545s, not a completed
+30-minute evaluation. Browser counters included frames after backend failure;
+they must not be counted as accepted input. Capture stopped and evaluation
+timers/diagnostic wrappers were cleared.
+
+| Measurement at incomplete stop | Result |
+|---|---:|
+| Finals / Partials | 29 / 2,555 |
+| Final boundary reasons | 19 VAD / 10 fallback / 0 session-end |
+| Distinct successful Provider items / retained Evidence | 29 / 29 |
+| STT failures / Analyzer failures / Queue failures | 1 / 0 / 0 |
+| Topics / Nodes / Relations | 1 / 25 / 23 |
+| Candidate / Confirmed Decision / Open Item / Action | 0 / 0 / 1 / 0 |
+| Queue pending / processing / failed | 0 / 0 / 0 |
+| Graph / Render | 51 / 51 |
+| Runtime | ended_with_incomplete_processing |
+
+The zero `empty_final_count` metric counts ignored benign completions; it does
+not mean no unsafe empty completion occurred. Queue `drain.complete=true` does
+not override incomplete STT. Local remaining audio was **1.972s, meaningful=true**.
+The failed item's ID/range and full committed-item lifecycle are not retained in
+the normal HTTP snapshot or server log; unresolved-item count is **unavailable**,
+not zero. No speculative causal classification is assigned.
+
+### Safety and partial performance
+
+All 29 completed Finals retain Evidence; duplicate successful item IDs 0,
+reference errors 0, FIFO maintained, automatic confirmation 0. No invented
+owner/due or Graph corruption was observed. **Overall Evidence loss = 0 cannot
+be claimed** because meaningful audio/item state remains unresolved.
+
+| Latency (seconds) | p50 | p95 | max |
+|---|---:|---:|---:|
+| Queue wait | 0.002 | 2.569 | 4.204 |
+| Analyzer | 3.241 | 6.139 | 7.193 |
+| All-event E2E | 5.719 | 9.491 | 24.521 |
+| Graph-changing E2E (22 items) | 6.090 | 8.243 | 9.491 |
+
+Queue maximum depth 2. STT-specific latency, complete item-lifecycle counts and
+tokens/cost are unavailable in these retained metrics; do not substitute E2E or
+estimate prices. Partial-run performance is not a 30-minute acceptance result.
+
+### Shared View / display-label observations, separate from failure
+
+The long-open Shared tab initially retained older frontend assets. Reloading
+only this passive display tab around minute four loaded the deployed candidate;
+capture/session/source and Product settings were unchanged. Its earlier image
+is not a candidate visual result. The stopped-run image was captured from the
+updated page at **1920×1080 actual pixels** and kept private.
+
+At stop: 23 eligible discussion items, 6 visible, **ほか17件**, one Open Item
+rail. Recent ground-survey/access/early-assessment content displaced older cards.
+Observed replacements 17 (about 1.85/min), remaining-card position movement 0;
+visible card age median 40.1s / max 93.8s. Nodes/Final 0.862. These sampled
+projection metrics are partial-run observations, not full T2 scores.
+
+All six stopped-screen cards used 40px and 2–3 lines, with no clipping/scrolling;
+branding and guidance were absent. Earlier dense content used one 36px card at
+five lines. All-node display metadata: 20 accepted labels and 5 safe Canonical
+fallbacks (temporal state 1, safety marker 3, comparison 1).
+
+Provisional inspection of the six stopped-screen representations: A=3, B=2,
+C=1, D=0. The C concern is omission of a directionality qualifier, making an
+Idea's direction sound more definite; it did not create a Canonical Decision or
+Action. A lexical/subject problem already present in Canonical content also
+remained visible and must not be blamed solely on label generation. These are
+follow-up quality findings, not the STT failure's cause or Human approval.
+
+No scheduled 10/20/30 snapshots or Q1–Q7 reviews exist because the run stopped
+before ten minutes. Do not label the stopped screen as a ten-minute snapshot or
+claim Human distance acceptance for this run.
+
+**Decision: D. T2 PIPELINE FAILURE. T2 RETRY NOT READY.** Candidate remains deployed
+and healthy at the same digest; no automatic rollback or further tuning was
+performed. Next investigate the failed empty item's ownership/range/commit
+sequence, preserving this run, before another retry. RFC-0006 remains pending;
+T3, Live Pilot and final release were not started.
+
+### T2 unsafe empty completion: controlled follow-up
+
+The stopped T2 snapshot does not retain the failed Provider item ID or audio
+range. Its exact failure transition therefore remains **unproven**. A separate
+short, human-owned synthetic control reproduced the same *failure class* under
+the frozen `server_vad_bounded` / 30s configuration:
+
+| 63-second control | Provider result | Drain |
+|---|---|---|
+| Speech with digital-zero pauses | 2 non-empty Finals; 2 silent automatic VAD tails safely ignored | ended |
+| Same speech with low-level non-speech pauses | 1 non-empty Final; automatic VAD tail returned empty with zero deltas | ended_with_incomplete_processing |
+
+In the noisy control, an explicit bounded commit owned audio through 30.0s.
+The subsequent Server VAD item covered roughly 30.0–30.432s, had no transcript
+deltas, and completed empty. The local `is_silent_pcm16le` guard treats any
+sample above amplitude 8 as meaningful; low-level non-speech noise crossed
+that guard. As a result, an automatic empty VAD tail was classified as unsafe.
+This proves a local *signal-classification weakness* and a VAD/fallback-tail
+interaction, but does not establish that the failed T2 item had the same
+identity or signal characteristics. A 40-second noise-only control instead
+produced `input_audio_buffer_commit_empty`, a distinct failure; it must not be
+conflated with T2's empty `transcription.completed`.
+
+Additional read-only comparison against the failed run's retained Chrome
+pre-resample energy counters weakens the claim that the same low-level-noise
+mechanism explains T2. Near the last successful Final, the one-second RMS
+values ranged about 0.0024–0.1023 (normalized float); several immediately
+preceding seconds were 0.07–0.10. The synthetic noisy-tail control used
+approximately 0.0005 RMS. These are aggregate levels, not a speech detector,
+and the failed Provider item's exact frame range remains unavailable. They do
+show that a threshold-only "noise fix" would be unjustified for T2.
+
+An isolated, **non-product** control tried disabling and re-enabling Server
+VAD around an explicit bounded commit. It avoided the noisy control's empty
+completion but produced `turn_correlation_failed`: Provider VAD audio offsets
+restarted near zero after re-enable while the local ledger expected cumulative
+offsets. This is not an accepted workaround; using it would require a new
+offset-generation model and separate validation.
+
+The follow-up adds private, content-free unsafe-completion logging and item
+context (VAD start/end, predecessor and delta count) so a future occurrence can
+be correlated. It does **not** alter finalization or mark potentially lost
+speech as benign. Full T2 retry remains blocked until the failed-item mechanism
+is confirmed and a safety-preserving behavioral fix passes short controls.
+An additional opt-in `RONRO_STT_ITEM_TRACE=1` emits only lifecycle identities,
+VAD offsets, local commit reason/range, completion emptiness and transcript
+length to private server logs. It is off by default, does not log transcript or
+audio content, and does not affect STT decisions. This code is local only;
+the currently deployed T2 candidate has not been replaced by this diagnostic.
+Separately, the Shared View locally highlights only newly added/updated visible
+discussion or persistent-state items and a newly focused Topic for about 4.5s;
+it does not flash on initial load, repeated polling, or a new session. It changes no
+Canonical content or selection rule. Neither change is deployed here.

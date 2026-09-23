@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import uuid
 from dataclasses import dataclass
@@ -33,6 +34,15 @@ DEFAULT_KEYWORDS = (
     "論路",
 )
 FINALIZATION_MODES = frozenset({"none", "server_vad", "semantic_vad", "bounded", "server_vad_bounded"})
+_logger = logging.getLogger(__name__)
+_TRACE_TYPES = frozenset({
+    "input_audio_buffer.speech_started",
+    "input_audio_buffer.speech_stopped",
+    "input_audio_buffer.committed",
+    "conversation.item.input_audio_transcription.completed",
+    "conversation.item.input_audio_transcription.failed",
+    "error",
+})
 
 
 class RealtimeSTTFailure(RuntimeError):
@@ -342,7 +352,14 @@ class OpenAIRealtimeTranscriptionClient:
         self._vad_speech_active = False
         self._pending_vad_completions = 0
         self._provider_event_counts: dict[str, int] = {}
+        self._trace_item_lifecycle = os.getenv("RONRO_STT_ITEM_TRACE") == "1"
         self.turns = TurnLedger('semantic_vad' if config.finalization_mode == 'semantic_vad' else 'server_vad')
+
+    def _trace_lifecycle(self, kind: str, **fields: Any) -> None:
+        if self._trace_item_lifecycle:
+            _logger.warning("stt_item_lifecycle %s", json.dumps({
+                "kind": kind, "connection_id": self.connection_id, **fields,
+            }, ensure_ascii=False, separators=(",", ":")))
 
     async def connect(self) -> None:
         if connect is None:  # pragma: no cover
@@ -384,6 +401,11 @@ class OpenAIRealtimeTranscriptionClient:
         self._commit_sequence += 1
         client_event_id = f'{self.connection_id}-commit-{self._commit_sequence}'
         self.turns.request(self._commit_sequence, self._last_boundary_reason, client_event_id)
+        self._trace_lifecycle("explicit_commit_requested", event_id=client_event_id,
+                              sequence=self._commit_sequence,
+                              reason=self._last_boundary_reason,
+                              audio_start=self.turns.intents[-1]['start'] / TARGET_SAMPLE_RATE,
+                              audio_end=self.turns.intents[-1]['end'] / TARGET_SAMPLE_RATE)
         diagnostic("explicit_commit_attempt", provider=self, local_commit_sequence=self._commit_sequence)
         await self._send({**build_commit_event(), 'event_id': client_event_id})
         diagnostic("explicit_commit_sent", provider=self, local_commit_sequence=self._commit_sequence)
@@ -527,6 +549,20 @@ class OpenAIRealtimeTranscriptionClient:
         raw_type = raw.get("type")
         diagnostic("provider_receive", provider=self, raw=raw)
         self.turns.observe(raw)
+        if raw_type in _TRACE_TYPES:
+            fields = {k: raw.get(k) for k in (
+                "event_id", "item_id", "previous_item_id", "audio_start_ms", "audio_end_ms"
+            ) if raw.get(k) is not None}
+            if raw_type == "conversation.item.input_audio_transcription.completed":
+                transcript = raw.get("transcript")
+                fields["transcript_empty"] = not isinstance(transcript, str) or not transcript.strip()
+                fields["transcript_length"] = len(transcript) if isinstance(transcript, str) else None
+                fields["turn"] = self.turns.context(raw.get("item_id"))
+            elif raw_type == "error":
+                error = raw.get("error") or {}
+                fields["error_code"] = error.get("code")
+                fields["related_event_id"] = error.get("event_id")
+            self._trace_lifecycle(str(raw_type), **fields)
         if raw_type:
             self._provider_event_counts[str(raw_type)] = self._provider_event_counts.get(str(raw_type), 0) + 1
         if raw_type in {"input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped"}:

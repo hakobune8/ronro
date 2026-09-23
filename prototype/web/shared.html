@@ -39,6 +39,7 @@
     .flow-list { display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
     .flow-item { flex: 0 0 auto; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 2px 6px; border-bottom: 2px solid transparent; border-radius: 3px; background: transparent; color: #40586f; font-size: 20px; line-height: 1.4; }
     .flow-item.current { border-bottom-color: #9bb9eb; color: #174ea6; font-weight: 750; }
+    .flow-item.current.just-updated { border-bottom-color: #3774d3; background: #eaf2ff; }
     .flow-item.ellipsis { max-width: 28px; color: #728496; font-size: 22px; letter-spacing: .08em; }
     .flow-arrow { flex: 0 0 auto; color: #728496; font-size: 22px; }
     .shared-main { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 24px; min-height: 0; padding: 24px 0 18px; }
@@ -106,6 +107,10 @@
     .current-discussion { display: flex; flex-direction: column; gap: 18px; min-height: 0; min-width: 0; }
     .discussion-active .topic-items { grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-rows: repeat(3,minmax(0,1fr)); flex: 1; max-width: none; min-height: 0; gap: 20px; }
     .discussion-active .topic-item, html.capture-1920 .discussion-active .topic-item { display: flex; align-items: center; font-size: 40px; line-height: 1.32; font-weight: 500; padding: 24px; min-height: 0; }
+    .discussion-active .topic-item.just-updated, .persistent-item.just-updated { background: #eaf2ff; box-shadow: inset 0 0 0 3px #3774d3; }
+    .discussion-active .topic-item.just-updated.concern { background: #fff4dc; box-shadow: inset 0 0 0 3px #a16207; }
+    .discussion-active .topic-item, .persistent-item { transition: background-color .35s ease, box-shadow .35s ease; }
+    @media (prefers-reduced-motion: reduce) { .discussion-active .topic-item, .persistent-item { transition: none; } }
     .discussion-active .shared-main:not(.no-rail) .topic-item { padding-inline: 14px; }
     .discussion-label { display: block; width: 100%; min-width: 0; }
     .discussion-active .topic-more { font-size: 23px; text-align: right; height: 38px; flex-shrink: 0; cursor: default; }
@@ -177,6 +182,11 @@
     const demoSequence = params.get('sequence');
     if (params.get('viewport') === '1920x1080') document.documentElement.classList.add('capture-1920');
     const $ = (id) => document.getElementById(id);
+    const HIGHLIGHT_MS = 4500;
+    let previousNodeSignatures = null;
+    let previousSessionId = null;
+    let previousFocusId = null;
+    const highlightedUntil = new Map();
 
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
@@ -185,6 +195,28 @@
     function activeNode(node) { return node && !['archived', 'revoked', 'resolved', 'completed'].includes(node.status); }
     function labelForNode(node) { return node?.label || ''; }
     function uniqueNodes(nodes) { return Array.from(new Map(nodes.filter(Boolean).map((node) => [node.id, node])).values()); }
+    function updatedNodeIds(graph, sessionId, representations) {
+      if (previousSessionId !== sessionId) {
+        previousNodeSignatures = null;
+        highlightedUntil.clear();
+        previousSessionId = sessionId;
+        previousFocusId = null;
+      }
+      const signatures = new Map((graph.nodes || []).map(node => [node.id,
+        JSON.stringify([node.label, node.status, node.source_event_ids || [], representations[node.id]?.text || null])]));
+      const now = Date.now();
+      const focusId = graph.current_topic?.primary_topic_id || null;
+      if (previousNodeSignatures) {
+        for (const [id, signature] of signatures) {
+          if (previousNodeSignatures.get(id) !== signature) highlightedUntil.set(id, now + HIGHLIGHT_MS);
+        }
+        if (focusId && focusId !== previousFocusId) highlightedUntil.set(focusId, now + HIGHLIGHT_MS);
+      }
+      previousNodeSignatures = signatures;
+      previousFocusId = focusId;
+      for (const [id, until] of highlightedUntil) if (until <= now || !signatures.has(id)) highlightedUntil.delete(id);
+      return highlightedUntil;
+    }
 
     function statusFor(snapshot, isDemo) {
       if (isDemo) return { text: '● 更新しました', className: 'updated' };
@@ -258,6 +290,9 @@
       $('shared-status').className = `shared-status ${status.className}`;
       const main = $('shared-main');
       if (idle) {
+        previousNodeSignatures = null;
+        highlightedUntil.clear();
+        previousFocusId = null;
         main.classList.add('no-rail');
         main.innerHTML = '<section class="passive"><h1>会議の開始を待っています</h1><p>スマートフォンで <a href="/session">会議をはじめる</a></p></section>';
         $('flow-list').innerHTML = '';
@@ -266,6 +301,7 @@
       }
       const nodes = new Map(graph.nodes.map(n => [n.id, n]));
       const representations = snapshot.map.display_labels || {};
+      const fresh = updatedNodeIds(graph, snapshot?.state?.session?.id || snapshot?.state?.graph?.session_id || 'demo', representations);
       const displayText = node => representations[node?.id]?.text || node?.label || '';
       const actionDetails = node => {
         if (node?.type !== 'action') return '';
@@ -275,7 +311,7 @@
       };
       const cards = shared.slots.map(id => {
         const node = nodes.get(id);
-        return node ? `<article class="topic-item ${escapeHtml(node.type)}"><span class="discussion-label">${escapeHtml(displayText(node))}</span></article>`
+        return node ? `<article class="topic-item ${escapeHtml(node.type)}${fresh.has(id) ? ' just-updated' : ''}"><span class="discussion-label">${escapeHtml(displayText(node))}</span></article>`
           : '<div class="empty-slot" aria-hidden="true"></div>';
       }).join('');
       const headings = {candidate: '決定候補', confirmed: '確定事項', open_item: '未解決事項', action: '次の対応'};
@@ -285,7 +321,7 @@
         <div class="topic-more">${shared.overflow ? 'ほか'+shared.overflow+'件' : ''}</div></section>`
         + (rail.length ? `<aside class="persistent-rail">${rail.map(([key,value]) =>
           `<section class="persistent-section ${key}"><h2>${headings[key]}</h2>
-            ${value.node_ids.map(id => `<div class="persistent-item">${escapeHtml(displayText(nodes.get(id)))}${actionDetails(nodes.get(id))}</div>`).join('')}
+            ${value.node_ids.map(id => `<div class="persistent-item${fresh.has(id) ? ' just-updated' : ''}">${escapeHtml(displayText(nodes.get(id)))}${actionDetails(nodes.get(id))}</div>`).join('')}
             ${value.overflow ? `<div class="topic-more">ほか${value.overflow}件</div>` : ''}</section>`).join('')}</aside>` : '');
       // Only actual canonical focus transitions; never infer a Topic from card capacity.
       const generic = label => ['その他','未分類','other','others','misc','other discussion items'].includes(String(label).trim().toLowerCase());
@@ -296,7 +332,7 @@
       // Presentation only: newest/current at the fixed left edge; history stays chronological upstream.
       const recent = flow.slice(-4).reverse();
       $('flow-list').innerHTML = meaningfulFlow ? recent.map((item,index) =>
-        `${index ? '<span class="flow-arrow">←</span>' : ''}<span class="flow-item${index === 0 && item.topic_id === graph.current_topic?.primary_topic_id ? ' current' : ''}">${escapeHtml(item.label)}</span>`).join('') : '';
+        `${index ? '<span class="flow-arrow">←</span>' : ''}<span class="flow-item${index === 0 && item.topic_id === graph.current_topic?.primary_topic_id ? ' current' : ''}${index === 0 && fresh.has(item.topic_id) ? ' just-updated' : ''}">${escapeHtml(item.label)}</span>`).join('') : '';
       fitDiscussionCards();
     }
 

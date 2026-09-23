@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -24,6 +25,9 @@ except ImportError:  # pragma: no cover - dependency is declared in requirements
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+_logger = logging.getLogger(__name__)
 
 
 class LiveWebSocketGateway:
@@ -365,6 +369,17 @@ class LiveWebSocketGateway:
                                 },
                             )
                         else:
+                            # Private server diagnostics only: the public
+                            # snapshot intentionally omits Provider item IDs.
+                            # Keep enough identity/range to distinguish an
+                            # empty automatic VAD item from an explicit commit.
+                            _logger.warning("unsafe_stt_event %s", _json({
+                                "code": code,
+                                "item_id": event.get("item_id"),
+                                "event_id": event.get("event_id"),
+                                "turn": event.get("_turn"),
+                                "transport": event.get("_transport"),
+                            }))
                             self.manager.fail(code, str(event.get("message", "Provider error")))
                             await self._safe_send(
                                 connection,
