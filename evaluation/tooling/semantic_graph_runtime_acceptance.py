@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from prototype.materializer import initial_state
-from prototype.real_analyzer import PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9, RealAnalyzer
+from prototype.real_analyzer import PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9, PROMPT_VERSION_V10, RealAnalyzer
 from prototype.replay import ReplayResult, ReplayRunner
 from prototype.schema import SchemaValidator
 
@@ -103,7 +103,7 @@ def main() -> None:
     parser.add_argument("--kubeconfig", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--prompt-version", choices=[PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9], default=PROMPT_VERSION_V6)
+    parser.add_argument("--prompt-version", choices=[PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9, PROMPT_VERSION_V10], default=PROMPT_VERSION_V6)
     parser.add_argument("--cases", nargs="+", default=["R1", "R2", "R3", "R4", "R5"])
     args = parser.parse_args()
     if args.runs < 1 or not args.output.is_absolute() or ROOT in args.output.parents:
