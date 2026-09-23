@@ -2621,3 +2621,26 @@ error-handler robustness issue: the receiver assumed `error` was an object.
 The local follow-up guards that shape and ensures opt-in tracing cannot fail
 the Provider path. This is defensive handling, **not** the T2 empty-Final fix,
 and is not part of the running digest above.
+
+### T2 short official-source item trace (non-evaluation interval)
+
+With the diagnostic digest still running, Safari played the official NILIM
+Player from 00:53:00 to approximately 00:55:00, outside the frozen T2
+00:57:00–01:27:00 interval. Chrome captured `BlackHole 2ch` at 48 kHz mono
+through the ordinary browser `/live` route. The Player reached 00:55:00.38,
+paused as planned, remained ready, and recorded no reset or unexpected stop.
+Chrome's transient, non-persisted pre-resample RMS samples during playback had
+mean about 0.0558; approximately 21.2% were below 0.005. No raw audio or
+source transcript was saved.
+
+The fresh diagnostic session started with zero Evidence, Utterances, Queue
+items and Nodes. It generated five non-empty Finals and 604 Partials; trace
+correlation showed four bounded-fallback explicit commits and one Server VAD
+item, all with known local audio ranges. No empty completion or STT failure
+occurred. Notably, the short Server VAD tail (about 1.22 seconds) completed
+non-empty after two deltas; a short tail alone does not explain T2's failure.
+Drain ended with queue pending/processing/failed all zero and
+Graph/Render revisions 16/16. The short run confirms item tracing and
+transport on real official playback, but **does not reproduce or explain**
+the earlier nine-minute empty completion. It is not a T2 retry and does not
+change the frozen T2 segment. T2 retry remains **NOT READY**.
