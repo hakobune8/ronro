@@ -149,6 +149,21 @@ class LiveEvaluationTests(unittest.TestCase):
         finally:
             session.close()
 
+    def test_possible_vad_gap_prevents_false_evidence_loss_zero_claim(self) -> None:
+        session = _make_session()
+        try:
+            _add_one(session)
+            session.record_possible_evidence_gap(1.888)
+            artifact = LiveEvaluationSession(evaluation_session_id="eval-gap").finalize(session.snapshot())
+            runtime = artifact["runtime_metrics"]
+            self.assertEqual(runtime["evidence_loss_count"], 0)
+            self.assertEqual(runtime["possible_evidence_gap_count"], 1)
+            self.assertEqual(runtime["evidence_completeness"], "unverified")
+            self.assertIsNone(artifact["success_criteria"]["evidence_loss"])
+            self.assertIn("Evidence completeness: unverified", render_markdown_report(artifact))
+        finally:
+            session.close()
+
     def test_synthetic_evaluation_generates_artifact_without_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             result = run_synthetic_evaluation(Path(temp))
