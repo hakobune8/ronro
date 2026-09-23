@@ -18,7 +18,7 @@ spec:
       labels:
         app.kubernetes.io/name: discussion-map-ai-facilitator
         app.kubernetes.io/part-of: discussion-map-pilot
-        app.kubernetes.io/configuration: semantic-graph-rc3
+        app.kubernetes.io/configuration: semantic-graph-rc4
     spec:
       terminationGracePeriodSeconds: 60
       automountServiceAccountToken: false
@@ -47,7 +47,7 @@ spec:
                 name: discussion-map-openai
           env:
             - name: APP_VERSION
-              value: semantic-graph-rc3
+              value: semantic-graph-rc4
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

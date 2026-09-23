@@ -40,6 +40,7 @@ PROMPT_VERSION_V6 = "analyzer-prompt-v6-semantic-graph-hypothesis"
 PROMPT_VERSION_V7 = "analyzer-prompt-v7-correctable-working-graph"
 PROMPT_VERSION_V8 = "analyzer-prompt-v8-explicit-candidate-decision"
 PROMPT_VERSION_V9 = "analyzer-prompt-v9-semantic-edge-balance"
+PROMPT_VERSION_V10 = "analyzer-prompt-v10-action-time-horizon"
 HUMAN_EVENT_TYPES = {
     "confirm_decision",
     "revoke_decision",
@@ -485,6 +486,8 @@ def build_analyzer_prompt(
         return build_analyzer_prompt_v8(context)
     if prompt_version == PROMPT_VERSION_V9:
         return build_analyzer_prompt_v9(context)
+    if prompt_version == PROMPT_VERSION_V10:
+        return build_analyzer_prompt_v10(context)
     if prompt_version == PROMPT_VERSION_V3:
         return build_analyzer_prompt_v3(context)
     if prompt_version == PROMPT_VERSION_V2:
@@ -1002,6 +1005,25 @@ Independent roots and uncertainty remain unconnected. No transitive shortcuts.
     return system_prompt, payload
 
 
+def build_analyzer_prompt_v10(context: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Distinguish meeting-time agenda from work that follows the meeting."""
+    system_prompt, payload = build_analyzer_prompt_v9(context)
+    system_prompt = system_prompt.replace(PROMPT_VERSION_V9, PROMPT_VERSION_V10)
+    system_prompt += """
+
+ACTION TIME HORIZON — V10
+An Action is work to execute after this meeting, not an agenda item or activity
+to be done during the present meeting. Distinguish 「本日の会議では点検結果を確認します」
+or 「まずここで説明します」 (current meeting process, NOT Action) from
+「次回までに点検結果を確認します」 or 「会議後に担当者が調査します」
+(post-meeting work, Action). A bare 「確認します」 may be an Action only when
+context clearly identifies a post-meeting follow-up; otherwise do not create
+one. Do not infer Owner or Due. Do not suppress a separately explicit
+post-meeting Action merely because the utterance also describes today's agenda.
+"""
+    return system_prompt, payload
+
+
 class RealAnalyzer:
     """Provider-backed Analyzer with the M6 CandidateEvent boundary."""
 
@@ -1064,7 +1086,7 @@ class RealAnalyzer:
             recent_events=recent_events,
             meeting_goal=self.meeting_goal,
         )
-        if self.prompt_version in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9}:
+        if self.prompt_version in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9, PROMPT_VERSION_V10}:
             context = self.context_builder.augment_for_semantic_relations(context, current_graph, utterance)
         context_measure = self.context_builder.measure(context)
         system_prompt, user_payload = build_analyzer_prompt(context, prompt_version=self.prompt_version)
@@ -1133,7 +1155,7 @@ class RealAnalyzer:
                 for intent, hint in zip([i for i in output["events"] if i.get("kind") == "node"], raw_hints):
                     intent["display_label"] = hint
             visible_ids = ({node["id"] for node in context["relevant_nodes"]}
-                           if self.prompt_version in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9} else None)
+                           if self.prompt_version in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9, PROMPT_VERSION_V10} else None)
             candidates = self._to_candidates(output, utterance, current_graph,
                                              visible_node_ids=visible_ids,
                                              recent_events=recent_events)
@@ -1307,13 +1329,13 @@ class RealAnalyzer:
                 if removal is not None and utterance.get("sequence", 0) <= removal["payload"]["evidence_sequence_at_correction"]:
                     self._critical("human_relation_correction_respected", trace, critical=False)
                     continue
-                if self.prompt_version not in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9} and relation_type == "discussion_provenance":
+                if self.prompt_version not in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9, PROMPT_VERSION_V10} and relation_type == "discussion_provenance":
                     self._critical("hypothesis_relation_not_enabled", trace)
                     continue
-                if self.prompt_version in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9} and relation_type == "related_to":
+                if self.prompt_version in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9, PROMPT_VERSION_V10} and relation_type == "related_to":
                     self._critical("legacy_related_to_rejected", trace)
                     continue
-                if (self.prompt_version == PROMPT_VERSION_V9 and relation_type == "opposes"
+                if (self.prompt_version in {PROMPT_VERSION_V9, PROMPT_VERSION_V10} and relation_type == "opposes"
                         and not self._explicit_opposition(text)):
                     self._critical("weak_opposition_rejected", trace, critical=False)
                     continue
