@@ -2718,3 +2718,38 @@ justify a narrowly scoped benign-empty rule; real speech or unknown coverage
 must continue to fail safely. The latest run's 138.5-second max-unfinalized
 metric also requires separate interpretation: session pre-roll and item
 ownership must be checked before treating it as 138.5 seconds of speech.
+
+### Retry 3 follow-up: repeated short VAD recognition-empty and continuity policy
+
+Diagnostic-only item-scoped PCM aggregation disproved a simple silence
+classification. In a short official-player control near the failed source
+time, the Provider again emitted a normal non-empty item followed by a short
+automatic Server VAD item with **zero deltas and an empty completion**. The
+second item had a known approximately 1.9-second local range, aggregate RMS
+about 437 PCM counts (roughly 0.013 normalized), peak 3,408, and no explicit
+commit. This is lower level than the preceding recognized item but not pure
+silence. Sparse browser energy samples had missed its short signal bursts.
+No raw source audio was retained.
+
+A second control changed only Server VAD `silence_duration_ms` from the
+500-ms baseline to 1000 ms. The same pattern recurred: the short item again
+had no deltas and completed empty (RMS about 490 PCM counts), so increasing
+VAD silence duration is **not** a supported fix. The deployment was returned
+to 500 ms after this control. The observed failure layer is Provider
+recognition of a short, lower-energy VAD item, not a local item-ID mix-up,
+explicit-commit race, or empty provider buffer. Whether that item contains a
+short utterance, an interjection, or non-speech remains unknown; captions and
+signal energy cannot establish its semantic content.
+
+Because natural meeting pauses must not automatically terminate a session,
+an **opt-in evaluation continuity policy** is being tested. It applies only
+to a known-range automatic Server VAD item at most 3 seconds long with no
+transcription delta and no local explicit commit. It records a visible
+`possible_untranscribed_audio` warning, item-scoped audio range, and aggregate
+possible-gap count/duration; it creates no Evidence and does not assert the
+audio was silent. Unknown-range, explicit-commit, longer, or partially
+recognized empty items remain fatal. Default policy remains `strict`.
+Any T2 run with possible gaps must report **Evidence completeness unknown**,
+not `Evidence loss = 0`, and cannot be called a clean PASS on that evidence.
+This change is a continuity mitigation for evaluation, not demonstrated
+recovery of lost speech or a Pilot-baseline decision.

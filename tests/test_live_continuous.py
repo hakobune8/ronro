@@ -166,6 +166,37 @@ class FakeConnection:
         await self.incoming.put(None)
 
 
+class WarningConnection(FakeConnection):
+    async def send(self, payload: str):
+        event = json.loads(payload)
+        self.sent.append(event)
+        if event.get("type") == "stt_gap_warning" and not self.stop_enqueued:
+            self.stop_enqueued = True
+            await self.incoming.put(json.dumps({"type": "stop"}))
+
+
+class FakeShortVADGapProvider(FakeVADProvider):
+    def __init__(self, config):
+        super().__init__(config)
+        from types import SimpleNamespace
+        self.turns = SimpleNamespace(
+            cursor=240, intents=[], meaningful_pending_seconds=0.0,
+            expired=lambda _timeout: False, acknowledge=lambda item_id: None,
+        )
+
+    async def append_audio(self, pcm16le: bytes):
+        await self.events.put({
+            "type": "stt_error", "code": "empty_final_transcript",
+            "item_id": "short-vad-item", "message": "Provider completed a turn without transcript text",
+            "_turn": {"range_known": True, "audio_start": 0.0, "audio_end": 1.8,
+                      "boundary_reason": "server_vad", "local_commit_sequence": None,
+                      "delta_count": 0},
+        })
+
+    def should_commit_at_session_end(self, *, has_audio_buffer: bool, meaningful_audio: bool) -> bool:
+        return False
+
+
 def make_session(
     analyzer: ContinuousAnalyzer | None = None,
     *,
@@ -212,6 +243,69 @@ def wait_settled(session: LiveContinuousSession, count: int, timeout: float = 5.
 
 
 class LiveContinuousSessionTests(unittest.TestCase):
+    def test_short_vad_empty_policy_is_explicit_and_item_scoped(self) -> None:
+        base = RealtimeSTTConfig(
+            endpoint="wss://example.invalid/realtime", api_key="test-only",
+            model="gpt-transcribe", language="ja", prompt="test", keywords=(),
+            timeout_seconds=1.0, finalization_mode="server_vad_bounded",
+        )
+        event = {
+            "type": "stt_error", "code": "empty_final_transcript",
+            "_turn": {"range_known": True, "audio_start": 26.4,
+                      "audio_end": 28.3, "boundary_reason": "server_vad",
+                      "local_commit_sequence": None, "delta_count": 0},
+        }
+        self.assertFalse(LiveWebSocketGateway._is_recoverable_short_vad_empty(event, config=base))
+        from dataclasses import replace
+        warning = replace(base, empty_vad_policy="warn_short_no_delta")
+        self.assertTrue(LiveWebSocketGateway._is_recoverable_short_vad_empty(event, config=warning))
+        for change in (
+            {"range_known": False}, {"boundary_reason": "bounded_fallback"},
+            {"local_commit_sequence": 1}, {"delta_count": 1},
+            {"audio_end": 29.5}, {"audio_start": None},
+        ):
+            changed = copy.deepcopy(event)
+            changed["_turn"].update(change)
+            self.assertFalse(LiveWebSocketGateway._is_recoverable_short_vad_empty(changed, config=warning), change)
+
+    def test_possible_gap_is_counted_separately_from_benign_empty(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas", analyzer_factory=lambda: ContinuousAnalyzer())
+        manager.start_mode("continuous")
+        current = manager.current()
+        current.record_possible_evidence_gap(1.888)
+        metrics = current.metrics()
+        self.assertEqual(metrics["possible_evidence_gap_count"], 1)
+        self.assertEqual(metrics["possible_evidence_gap_seconds"], 1.888)
+        self.assertEqual(metrics["empty_final_count"], 1)
+        self.assertEqual(metrics["stt_failures"], 0)
+        current.close()
+
+    def test_short_vad_warning_continues_and_drains_without_evidence(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas", analyzer_factory=lambda: ContinuousAnalyzer())
+        manager.start_mode("continuous")
+        connection = WarningConnection()
+        connection.incoming.put_nowait(encode_audio_frame(AudioChunk(0, 0.0, b"\x10\x00" * 240)))
+        config = RealtimeSTTConfig(
+            endpoint="wss://example.invalid/realtime", api_key="test-only",
+            model="gpt-transcribe", language="ja", prompt="test", keywords=(),
+            timeout_seconds=1.0, finalization_mode="server_vad_bounded",
+            empty_vad_policy="warn_short_no_delta",
+        )
+
+        async def run_gateway():
+            gateway = LiveWebSocketGateway(manager, stt_config=config)
+            with patch("prototype.live_transport.OpenAIRealtimeTranscriptionClient", FakeShortVADGapProvider):
+                await asyncio.wait_for(gateway(connection), timeout=2.0)
+
+        asyncio.run(run_gateway())
+        state = manager.current().snapshot()["live_state"]
+        self.assertEqual(state["runtime_state"], "ended")
+        self.assertEqual(state["final_utterance_count"], 0)
+        self.assertEqual(state["metrics"]["possible_evidence_gap_count"], 1)
+        self.assertEqual(state["metrics"]["stt_failures"], 0)
+        self.assertTrue(any(x.get("type") == "stt_gap_warning" for x in connection.sent))
+        manager.current().close()
+
     def tearDown(self) -> None:
         session = getattr(self, "session", None)
         if session is not None:

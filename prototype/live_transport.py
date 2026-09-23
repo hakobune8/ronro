@@ -368,6 +368,29 @@ class LiveWebSocketGateway:
                                     "snapshot": self.manager.snapshot(),
                                 },
                             )
+                        elif turns is not None and self._is_recoverable_short_vad_empty(event, config=self.stt_config):
+                            # This is NOT proof of silence. The item is resolved
+                            # by the Provider but may contain missed speech.
+                            # Keep the gap visible in metrics and runtime events.
+                            turn = event['_turn']
+                            gap_seconds = turn['audio_end'] - turn['audio_start']
+                            turns.acknowledge(event.get('item_id'))
+                            current = self.manager.current()
+                            current.record_possible_evidence_gap(gap_seconds)
+                            _logger.warning("possible_stt_evidence_gap %s", _json({
+                                "item_id": event.get("item_id"),
+                                "turn": turn,
+                                "transport": event.get("_transport"),
+                            }))
+                            if stop_seen and not self._provider_has_pending_vad_completion(provider):
+                                self.manager.mark_stt_finalization_complete()
+                            await self._safe_send(connection, {
+                                "type": "stt_gap_warning",
+                                "code": "possible_untranscribed_audio",
+                                "audio_start": turn['audio_start'],
+                                "audio_end": turn['audio_end'],
+                                "snapshot": self.manager.snapshot(),
+                            })
                         else:
                             # Private server diagnostics only: the public
                             # snapshot intentionally omits Provider item IDs.
@@ -465,6 +488,24 @@ class LiveWebSocketGateway:
             self.manager.fail(exc.code, exc.message)
             await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message, "snapshot": self.manager.snapshot()})
             return False
+
+    @staticmethod
+    def _is_recoverable_short_vad_empty(event: dict[str, Any], *, config: RealtimeSTTConfig) -> bool:
+        if config.empty_vad_policy != "warn_short_no_delta" or event.get("code") != "empty_final_transcript":
+            return False
+        turn = event.get('_turn')
+        if not isinstance(turn, dict):
+            return False
+        start, end = turn.get('audio_start'), turn.get('audio_end')
+        return (
+            turn.get('range_known') is True
+            and turn.get('boundary_reason') == 'server_vad'
+            and turn.get('local_commit_sequence') is None
+            and turn.get('delta_count') == 0
+            and isinstance(start, (int, float))
+            and isinstance(end, (int, float))
+            and 0 < end - start <= 3.0
+        )
 
     @staticmethod
     def _provider_has_pending_vad_completion(provider: OpenAIRealtimeTranscriptionClient) -> bool:

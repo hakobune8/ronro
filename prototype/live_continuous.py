@@ -115,6 +115,8 @@ class LiveContinuousSession:
         self._graph_update_count = 0
         self._stt_failure_count = 0
         self._empty_final_count = 0
+        self._possible_evidence_gap_count = 0
+        self._possible_evidence_gap_seconds = 0.0
         self._transport_failure_count = 0
         self._forced_incomplete = False
         self._drain_result: dict[str, Any] | None = None
@@ -359,6 +361,14 @@ class LiveContinuousSession:
         with self._lock:
             self._empty_final_count += 1
 
+    def record_possible_evidence_gap(self, duration_seconds: float) -> None:
+        """Surface unresolved automatic VAD audio without creating Evidence."""
+
+        with self._lock:
+            self._empty_final_count += 1
+            self._possible_evidence_gap_count += 1
+            self._possible_evidence_gap_seconds += duration_seconds
+
     def process_final_transcript(
         self,
         *,
@@ -563,6 +573,8 @@ class LiveContinuousSession:
                 "partial_count": self._partial_count,
                 "stt_failures": self._stt_failure_count,
                 "empty_final_count": self._empty_final_count,
+                "possible_evidence_gap_count": self._possible_evidence_gap_count,
+                "possible_evidence_gap_seconds": round(self._possible_evidence_gap_seconds, 3),
                 "analyzer_calls": len([item for item in queue["items"] if item["analyzer_start_at"]]),
                 "analyzer_failures": queue["failed"],
                 "queue_max_depth": queue["max_depth"],

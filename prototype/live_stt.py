@@ -69,6 +69,7 @@ class RealtimeSTTConfig:
     vad_silence_duration_ms: int = 500
     semantic_vad_eagerness: str = "auto"
     periodic_commit_seconds: float = 30.0
+    empty_vad_policy: str = "strict"
 
     @classmethod
     def from_environment(cls) -> "RealtimeSTTConfig":
@@ -120,6 +121,9 @@ class RealtimeSTTConfig:
             or os.getenv("LIVE_STT_PERIODIC_COMMIT_SECONDS"),
             default=30.0,
         )
+        empty_vad_policy = os.getenv("LIVE_STT_EMPTY_VAD_POLICY", "strict").strip().lower()
+        if empty_vad_policy not in {"strict", "warn_short_no_delta"}:
+            empty_vad_policy = "strict"
         return cls(
             endpoint=endpoint,
             api_key=api_key,
@@ -134,6 +138,7 @@ class RealtimeSTTConfig:
             vad_silence_duration_ms=vad_silence_duration_ms,
             semantic_vad_eagerness=semantic_vad_eagerness,
             periodic_commit_seconds=periodic_commit_seconds,
+            empty_vad_policy=empty_vad_policy,
         )
 
     @property
@@ -156,6 +161,7 @@ class RealtimeSTTConfig:
             "vad_silence_duration_ms": self.vad_silence_duration_ms,
             "semantic_vad_eagerness": self.semantic_vad_eagerness,
             "periodic_commit_seconds": self.periodic_commit_seconds,
+            "empty_vad_policy": self.empty_vad_policy,
             "configured": self.configured,
         }
 
