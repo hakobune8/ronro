@@ -130,6 +130,11 @@ compatibility. The validated Pilot candidate explicitly selects
 `OPENAI_REALTIME_FINALIZATION_MODE=server_vad_bounded` and
 `OPENAI_REALTIME_PERIODIC_COMMIT_SECONDS=30`. Provider `server_vad` handles
 normal turns; the bound is only a safety fallback for a long unfinalized turn.
+The repaired local candidate measures the bound from the first meaningful frame
+in the uncommitted range, excluding leading silence but including subsequent
+pauses. Raw pending PCM duration can therefore exceed 30 seconds during silent
+preparation without requiring a commit. This accounting change requires a new
+candidate image and deployment acceptance; it is not an environment override.
 Keep the `none` mode available for non-Pilot usage and experiments.
 
 ## Storage

@@ -32,6 +32,47 @@ class TurnLedgerTests(unittest.TestCase):
         self.assertTrue(self.ledger.pending())
         self.assertEqual(self.ledger.context('a')['boundary_reason'], 'server_vad')
 
+    def test_silent_preroll_does_not_age_first_speech(self):
+        self.ledger.append(pcm(53, False))
+        self.assertEqual(self.ledger.meaningful_pending_seconds, 0)
+        self.ledger.append(pcm(.1))
+        self.assertAlmostEqual(self.ledger.pending_seconds, 53.1)
+        self.assertAlmostEqual(self.ledger.meaningful_pending_seconds, .1)
+        self.ledger.append(pcm(29.9))
+        self.assertEqual(self.ledger.meaningful_pending_seconds, 30)
+        self.ledger.request(1, 'bounded_fallback')
+        self.assertEqual(self.ledger.intents[0]['start'], 0)
+        self.assertEqual(self.ledger.meaningful_pending_seconds, 0)
+
+    def test_internal_pauses_still_count_toward_bound(self):
+        self.ledger.append(pcm(1))
+        self.ledger.append(pcm(29, False))
+        self.assertEqual(self.ledger.meaningful_pending_seconds, 30)
+
+    def test_new_turn_after_vad_excludes_silent_gap(self):
+        self.ledger.append(pcm(1))
+        self.commit('a', 1)
+        self.ledger.append(pcm(40, False))
+        self.ledger.append(pcm(.1))
+        self.ledger.complete('a', {'type': 'final_transcript'})
+        self.ledger.acknowledge('a')
+        self.assertAlmostEqual(self.ledger.meaningful_pending_seconds, .1)
+
+    def test_bound_clamps_to_committed_cursor_inside_frame(self):
+        self.ledger.append(pcm(1))
+        self.commit('a', .75)
+        self.assertEqual(self.ledger.meaningful_pending_seconds, .25)
+
+    def test_out_of_order_completion_does_not_reset_new_clock(self):
+        self.ledger.append(pcm(2))
+        self.commit('a', 1)
+        self.commit('b', 2, 'a')
+        self.ledger.append(pcm(40, False))
+        self.ledger.append(pcm(3))
+        self.ledger.complete('b', {'type': 'final_transcript'})
+        self.ledger.complete('a', {'type': 'final_transcript'})
+        self.assertEqual(self.ledger.meaningful_pending_seconds, 3)
+
     def test_bounded_commit_keeps_completion_pending(self):
         self.ledger.append(pcm(30))
         self.ledger.request(1, 'bounded_fallback')
@@ -242,6 +283,54 @@ class ProviderItemTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.client.should_commit_at_session_end(has_audio_buffer=True, meaningful_audio=True))
         await self.client.commit()
         self.assertFalse(self.client.should_commit_at_session_end(has_audio_buffer=True, meaningful_audio=True))
+
+    async def test_gateway_preroll_short_speech_only_commits_at_end(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+        from prototype.live_session import LiveSessionManager
+        from prototype.live_transport import LiveWebSocketGateway
+        from prototype.live_audio import encode_audio_frame
+
+        class Analyzer:
+            provider_name = model = prompt_version = 'test'
+            last_trace = None
+            def analyze(self, *args): return []
+
+        class Browser:
+            request = SimpleNamespace(path='/live?controller_id=preroll-test')
+            def __init__(self):
+                self.incoming, self.sent = asyncio.Queue(), []
+            async def recv(self): return await self.incoming.get()
+            async def send(self, message): self.sent.append(json.loads(message))
+            async def close(self): pass
+
+        async def provider_send(message):
+            value = json.loads(message)
+            if value['type'] == 'input_audio_buffer.commit':
+                for event in [
+                    dict(type='input_audio_buffer.committed', item_id='end-item', previous_item_id=None),
+                    dict(type='conversation.item.input_audio_transcription.completed',
+                         item_id='end-item', transcript='資料を確認します'),
+                ]:
+                    await self.client._connection.events.put(json.dumps(event))
+
+        self.client._connection.send = provider_send
+        self.client.connect = AsyncMock()
+        manager = LiveSessionManager(schema_dir=Path(__file__).resolve().parents[1] / 'schemas', analyzer_factory=Analyzer)
+        manager.start_mode('continuous', controller_id='preroll-test')
+        browser = Browser()
+        for seq in range(540):
+            await browser.incoming.put(encode_audio_frame(AudioChunk(seq, seq / 10, pcm(.1, seq >= 530))))
+        await browser.incoming.put(json.dumps({'type': 'stop'}))
+        try:
+            with patch('prototype.live_transport.OpenAIRealtimeTranscriptionClient', lambda cfg: self.client):
+                await asyncio.wait_for(LiveWebSocketGateway(manager, stt_config=self.client.config)(browser), 5)
+            boundaries = [e['boundary_reason'] for e in browser.sent if e['type'] == 'stt_committing']
+            self.assertEqual(boundaries, ['session_end'])
+            self.assertEqual(manager.snapshot()['live_state']['runtime_state'], 'ended')
+            self.assertEqual(len(self.client.turns.delivered), 1)
+        finally:
+            manager.current().close()
 
     async def test_unmatched_commit_error_drains_incomplete_without_hanging(self):
         from types import SimpleNamespace

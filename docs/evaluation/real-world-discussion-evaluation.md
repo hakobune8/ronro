@@ -2223,3 +2223,185 @@ or transcript. Default Analyzer schema remains v2; v3 stays explicit opt-in.
 Regression: **229 tests / 208 PASS / 21 skip**. Separate actual-browser QA checks
 five-line fit, font floor, bounds, repeat-render determinism, six slots and
 structural Action owner/due. Persistent Rail semantics and STT fix are unchanged.
+
+## T2 Retry — candidate deployment and startup failure
+
+The earlier six-minute failed T2 run remains unchanged. This is a separate
+attempt with the approved fixed source interval **00:57:00–01:27:00**.
+
+### Frozen identity and deployment
+
+- Branch: `t2-retry-rc1`.
+- Source SHA: `b8d62f3eb7ca320bb2beba135aad4ac47631af64`.
+- [Existing publish workflow run](https://github.com/hakobune8/ronro/actions/runs/35829209914).
+- Image tag: `ghcr.io/hakobune8/ronro:t2-retry-rc1`.
+- Accepted/deployed digest:
+  `sha256:97ed1d204616a1542fa71001245793804f245b01b90124e46594a2895e850237`.
+
+Public-safe audit excluded source media, complete transcripts, private runtime
+artifacts/identifiers, credentials and local paths. Full suite: **208 PASS /
+21 skip**, `git diff --check` clean. Existing CI `GITHUB_TOKEN` with
+`packages: write` published the unique candidate; no new credentials, release
+tag or main merge. Previous digest is retained privately for rollback.
+
+Digest-pinned rollout reached Ready 1/1, restart 0. `/`, `/shared`, `/control`,
+`/session`, `/healthz`, `/readyz` returned 200; `/live` WSS carried real audio.
+Infrastructure topology remained unchanged. Runtime explicitly selected
+Analyzer output **v3** for display-label evaluation; generic code default stays
+v2. `server_vad_bounded`, 30s, Generic Japanese Meeting Context and `["論路"]`
+remained unchanged. No rebuild/config adjustment between acceptance and retry.
+
+### Short acceptance and provenance
+
+Synthetic Japanese input through the normal controller/HTTP/WSS contract:
+101.854s input, 1,019 accepted chunks, **7 Finals / 397 Partials**. Boundaries:
+5 Server VAD, 2 bounded fallback. STT/Analyzer/Queue failures 0; pending,
+processing and failed queue counts 0; `ended`; Graph/Render **17/17**. Maximum
+uncommitted audio 30.148s. Seven distinct item/Evidence traces were retained;
+no known completed-Final Evidence loss or duplicate Evidence. No raw audio saved.
+
+Actual generated display labels and unsafe-label fallback were observed.
+Past proposal/non-adoption and provisional state were spot-checked; this is not
+general semantic certification. Deployed HTML matched the locally tested bytes.
+A deployed basic fixture rendered within a 1920×1080 DOM with 40px cards and
+hidden branding. Dense six-card/rail coverage remains the prior local browser
+QA of identical HTML, not a newly captured dense live screen. An attempted live
+screenshot timed out when no eligible current-discussion cards were present;
+this alone is not classified as a Product defect.
+
+Official playback provenance used Safari → BlackHole → Chrome, outside the
+evaluation interval. Played capture RMS roughly 0.05–0.10, paused RMS 0, resumed
+roughly 0.047–0.087. Three consecutive Finals corresponded to official Player
+caption/technical-explanation anchors (interim findings, standards revision,
+reliability and strengthening standards). This was caption/visual semantic
+verification, not direct auditory review. Pause/Resume and Player progression
+passed; no reset or Demo contamination observed. Provenance ended cleanly:
+**8 Finals / 655 Partials**, failures 0, Graph/Render **13/13**.
+
+### Retry failure — not the previous empty-transcription failure
+
+A new empty session was prepared, with connected BlackHole track and WSS.
+Preparation included approximately 53 seconds of silent capture before the
+official source began. At the first incoming source audio, the session failed
+within approximately **0.6 seconds of playback**. Backend PCM accounting reached
+about 53.1s, mostly pre-roll silence; this must not be described as 53s of source
+speech. The official Player continued normally until the failure was observed
+and it was stopped at approximately **00:57:20.04**. No 30-minute run completed.
+
+Exact error: **`input_audio_buffer_commit_empty`**, Provider buffer **0.00ms**,
+minimum expected **100ms**. This is a rejected commit, **not** an empty
+`transcription.completed` and not a recurrence proven to have the same cause as
+the original T2 failure. A long silent pre-roll → initial speech transition is
+a diagnostic lead, not an established causal explanation. Detailed Provider
+item/commit ordering is not available in this web snapshot; do not invent it.
+
+| Retry measurement | Result |
+|---|---:|
+| Finals / Partials | 0 / 0 |
+| STT errors / empty transcription completions | 1 / 0 |
+| Analyzer calls / failures | 0 / 0 |
+| Queue pending / processing / failed | 0 / 0 / 0 |
+| Topics / Nodes / Relations | 0 / 0 / 0 |
+| Decision / Open Item / Action | 0 / 0 / 0 |
+| Graph / Render revision | 2 / 2 |
+| Runtime state | ended_with_incomplete_processing |
+
+Queue drain reported complete, but that does not override the unsafe runtime
+state. Completed-Final Evidence loss is zero only trivially (no Finals); loss or
+unresolved coverage of incoming source audio cannot be excluded. Overall
+**Evidence loss = 0 is not claimed**. No automatic confirmation, invented
+owner/due, Graph corruption or Queue silent drop was observed in the empty run.
+Unresolved STT item count cannot independently be quantified from retained API
+metadata and must not be reported as zero.
+
+No 10/20/30-minute snapshots, label-quality ratings, recency statistics or
+Q1–Q7 scores are available. No T2 latency/cost quality conclusion is possible.
+Short-control performance is separate: Queue p50/p95/max 0.001/0.266/0.266s;
+Analyzer 5.854/10.842/10.842s; E2E 9.027/17.629/17.629s.
+
+**Decision: D. T2 PIPELINE FAILURE — RETRY NOT READY.** Source/capture stopped,
+evaluation timers cleared; candidate remains deployed without further tuning
+or automatic rollback. Investigate the silent-pre-roll/first-speech commit
+transition on the frozen version before another retry. No fix or second retry
+was performed. RFC-0006 remains pending; T3, Live Pilot and release not started.
+
+## T2 Retry Silent Pre-roll / First-speech Repair
+
+This follow-up preserves both failed T2 runs. It addresses the retry's
+`input_audio_buffer_commit_empty`, not the earlier empty transcription completion.
+
+### Controlled root-cause evidence
+
+An owned synthetic Japanese fixture reproduced the startup failure using the
+unchanged candidate's Live gateway and real Provider. After 53 seconds of silent
+PCM, frame 530 introduced meaningful input. The application immediately fired
+bounded fallback with raw pending duration 53.1s, although only 0.1s of meaningful
+input had begun. No Provider speech-start event had arrived. The Provider returned
+`invalid_request_error / input_audio_buffer_commit_empty`, explicitly referencing
+the local commit's event ID. There were no transcription completions. Runtime
+ended incomplete, with zero Finals and Partials. This establishes the premature
+commit and rejection sequence; it does not expose Provider-internal buffering.
+
+The original web snapshot lacked this correlation. The controlled reproduction
+provides the matching failure pattern without claiming missing historical IDs.
+The root cause is the **local bounded clock counting leading silence**, not
+Shared View, Analyzer, YouTube restrictions, or an empty completed item.
+
+The [official Realtime client-event contract](https://developers.openai.com/api/reference/resources/realtime/client-events)
+distinguishes a rejected empty-buffer commit from a successfully committed item.
+The [transcription guide](https://developers.openai.com/api/docs/guides/realtime-transcription)
+also requires item-based correlation rather than assuming cross-turn completion
+ordering. Neither contract justifies treating this rejection as a safe Final.
+
+### Minimal repair
+
+The bound now measures from the first meaningful frame in the uncommitted range
+to the latest appended sample. Leading silence is excluded; pauses after speech
+begins are included. The existing silence detector and 30-second configuration
+remain unchanged. Audio/range ownership is retained, not truncated. Older item
+completion cannot reset the newer range's clock. Raw pending-audio metrics still
+include silence and must not be mistaken for meaningful-audio bound age.
+
+`none` mode, explicit end flushing, unsafe empty-item handling and error reporting
+are unchanged. No STT model, context, Analyzer, Canonical or Shared View changes.
+
+### Validation scope
+
+Real-Provider controls run in isolated child processes with the existing Live
+controller/gateway contract and a Noop Analyzer. They exercise STT/Evidence/queue
+handling, not production Analyzer quality or Safari/BlackHole provenance. Audio
+is generated and streamed in RAM only; private artifacts retain metadata, not
+raw audio or transcript text. The Deployment and image digest remain unchanged.
+
+The six added regression cases cover silent pre-roll, intervening pauses, a new
+turn after VAD and a silent gap, partial-frame ownership, out-of-order completion,
+and the complete gateway's short-speech/session-end sequence. Full suite:
+**214 PASS / 21 skip**; focused STT suite: **56 PASS**.
+
+| Real-Provider control | Input duration | Finals / Partials | Explicit boundaries | Result |
+|---|---:|---:|---|---|
+| Unchanged baseline: 53s silence then speech | 68s planned; stopped near 53.2s | 0 / 0 | premature fallback at 53.1s raw pending | incomplete; commit rejected |
+| Repaired: identical 53s silence then speech | 68s | 1 / 43 | none; normal VAD | ended |
+| 40s silence then 36s continuous speech | 79s | 2 / 169 | 1 fallback at 30.0s meaningful age | ended |
+| Pure silence | 40s | 0 / 0 | none | ended |
+| Normal VAD, six turns | 60s | 6 / 147 | none | ended |
+| Near-boundary VAD/fallback race | 63s | 2 / 290 | 2 fallbacks, each at 30.0s | ended |
+| Close turns and session end | 62.1s | 23 / 179 | 1 session-end flush | ended |
+
+All repaired controls had zero STT failures, zero duplicate completions and clean
+drain. Committed/completed item counts matched (1/1, 2/2, 0/0, 6/6, 4/4,
+23/23 respectively). The race control's two additional empty completions were
+known silent automatic-VAD ranges, 30.000–30.368s and 60.600–60.960s; the existing
+item-specific benign handling applied without weakening error policy. Their
+speech-bearing explicit items completed non-empty. No unresolved-item failure
+was reported. These controls do not establish exact recognition recall or
+production Analyzer/Graph semantic safety; Noop Analyzer timings are not Pilot
+performance measurements.
+
+**Fix locally validated — ready for candidate packaging and deployed short
+acceptance, not yet T2 retry-ready.** The running image remains the prior failed
+candidate. Next: publish a new unique CI candidate, deploy by digest, repeat
+silent-pre-roll/first-speech and long-turn smoke with the real Analyzer, then
+official Safari → BlackHole → Chrome provenance. Only that accepted same digest
+may be used for the frozen 00:57:00–01:27:00 retry. No deploy, T2, T3, Pilot or
+release was performed in this repair task. RFC-0006 remains pending.

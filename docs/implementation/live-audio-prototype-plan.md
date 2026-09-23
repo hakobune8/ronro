@@ -886,3 +886,13 @@ generic default `none`、Pilotの `server_vad_bounded` / 30秒、モデル、Con
 Analyzer、Canonical、Shared Viewは変更しない。これはローカル実装であり、自動デプロイしない。
 実Provider検証は隔離process・synthetic入力・Noop Analyzerなので、T2本番や実会議の品質評価を
 代替しない。詳細はReal-world Evaluation文書のitem-scoped repair記録を参照。
+
+### Silent pre-roll bound repair
+
+fallback判定は `TurnLedger.meaningful_pending_seconds` を使う。未commit範囲の
+最初の有意frameから現在のappend位置までを測り、先行無音を除外する。
+発話開始後の休止は含めるため、voiced時間の積算ではない。既存の無音閾値は変更しない。
+commit範囲・PCM自体は切り捨てず、raw pending durationの観測値も変更しない。
+`bounded_fallback_fired.bounded_timer_age` はこの意味のある音声の経過時間を示す。
+commitによる範囲所有の更新だけが対象範囲を進め、旧itemのFinal到着ではリセットしない。
+`none` の明示commit、session-end flush、危険なempty/不明範囲の失敗は維持する。

@@ -218,11 +218,13 @@ class LiveWebSocketGateway:
                     and self.stt_config.finalization_mode in {"bounded", "server_vad_bounded"}
                 ):
                     current = self.manager.current()
-                    buffer_duration = (
-                        current.audio_buffer_duration_seconds()
-                        if current is not None
-                        else 0.0
+                    # Leading silence is retained for range accounting, but
+                    # must not make the first speech frame immediately overdue.
+                    bound_duration = (
+                        current.audio_buffer_duration_seconds() if current is not None else 0.0
                     )
+                    if turns is not None:
+                        bound_duration = turns.meaningful_pending_seconds
                     meaningful_audio = bool(
                         current is not None
                         and getattr(current, "has_meaningful_audio_buffer", lambda: False)()
@@ -240,9 +242,9 @@ class LiveWebSocketGateway:
                     if (
                         should_commit
                         and (turns is not None or not self._provider_has_pending_vad_completion(provider))
-                        and buffer_duration >= self.stt_config.periodic_commit_seconds
+                        and bound_duration >= self.stt_config.periodic_commit_seconds
                     ):
-                        diagnostic("bounded_fallback_fired", session=current, provider=provider, commit_pending=commit_pending, bounded_timer_armed=True, bounded_timer_age=buffer_duration)
+                        diagnostic("bounded_fallback_fired", session=current, provider=provider, commit_pending=commit_pending, bounded_timer_armed=True, bounded_timer_age=bound_duration)
                         commit_pending = await self._request_continuous_commit(
                             provider, connection, boundary_reason="bounded_fallback"
                         )

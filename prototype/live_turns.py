@@ -32,6 +32,20 @@ class TurnLedger:
     def pending_seconds(self):
         return (self.samples - self.cursor) / 24000
 
+    @property
+    def meaningful_pending_seconds(self):
+        """Age from first meaningful uncommitted frame, not silent pre-roll.
+
+        Keep intervening pauses in the bound; this is not summed voiced time.
+        Ownership advances on commit, never on an older item's completion.
+        This clock does not discard or change the committed audio range.
+        """
+        cursor = self.cursor
+        for start, end, speech in self.frames:
+            if speech and end > cursor:
+                return (self.samples - max(start, cursor)) / 24000
+        return 0.0
+
     def request(self, sequence, reason, event_id=None):
         self.intents.append(dict(sequence=sequence, reason=reason, start=self.cursor,
                                  end=self.samples, at=time.monotonic(), event_id=event_id))
