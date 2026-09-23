@@ -1,8 +1,8 @@
 """Item-scoped audio accounting. No transcript or audio is persisted here."""
 from collections import deque
+import math
+import struct
 import time
-
-from .live_audio import is_silent_pcm16le
 
 
 class TurnLedger:
@@ -11,6 +11,9 @@ class TurnLedger:
         self.samples = 0
         self.allocated = 0
         self.frames = []
+        # Aggregate signal only. Kept alongside frames for item-scoped
+        # diagnostics; no PCM content is retained by this ledger.
+        self.frame_levels = []
         self.items = {}
         self.intents = []
         self.ready = deque()
@@ -18,7 +21,13 @@ class TurnLedger:
 
     def append(self, pcm):
         end = self.samples + len(pcm) // 2
-        self.frames.append((self.samples, end, not is_silent_pcm16le(pcm)))
+        squared = 0
+        peak = 0
+        for (sample,) in struct.iter_unpack('<h', pcm):
+            squared += sample * sample
+            peak = max(peak, abs(sample))
+        self.frames.append((self.samples, end, peak > 8))
+        self.frame_levels.append((squared, peak, end - self.samples))
         self.samples = end
 
     def meaningful(self, start, end):
@@ -109,6 +118,12 @@ class TurnLedger:
         known = start is not None and end is not None and 0 <= start <= end <= self.samples
         indices = [i for i, (a, b, _) in enumerate(self.frames)
                    if known and a < end and b > start]
+        # Boundary frames can be partially covered, so these levels are
+        # approximate; their frame count makes that limitation explicit.
+        count = sum(self.frame_levels[i][2] for i in indices)
+        squared = sum(self.frame_levels[i][0] for i in indices)
+        levels = [math.sqrt(self.frame_levels[i][0] / self.frame_levels[i][2])
+                  for i in indices if self.frame_levels[i][2]]
         return dict(item_id=key, range_known=known,
                     audio_start=start / 24000 if known else None,
                     audio_end=end / 24000 if known else None,
@@ -121,7 +136,11 @@ class TurnLedger:
                     provider_previous_item_id=item.get('previous'),
                     vad_start_ms=item.get('vad_start'),
                     vad_end_ms=item.get('vad_end'),
-                    delta_count=item.get('delta_count', 0))
+                    delta_count=item.get('delta_count', 0),
+                    pcm_rms=round(math.sqrt(squared / count), 2) if count else None,
+                    max_frame_rms=round(max(levels), 2) if levels else None,
+                    pcm_peak=max((self.frame_levels[i][1] for i in indices), default=None),
+                    rms_sample_count=count)
 
     def complete(self, key, event):
         item = self.items.setdefault(key, {})

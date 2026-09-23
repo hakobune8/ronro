@@ -31,6 +31,21 @@ class TurnLedgerTests(unittest.TestCase):
         self.commit('a', 1)
         self.assertTrue(self.ledger.pending())
         self.assertEqual(self.ledger.context('a')['boundary_reason'], 'server_vad')
+        self.assertEqual(self.ledger.context('a')['pcm_rms'], 4096)
+        self.assertEqual(self.ledger.context('a')['pcm_peak'], 4096)
+
+    def test_item_signal_metadata_distinguishes_low_level_vad_from_speech(self):
+        self.ledger.append((b'\x10\x00') * 24000)
+        self.commit('quiet', 1)
+        self.ledger.append(pcm(1))
+        self.commit('speech', 2, 'quiet')
+        quiet = self.ledger.context('quiet')
+        speech = self.ledger.context('speech')
+        self.assertTrue(quiet['meaningful'])  # Existing >8-sample guard.
+        self.assertEqual(quiet['pcm_rms'], 16)
+        self.assertEqual(quiet['max_frame_rms'], 16)
+        self.assertEqual(speech['pcm_rms'], 4096)
+        self.assertEqual(speech['rms_sample_count'], 24000)
 
     def test_silent_preroll_does_not_age_first_speech(self):
         self.ledger.append(pcm(53, False))

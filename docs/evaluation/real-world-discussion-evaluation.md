@@ -2644,3 +2644,77 @@ Graph/Render revisions 16/16. The short run confirms item tracing and
 transport on real official playback, but **does not reproduce or explain**
 the earlier nine-minute empty completion. It is not a T2 retry and does not
 change the frozen T2 segment. T2 retry remains **NOT READY**.
+
+## T2 Retry 3 — diagnostic candidate, stopped on unsafe empty completion
+
+The user authorized a further retry with the already deployed diagnostic
+digest (`ghcr.io/hakobune8/ronro@sha256:921a10cc546da783dd947e1d68e2341dd18cb0412fccaadda26229b4cf40f28f`). No Product code or configuration
+was changed. This is a separate run; the earlier failed T2 attempts remain
+unchanged. Safari official playback started at the frozen 00:57:00 point;
+Chrome captured BlackHole through `/live`. The session started with zero
+Evidence, Utterances, Queue items and Graph Nodes. The same separated-browser
+path had passed a short non-evaluation official-source transport check; no new
+claim of a completed 30-minute provenance or quality evaluation is made here.
+
+The source progressed continuously to approximately 01:12:56 before the
+operator stopped it following a pipeline error. The captured playback monitor
+recorded no reset, unready state, unexpected pause or rate change up to that
+stop. The STT failure occurred earlier, at approximately 01:12:06 source time
+(15 minutes 6 seconds into the selected interval); the interval after that
+failure is **not** accepted as evaluation audio. The 10-minute private snapshot
+was saved: 31 Finals, 2,776 Partials, 28 Nodes, 27 Edges and Graph/Render
+58/58. There are no valid 20- or 30-minute snapshots.
+
+At failure, the Provider emitted `input_audio_buffer.speech_started`,
+`speech_stopped`, `committed`, then
+`conversation.item.input_audio_transcription.completed` for the **same
+Provider item** with an empty transcript and zero deltas. Item-scoped tracing
+mapped it to a known approximately 1.888-second local audio range (frames
+10114–10133), marked meaningful by RONRO's local signal accounting, with a
+`server_vad` boundary and **no explicit fallback commit for that item**.
+This is not `input_audio_buffer_commit_empty`, and this terminal item was not
+caused by a simultaneous bounded-fallback commit. Why the Provider returned
+empty recognition for that VAD item is not established; local non-silence alone
+does not prove recognizable speech. It would be unsafe to relabel the item
+benign without further evidence.
+
+The session ended `ended_with_incomplete_processing` as designed. Fifty
+non-empty Finals produced fifty retained Evidence records; all fifty Analyzer
+jobs completed, with queue pending/processing/failed 0/0/0 and Graph/Render
+90/90. Final Graph: 3 Topics, 44 Nodes (31 Ideas, 7 Concerns, 3 Open Items,
+3 Topics), 41 Edges, no Decisions or Actions. Automatic confirmations and
+Analyzer failures were zero. Completed-Final Evidence was retained, but
+**Evidence loss = 0 cannot be claimed for the empty item**. The peak
+`current_unfinalized_audio` metric reached 138.5 seconds despite the nominal
+30-second fallback; its interpretation requires a separate state-timeline
+review, not a mid-run configuration change.
+
+**Decision: D. T2 PIPELINE FAILURE.** The frozen 30-minute T2 interval was not
+completed. No T2 quality scores, T3 run, Pilot or release decision follows
+from this partial run. Next work is a focused review of the failed VAD item's
+signal and Provider lifecycle, including why a locally meaningful short item
+completed empty and whether the 138.5-second metric reflects unresolved
+speech. Do not retry the 30-minute interval until that failure is classified
+and short validation passes.
+
+### Retry 3 follow-up: low-signal VAD item hypothesis
+
+The item-scoped trace establishes that the unsafe completion belonged to a
+short Server VAD item, not an explicit fallback item. Transient browser
+pre-resample monitoring sampled one approximately 100-ms chunk per second.
+Near the failed item's frame range, sampled RMS values fell from about 0.048
+in preceding speech to approximately 0.00027 and 0.00002; the Provider emitted
+zero transcription deltas for the failed item. This supports a low-signal or
+false-VAD hypothesis, but sampling does **not** prove that every frame of the
+item lacked speech. No source audio was saved.
+
+The local `meaningful` guard treats any PCM frame with a sample above 8/32768
+as meaningful. That is a useful near-zero/silence test, not a reliable speech
+classifier. A diagnostic-only follow-up now records per-item PCM RMS,
+maximum frame RMS and peak as aggregate metadata, leaving finalization and
+empty-completion behavior unchanged. The next gate is a short official-player
+control with this instrumentation. Only a demonstrated low-signal range can
+justify a narrowly scoped benign-empty rule; real speech or unknown coverage
+must continue to fail safely. The latest run's 138.5-second max-unfinalized
+metric also requires separate interpretation: session pre-roll and item
+ownership must be checked before treating it as 138.5 seconds of speech.
