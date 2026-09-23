@@ -355,6 +355,7 @@
       <div class="debug-grid">
         <div id="event-log"></div>
         <pre id="graph-json"></pre>
+        <pre id="display-label-debug"></pre>
       </div>
     </details>
   </div>
@@ -1006,6 +1007,7 @@
 
     function renderDebug() {
       $('graph-json').textContent = JSON.stringify(model.state.graph, null, 2);
+      $('display-label-debug').textContent = JSON.stringify({presentation_only: true, nodes: model.state.graph.nodes.map(node => ({id: node.id, canonical: node.label, display_label: model.map.presentation?.[node.id]?.display_label ?? null, ...model.map.display_labels?.[node.id]}))}, null, 2);
       $('event-log').innerHTML = `<table><tr><th>#</th><th>Actor</th><th>Event</th><th>Payload</th></tr>${model.events.map((event) => `<tr><td>${event.sequence}</td><td>${escapeHtml(event.actor)}</td><td>${escapeHtml(event.event_type)}</td><td>${escapeHtml(JSON.stringify(event.payload))}</td></tr>`).join('')}</table>`;
     }
 

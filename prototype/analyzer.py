@@ -19,6 +19,7 @@ from .fixtures import Fixture
 from .materializer import initial_state
 from .replay import ReplayResult, ReplayRunner
 from .schema import SchemaValidator
+from .display_labels import record_hint
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class CandidateEvent:
     source_evidence_ids: tuple[str, ...]
     payload: dict[str, Any]
     actor: str = "analyzer"
+    presentation: dict[str, Any] | None = None
 
     def to_event(self, sequence: int) -> dict[str, Any]:
         event = {
@@ -437,6 +439,7 @@ class TranscriptReplaySession:
             try:
                 self.validator.validate_event(event)
                 self.result = self.replay_runner.apply_event(self.result, event)
+                record_hint(self.result, candidate)
             except PrototypeError as exc:
                 self._record_error(exc, candidate)
         self.cursor += 1

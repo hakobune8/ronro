@@ -182,7 +182,7 @@ class LiveOneUtteranceSession:
             schema_validator=self.schema_validator,
             meeting_goal=self.goal,
             prompt_version="analyzer-prompt-v4",
-            output_schema_version="v2",
+            output_schema_version=os.getenv("REAL_ANALYZER_OUTPUT_SCHEMA_VERSION", "v2"),
         )
 
     def _session_document(self) -> dict[str, Any]:
@@ -426,7 +426,7 @@ class LiveOneUtteranceSession:
 
     def snapshot(self) -> dict[str, Any]:
         graph = self.state["graph"]
-        map_value = map_projection(self.state, self.events, self.layout)
+        map_value = map_projection(self.state, self.events, self.layout, self._queue_runtime.result.presentation)
         queue_snapshot = self._queue_runtime.queue.snapshot()
         return {
             "live": True,
@@ -592,7 +592,7 @@ class LiveSessionManager:
                         schema_validator=self.validator,
                         meeting_goal="論路の論点図を会議中に理解する",
                         prompt_version="analyzer-prompt-v4",
-                        output_schema_version="v2",
+                        output_schema_version=os.getenv("REAL_ANALYZER_OUTPUT_SCHEMA_VERSION", "v2"),
                     )),
                     analyzer_factory=self.analyzer_factory,
                     render_interval_seconds=render_interval_seconds,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from typing import Any, Iterable
+from .display_labels import display_projection
 
 
 MAIN_LANE_GAP = 320
@@ -281,6 +282,7 @@ def map_projection(
     state: dict[str, Any],
     events: Iterable[dict[str, Any]],
     layout: StableLayout,
+    presentation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build M5-only presentation data; the canonical Graph remains untouched."""
 
@@ -298,6 +300,8 @@ def map_projection(
     }
     return {
         **projected,
+        "presentation": copy.deepcopy(presentation or {}),
+        "display_labels": display_projection(graph, presentation),
         "recent_flow": recent_topic_flow(event_list, graph),
         "counts": counts,
         "observation": None,

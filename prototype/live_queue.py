@@ -481,7 +481,7 @@ class LiveAnalyzerRuntime:
                 "worker_alive": self._worker.alive,
                 "state": copy.deepcopy(self.result.state),
                 "events": copy.deepcopy(list(self.result.events)),
-                "map": copy.deepcopy(map_projection(self.result.state, self.result.events, self.layout)),
+                "map": copy.deepcopy(map_projection(self.result.state, self.result.events, self.layout, self.result.presentation)),
             }
 
     def latency_metrics(self) -> dict[str, Any]:
@@ -565,6 +565,8 @@ class LiveAnalyzerRuntime:
                     event = candidate.to_event(sequence)
                     self.schema_validator.validate_event(event)
                     staged = self.replay_runner.apply_event(staged, event)
+                    from .display_labels import record_hint
+                    record_hint(staged, candidate)
                     staged_events.append(event)
             except (PrototypeError, TypeError, ValueError, KeyError) as exc:
                 raise QueueProcessingError("candidate_rejected", str(exc)) from exc

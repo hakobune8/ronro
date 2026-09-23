@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Protocol
 
 from .live_audio import TARGET_SAMPLE_RATE
+from .live_diagnostic import diagnostic
+from .live_turns import TurnLedger
 
 try:  # Imported lazily in production, but kept optional for unit tests.
     from websockets.asyncio.client import connect
@@ -340,6 +342,7 @@ class OpenAIRealtimeTranscriptionClient:
         self._vad_speech_active = False
         self._pending_vad_completions = 0
         self._provider_event_counts: dict[str, int] = {}
+        self.turns = TurnLedger('semantic_vad' if config.finalization_mode == 'semantic_vad' else 'server_vad')
 
     async def connect(self) -> None:
         if connect is None:  # pragma: no cover
@@ -374,10 +377,16 @@ class OpenAIRealtimeTranscriptionClient:
         if not pcm16le:
             return
         await self._send(build_append_event(pcm16le))
+        self.turns.append(pcm16le)
+        diagnostic("provider_append_sent", provider=self, samples=len(pcm16le)//2, duration=len(pcm16le)/48000)
 
     async def commit(self) -> None:
         self._commit_sequence += 1
-        await self._send(build_commit_event())
+        client_event_id = f'{self.connection_id}-commit-{self._commit_sequence}'
+        self.turns.request(self._commit_sequence, self._last_boundary_reason, client_event_id)
+        diagnostic("explicit_commit_attempt", provider=self, local_commit_sequence=self._commit_sequence)
+        await self._send({**build_commit_event(), 'event_id': client_event_id})
+        diagnostic("explicit_commit_sent", provider=self, local_commit_sequence=self._commit_sequence)
 
     def mark_boundary_reason(self, reason: str) -> None:
         """Attach a local, non-semantic reason to the next Final trace."""
@@ -389,7 +398,7 @@ class OpenAIRealtimeTranscriptionClient:
         return self.config.finalization_mode in {"server_vad", "semantic_vad", "server_vad_bounded"}
 
     def has_pending_vad_completion(self) -> bool:
-        return self._pending_vad_completions > 0
+        return self.turns.pending() or self.turns.meaningful(self.turns.cursor, self.turns.samples)
 
     def should_commit_bounded_fallback(
         self,
@@ -406,6 +415,9 @@ class OpenAIRealtimeTranscriptionClient:
         sufficient.
         """
 
+        if self.turns.frames:
+            return (not self.turns.intents and
+                    self.turns.meaningful(self.turns.cursor, self.turns.samples))
         if not has_audio_buffer or not meaningful_audio:
             return False
         if self.vad_enabled:
@@ -427,6 +439,10 @@ class OpenAIRealtimeTranscriptionClient:
         commit can produce an empty provider completion.
         """
 
+        if self.turns.frames:
+            return (not self.turns.intents and self.turns.samples > self.turns.cursor
+                    and (not self.vad_enabled or
+                         self.turns.meaningful(self.turns.cursor, self.turns.samples)))
         if self.config.finalization_mode == "bounded":
             return meaningful_audio
         if not self.vad_enabled:
@@ -485,6 +501,8 @@ class OpenAIRealtimeTranscriptionClient:
         ``receive_until_final``.
         """
 
+        if self.turns.ready:
+            return self.turns.ready.popleft()
         if self._connection is None:
             raise RealtimeSTTFailure("provider_not_connected", "Realtime STT is not connected")
         try:
@@ -507,6 +525,8 @@ class OpenAIRealtimeTranscriptionClient:
                 "message": "Provider event must be an object",
             }
         raw_type = raw.get("type")
+        diagnostic("provider_receive", provider=self, raw=raw)
+        self.turns.observe(raw)
         if raw_type:
             self._provider_event_counts[str(raw_type)] = self._provider_event_counts.get(str(raw_type), 0) + 1
         if raw_type in {"input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped"}:
@@ -522,6 +542,29 @@ class OpenAIRealtimeTranscriptionClient:
                     "semantic_vad" if self.config.finalization_mode == "semantic_vad" else "server_vad"
                 )
         runtime_event = adapt_realtime_event(raw, seen_final_item_ids=self._seen_final_item_ids)
+        if raw_type == 'error' and (raw.get('error') or {}).get('code') == 'input_audio_buffer_commit_empty':
+            if self.turns.reconcile_empty_commit((raw.get('error') or {}).get('event_id')):
+                runtime_event = dict(type='ignored', raw_type=raw_type, reason='commit_superseded_by_vad', event_id=raw.get('event_id'))
+        item_id = raw.get("item_id")
+        if raw_type == "conversation.item.input_audio_transcription.completed" and runtime_event.get("type") != "duplicate_final":
+            context = self.turns.context(item_id)
+            runtime_event['_turn'] = context
+            if not context['range_known'] and runtime_event.get('type') == 'final_transcript':
+                runtime_event = dict(type='stt_error', code='turn_correlation_failed',
+                                     message='Provider item audio coverage is unknown or overlapping',
+                                     item_id=item_id, event_id=raw.get('event_id'), _turn=context)
+            runtime_event['_transport'] = {
+                **self.diagnostic_context(),
+                'boundary_reason': context['boundary_reason'],
+                'boundary_event_id': context['boundary_event_id'],
+                'local_commit_sequence': context['local_commit_sequence'],
+            }
+            if runtime_event.get('code') == 'empty_final_transcript':
+                # Only a known, silent automatic item is benign. An explicit
+                # or unknown region remains unsafe, regardless of other items.
+                runtime_event['_benign_empty'] = (
+                    context['range_known'] and not context['meaningful']
+                    and context['boundary_reason'] in {'server_vad', 'semantic_vad'})
         if raw_type == "conversation.item.input_audio_transcription.completed":
             self._pending_vad_completions = max(0, self._pending_vad_completions - 1)
         if runtime_event.get("type") == "stt_error":
@@ -529,7 +572,10 @@ class OpenAIRealtimeTranscriptionClient:
             runtime_event["event_id"] = raw.get("event_id")
             runtime_event["transcript_id"] = raw.get("transcript_id")
             runtime_event["commit_id"] = raw.get("commit_id")
-            runtime_event["_transport"] = self.diagnostic_context()
+            runtime_event.setdefault("_transport", self.diagnostic_context())
+        diagnostic("provider_adapted", provider=self, raw_type=raw_type, item_id=raw.get("item_id"), event_id=raw.get("event_id"), adapted_type=runtime_event.get("type"), code=runtime_event.get("code"), item_context=runtime_event.get('_turn'))
+        if raw_type == "conversation.item.input_audio_transcription.completed" and runtime_event.get('type') != 'duplicate_final':
+            return self.turns.complete(item_id, runtime_event)
         return runtime_event
 
     async def close(self) -> None:

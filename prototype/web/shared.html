@@ -107,6 +107,7 @@
     .discussion-active .topic-items { grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-rows: repeat(3,minmax(0,1fr)); flex: 1; max-width: none; min-height: 0; gap: 20px; }
     .discussion-active .topic-item, html.capture-1920 .discussion-active .topic-item { display: flex; align-items: center; font-size: 40px; line-height: 1.32; font-weight: 500; padding: 24px; min-height: 0; }
     .discussion-active .shared-main:not(.no-rail) .topic-item { padding-inline: 14px; }
+    .discussion-label { display: block; width: 100%; min-width: 0; }
     .discussion-active .topic-more { font-size: 23px; text-align: right; height: 38px; flex-shrink: 0; cursor: default; }
     .empty-slot { visibility: hidden; }
     .persistent-rail { padding-left: 24px; border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; min-height: 0; }
@@ -210,6 +211,41 @@
         : `<li class="side-empty">${escapeHtml(emptyText)}</li>`;
     }
 
+    // Measure actual wrapped text, not character count. Never truncate or hide
+    // overflow: unresolved extremes remain detectable at the 36px lower bound.
+    function fitDiscussionCards() {
+      for (const card of document.querySelectorAll('.discussion-active .topic-item')) {
+        const text = card.querySelector('.discussion-label');
+        if (!text) continue;
+        card.style.paddingBlock = '';
+        let fits = false;
+        for (const size of [40, 38, 36]) {
+          card.style.fontSize = `${size}px`;
+          const measure = () => {
+            const range = document.createRange(); range.selectNodeContents(text);
+            const rects = [...range.getClientRects()].filter(r => r.width > 0);
+            const lines = new Set(rects.map(r => Math.round(r.top))).size;
+            const style = getComputedStyle(card);
+            const available = card.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+            const height = rects.length ? Math.max(...rects.map(r => r.bottom)) - Math.min(...rects.map(r => r.top)) : 0;
+            card.dataset.textLines = String(lines);
+            return lines <= 5 && height <= available + 1 && text.scrollWidth <= text.clientWidth + 1;
+          };
+          fits = measure();
+          if (!fits && size === 36) {
+            // Five 36px lines need ~238px. Recover vertical padding on dense
+            // Topic-flow layouts before declaring a genuine capacity issue.
+            card.style.paddingBlock = '12px';
+            fits = measure();
+          }
+          if (fits) break;
+        }
+        card.dataset.textFit = fits ? 'fit' : 'unresolved';
+      }
+    }
+    window.addEventListener('resize', fitDiscussionCards);
+    document.fonts.ready.then(fitDiscussionCards);
+
     function renderShared(snapshot, isDemo = false) {
       const graph = snapshot?.state?.graph;
       const shared = snapshot?.map?.shared;
@@ -229,9 +265,17 @@
         return;
       }
       const nodes = new Map(graph.nodes.map(n => [n.id, n]));
+      const representations = snapshot.map.display_labels || {};
+      const displayText = node => representations[node?.id]?.text || node?.label || '';
+      const actionDetails = node => {
+        if (node?.type !== 'action') return '';
+        const action = node.action || {};
+        const details = [action.owner ? `担当：${action.owner}` : '', action.due_date ? `期限：${action.due_date}` : ''].filter(Boolean);
+        return details.length ? `<div class="action-details">${details.map(escapeHtml).join(' ／ ')}</div>` : '';
+      };
       const cards = shared.slots.map(id => {
         const node = nodes.get(id);
-        return node ? `<article class="topic-item ${escapeHtml(node.type)}">${escapeHtml(node.label)}</article>`
+        return node ? `<article class="topic-item ${escapeHtml(node.type)}"><span class="discussion-label">${escapeHtml(displayText(node))}</span></article>`
           : '<div class="empty-slot" aria-hidden="true"></div>';
       }).join('');
       const headings = {candidate: '決定候補', confirmed: '確定事項', open_item: '未解決事項', action: '次の対応'};
@@ -241,7 +285,7 @@
         <div class="topic-more">${shared.overflow ? 'ほか'+shared.overflow+'件' : ''}</div></section>`
         + (rail.length ? `<aside class="persistent-rail">${rail.map(([key,value]) =>
           `<section class="persistent-section ${key}"><h2>${headings[key]}</h2>
-            ${value.node_ids.map(id => `<div class="persistent-item">${escapeHtml(nodes.get(id)?.label)}</div>`).join('')}
+            ${value.node_ids.map(id => `<div class="persistent-item">${escapeHtml(displayText(nodes.get(id)))}${actionDetails(nodes.get(id))}</div>`).join('')}
             ${value.overflow ? `<div class="topic-more">ほか${value.overflow}件</div>` : ''}</section>`).join('')}</aside>` : '');
       // Only actual canonical focus transitions; never infer a Topic from card capacity.
       const generic = label => ['その他','未分類','other','others','misc','other discussion items'].includes(String(label).trim().toLowerCase());
@@ -253,6 +297,7 @@
       const recent = flow.slice(-4).reverse();
       $('flow-list').innerHTML = meaningfulFlow ? recent.map((item,index) =>
         `${index ? '<span class="flow-arrow">←</span>' : ''}<span class="flow-item${index === 0 && item.topic_id === graph.current_topic?.primary_topic_id ? ' current' : ''}">${escapeHtml(item.label)}</span>`).join('') : '';
+      fitDiscussionCards();
     }
 
     async function fetchDemo() {

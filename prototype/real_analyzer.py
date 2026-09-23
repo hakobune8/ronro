@@ -28,6 +28,7 @@ from .analyzer import CandidateEvent
 from .errors import PrototypeError
 from .materializer import RELATION_MATRIX
 from .schema import SchemaValidator
+from .display_labels import INSTRUCTION as DISPLAY_INSTRUCTION, POLICY_VERSION
 
 
 PROMPT_VERSION = "analyzer-prompt-v1"
@@ -209,7 +210,7 @@ class OpenAICompatibleProvider:
             request_body["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "discussion_analyzer_output_v2",
+                    "name": "discussion_analyzer_output_v3" if response_schema.get("$id") == "urn:discussion-map:analyzer-output-v3" else "discussion_analyzer_output_v2",
                     "strict": True,
                     "schema": copy.deepcopy(dict(response_schema)),
                 },
@@ -857,6 +858,8 @@ class RealAnalyzer:
         self.context_builder = context_builder or AnalysisContextBuilder()
         self.prompt_version = prompt_version
         self.output_schema_version = output_schema_version
+        if output_schema_version not in {"v1", "v2", "v3"}:
+            raise ValueError("Unsupported Analyzer output schema version")
         self.run_history: list[dict[str, Any]] = []
         self.last_trace: dict[str, Any] | None = None
 
@@ -900,12 +903,16 @@ class RealAnalyzer:
         )
         context_measure = self.context_builder.measure(context)
         system_prompt, user_payload = build_analyzer_prompt(context, prompt_version=self.prompt_version)
+        if self.output_schema_version == "v3":
+            system_prompt += DISPLAY_INSTRUCTION
         base = {
             "utterance_id": utterance.get("id"),
             "session_id": utterance.get("session_id"),
             "provider": self.provider_name,
             "model": self.model,
             "prompt_version": self.prompt_version,
+            "output_schema_version": self.output_schema_version,
+            "presentation_policy": POLICY_VERSION if self.output_schema_version == "v3" else None,
             **context_measure,
             "raw_output": None,
             "validation_error": None,
@@ -946,8 +953,21 @@ class RealAnalyzer:
         # They are not part of the canonical Event or Graph state.
         self.last_trace = base
         try:
-            self.schema_validator.validate_analyzer_output(response.output, version=self.output_schema_version)
-            candidates = self._to_candidates(response.output, utterance, current_graph)
+            output = copy.deepcopy(response.output)
+            # Presentation errors never reject otherwise valid Canonical intents.
+            # Strict provider v3 requires nullable keys; old/malformed hints from
+            # compatible providers are normalized locally for graceful fallback.
+            raw_hints = []
+            if self.output_schema_version == "v3" and isinstance(output, dict):
+                for intent in output.get("events", []):
+                    if isinstance(intent, dict) and intent.get("kind") == "node":
+                        raw_hints.append(intent.get("display_label"))
+                        intent["display_label"] = None
+            self.schema_validator.validate_analyzer_output(output, version=self.output_schema_version)
+            if self.output_schema_version == "v3":
+                for intent, hint in zip([i for i in output["events"] if i.get("kind") == "node"], raw_hints):
+                    intent["display_label"] = hint
+            candidates = self._to_candidates(output, utterance, current_graph)
             for candidate in candidates:
                 # Sequence is a temporary validation placeholder.  The replay
                 # boundary replaces it with the canonical global sequence.
@@ -1000,7 +1020,7 @@ class RealAnalyzer:
         utterance_id = str(utterance["id"])
         occurred_at = str(utterance["ended_at"])
 
-        def candidate(event_type: str, payload: dict[str, Any], source_ids: Iterable[str]) -> CandidateEvent:
+        def candidate(event_type: str, payload: dict[str, Any], source_ids: Iterable[str], presentation: dict[str, Any] | None = None) -> CandidateEvent:
             nonlocal next_candidate_index
             event_id = f"real:{session_id}:{utterance_id}:{next_candidate_index:02d}"
             next_candidate_index += 1
@@ -1011,6 +1031,7 @@ class RealAnalyzer:
                 occurred_at=occurred_at,
                 source_evidence_ids=tuple(source_ids),
                 payload=payload,
+                presentation=presentation,
             )
             candidates.append(result)
             return result
@@ -1057,7 +1078,8 @@ class RealAnalyzer:
                 }
             else:
                 payload = {"node_type": node_type, "label": label}
-            event = candidate("node_detected", payload, source_ids)
+            event = candidate("node_detected", payload, source_ids,
+                              {"display_label": intent.get("display_label")} if self.output_schema_version == "v3" else None)
             node_refs[index] = f"node:{session_id}:{event.event_id}"
 
         # Human commands are not part of the provider schema, but keep this

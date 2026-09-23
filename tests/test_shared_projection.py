@@ -90,8 +90,8 @@ class SharedProjectionTests(unittest.TestCase):
 const assert=require('node:assert/strict');
 const elements=new Map();
 function element(key){if(!elements.has(key))elements.set(key,{innerHTML:'',textContent:'',hidden:false,classList:{toggle(){},add(){}}});return elements.get(key);}
-global.document={getElementById:element,querySelector:element,documentElement:element('html')};
-global.window={location:{search:''}};
+global.document={getElementById:element,querySelector:element,querySelectorAll:()=>[],fonts:{ready:Promise.resolve()},documentElement:element('html')};
+global.window={location:{search:''},addEventListener(){}};
 '''+js+r'''
 const graph={nodes:[{id:'a',type:'idea',label:'意味 <script>',status:'active'}, {id:'t1',type:'topic',label:'交通'}, {id:'t2',type:'topic',label:'住民参加'}],current_topic:{primary_topic_id:'t1'}};
 const rail={candidate:{node_ids:['a'],overflow:2},confirmed:{node_ids:['a'],overflow:0},open_item:{node_ids:[],overflow:0},action:{node_ids:[],overflow:0}};

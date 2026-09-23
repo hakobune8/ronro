@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .live_audio import AudioFrameError, decode_audio_frame
+from .live_diagnostic import diagnostic
 from .errors import PrototypeError
 from .live_session import LiveSessionManager
 from .live_stt import OpenAIRealtimeTranscriptionClient, RealtimeSTTConfig, RealtimeSTTFailure
@@ -184,6 +185,24 @@ class LiveWebSocketGateway:
         reader_task = asyncio.create_task(read_provider())
         try:
             while True:
+                turns = getattr(provider, 'turns', None)
+                if turns is not None:
+                    current = self.manager.current()
+                    if current.stt_state == 'error':
+                        await self._drain_and_send(connection)
+                        return
+                    current.retire_committed_audio(turns.cursor / 24000)
+                    commit_pending = bool(turns.intents)
+                    if turns.expired(self.stt_config.timeout_seconds):
+                        self.manager.fail('provider_item_timeout', 'An audio item did not resolve before its deadline')
+                        await self._drain_and_send(connection)
+                        return
+                    if stop_seen and current.stt_state != 'error':
+                        await self._request_continuous_commit(provider, connection, boundary_reason='session_end')
+                        commit_pending = bool(turns.intents)
+                        if not provider.has_pending_vad_completion():
+                            self.manager.mark_stt_finalization_complete()
+                diagnostic("transport_state", session=self.manager.current(), provider=provider, commit_pending=commit_pending, pending_boundary_reason=pending_boundary_reason, stop_seen=stop_seen)
                 if self.manager.consume_stop_request() and not stop_seen:
                     stop_seen = True
                     commit_pending = await self._request_continuous_commit(
@@ -220,9 +239,10 @@ class LiveWebSocketGateway:
                         should_commit = meaningful_audio
                     if (
                         should_commit
-                        and not self._provider_has_pending_vad_completion(provider)
+                        and (turns is not None or not self._provider_has_pending_vad_completion(provider))
                         and buffer_duration >= self.stt_config.periodic_commit_seconds
                     ):
+                        diagnostic("bounded_fallback_fired", session=current, provider=provider, commit_pending=commit_pending, bounded_timer_armed=True, bounded_timer_age=buffer_duration)
                         commit_pending = await self._request_continuous_commit(
                             provider, connection, boundary_reason="bounded_fallback"
                         )
@@ -296,6 +316,7 @@ class LiveWebSocketGateway:
                 if provider_task in done:
                     event = provider_task.result()
                     event_type = event.get("type")
+                    diagnostic("application_handle", session=self.manager.current(), provider=provider, item_id=event.get("item_id"), event_id=event.get("event_id"), event_type=event_type, commit_pending=commit_pending, pending_boundary_reason=pending_boundary_reason, item_context=event.get('_turn'))
                     if event_type == "partial_transcript":
                         snapshot = self.manager.record_partial(str(event.get("text", "")))
                         await self._safe_send(connection, {"type": "partial_transcript", "text": event.get("text", ""), "snapshot": snapshot})
@@ -308,18 +329,23 @@ class LiveWebSocketGateway:
                             provider_event=self._with_transport_diagnostics(event, provider),
                         )
                         await self._safe_send(connection, {"type": "final_transcript", "text": event["text"], "snapshot": snapshot})
+                        if turns is not None:
+                            turns.acknowledge(event.get('item_id'))
                         had_commit = commit_pending
                         commit_pending = False
                         pending_boundary_reason = None
-                        if stop_seen and (had_commit or not self._provider_has_pending_vad_completion(provider)):
+                        if stop_seen and ((had_commit and turns is None) or not self._provider_has_pending_vad_completion(provider)):
                             self.manager.mark_stt_finalization_complete()
                     elif event_type == "stt_error":
                         code = str(event.get("code", "provider_error"))
-                        if self._is_benign_vad_empty_final(
+                        benign = event.get('_benign_empty') if turns is not None else self._is_benign_vad_empty_final(
                             provider,
                             code=code,
                             commit_pending=commit_pending,
-                        ):
+                        )
+                        if benign:
+                            if turns is not None:
+                                turns.acknowledge(event.get('item_id'))
                             commit_pending = False
                             pending_boundary_reason = None
                             current = self.manager.current()
@@ -403,6 +429,7 @@ class LiveWebSocketGateway:
             should_commit = has_audio_buffer
         if not should_commit:
             return False
+        diagnostic("commit_requested", session=session, provider=provider, reason=boundary_reason)
         try:
             mark_boundary_reason = getattr(provider, "mark_boundary_reason", None)
             if callable(mark_boundary_reason):
@@ -456,7 +483,7 @@ class LiveWebSocketGateway:
     ) -> dict[str, Any]:
         value = dict(event)
         diagnostic_context = getattr(provider, "diagnostic_context", None)
-        if callable(diagnostic_context):
+        if callable(diagnostic_context) and '_transport' not in value:
             value["_transport"] = diagnostic_context()
         return value
 

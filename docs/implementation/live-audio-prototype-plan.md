@@ -858,3 +858,31 @@ L1〜L2とStep 1の1発話Vertical Slice、L3のQueue / Analyzer Worker、L4 Con
 - **Real Provider short check**: `evaluation/live/l4-l5-real-provider-short.json`に、既存60秒PCMを高速投入した短時間確認を保存した。`gpt-transcribe` Final 4件、Partial 108件、Analyzer / Graph update 4件、Map render 5件、Drain Complete、Final revision一致を確認した。Queue wait p50/p95は0.001595/0.002987秒、Analyzer p50/p95は2.762092/3.204281秒、Map E2E p50/p95/maxは4.753729/5.936411/5.936411秒、Drainは0.000182秒だった。高速投入のためlatencyはBurst相当であり、実室内のRealtime acceptance値とは分離する。
 
 L1/L2の実Microphone 3-case Manual Acceptanceは、macOS microphone permission制約により引き続きPendingである。L4/L5完了後はここで停止し、L6 Live Evaluation Harness、10〜15分のHuman Session、Participant Feedback、Minutes、Visual Artifact、Production Persistenceへは進まない。
+
+## 34. Item-scoped Realtime Finalization Repair
+
+T2のfollow-upでは、Provider item Aの明示commit待ちと別のVAD item Bの空完了が
+混同される競合を実Providerで再現した。`live_turns.py` の接続単位ledgerで以下を分離する。
+
+- 未commitのsample範囲、明示commit intent、Provider item、受信済み完了の処理待ち。
+- 各appendのsample範囲と無音判定だけをledgerへ記録。音声の永続保存はしない。
+- commit送信は予約であり成功ではない。`committed` のitem ID、VAD end offset、
+  ローカル送信watermarkで担当範囲を対応付ける。範囲はローカルの音声管理範囲であり、
+  Provider内部のprefix paddingまで含む厳密な認識範囲とは区別する。
+- `previous_item_id` に従って完了の順序を整え、Finalだけを従来のNormalization / Queueへ渡す。
+  重複itemは再登録しない。古いitemの完了で新しい未commit音声をクリアしない。
+- 無音と確認できた自動VAD itemの空完了のみbenign。明示item、意味のある音声、
+  範囲不明のemptyは失敗を維持する。非空Finalでも対応範囲不明・重複範囲は失敗を明示。
+- VADが先に処理した終了時commitが `input_audio_buffer_commit_empty` になった場合は、
+  単一intentの対象音声をVAD itemが既に担当し、未担当の末尾が無音と確認できる場合だけ
+  intentを解消する。VAD item自体の完了待ちは解除しない。これはempty transcriptionの無視ではない。
+  送信event IDを付け、Providerが返す関連IDが異なる場合は解消しない。
+- 30秒boundは未commit範囲に適用。古いitemの完了待ちで新しい音声のboundを止めない。
+  commit/item未解決には既存Provider timeout設定を適用し、期限切れは不完全終了。
+- Endは未commit音声をflushし、全itemのアプリ側処理とQueue/Analyzer/renderの完了を待つ。
+  Provider failureで残ったintentがDrainを永久に妨げないよう、失敗時は不完全終了へ進める。
+
+generic default `none`、Pilotの `server_vad_bounded` / 30秒、モデル、Context、keywords、
+Analyzer、Canonical、Shared Viewは変更しない。これはローカル実装であり、自動デプロイしない。
+実Provider検証は隔離process・synthetic入力・Noop Analyzerなので、T2本番や実会議の品質評価を
+代替しない。詳細はReal-world Evaluation文書のitem-scoped repair記録を参照。

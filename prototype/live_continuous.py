@@ -20,6 +20,7 @@ from .analyzer import TranscriptReplaySession
 from .errors import PrototypeError
 from .layout import StableLayout, map_projection
 from .live_audio import AudioChunk, TARGET_SAMPLE_RATE, is_silent_pcm16le
+from .live_diagnostic import diagnostic
 from .live_queue import LiveAnalyzerRuntime, LiveQueueItem, QueueError
 from .live_render import PresentationRenderCoalescer
 from .replay import ReplayRunner
@@ -86,6 +87,7 @@ class LiveContinuousSession:
         self.audio_chunk_sequence = -1
         self._current_audio_start_sequence: int | None = None
         self._current_audio_end_sequence: int | None = None
+        self._pending_audio_frames: list[tuple[int, float]] = []
         self.audio_start_seconds: float | None = None
         self.audio_end_seconds: float | None = None
         self.audio_start_at: str | None = None
@@ -251,6 +253,7 @@ class LiveContinuousSession:
                 self._current_audio_start_sequence = chunk.sequence
             self.audio_chunk_sequence = chunk.sequence
             self._current_audio_end_sequence = chunk.sequence
+            self._pending_audio_frames.append((chunk.sequence, chunk.audio_end_seconds))
             self.audio_end_seconds = chunk.audio_end_seconds
             self.audio_end_at = utc_now()
             self._audio_end_monotonic = time.monotonic()
@@ -262,6 +265,27 @@ class LiveContinuousSession:
                 max(0.0, self.audio_end_seconds - self._current_audio_start_seconds),
             )
             self.stt_state = "streaming"
+            diagnostic("local_append", session=self, frame_sequence=chunk.sequence, duration=chunk.duration_seconds)
+
+    def retire_committed_audio(self, seconds: float) -> None:
+        """Retire only committed PCM; pending Provider items live in the ledger."""
+        with self._lock:
+            end = min(seconds, self.audio_end_seconds or 0.0)
+            count = max(0, round((end - self._current_audio_start_seconds) * 24000))
+            if not count:
+                return
+            diagnostic('buffer_retire_before', session=self, reset_reason='commit_coverage', retired_until=end)
+            del self._current_audio_bytes[:count * 2]
+            self._pending_audio_frames = [(seq, stop) for seq, stop in self._pending_audio_frames if stop > end + 1e-9]
+            self._current_audio_start_sequence = self._pending_audio_frames[0][0] if self._pending_audio_frames else None
+            self._current_audio_end_sequence = self._pending_audio_frames[-1][0] if self._pending_audio_frames else None
+            self._current_audio_start_seconds = end
+            self._current_audio_has_meaningful_signal = bool(
+                self._current_audio_bytes and not is_silent_pcm16le(self._current_audio_bytes))
+            if not self._current_audio_bytes:
+                self._current_audio_start_sequence = None
+                self._current_audio_end_sequence = None
+            diagnostic('buffer_retire_after', session=self, reset_reason='commit_coverage', retired_until=end)
 
     def record_partial(self, text: str) -> None:
         with self._lock:
@@ -354,6 +378,9 @@ class LiveContinuousSession:
             sequence = len(self._utterances) + 1
             audio_start = self._current_audio_start_seconds
             audio_end = self.audio_end_seconds if self.audio_end_seconds is not None else audio_start
+            turn = (provider_event or {}).get('_turn')
+            if turn and turn.get('range_known'):
+                audio_start, audio_end = turn['audio_start'], turn['audio_end']
             raw_segment = RawSTTSegment(
                 segment_id=f"live-segment:{self.session_id}:{sequence}",
                 start=audio_start,
@@ -416,8 +443,8 @@ class LiveContinuousSession:
                 "raw_stt_text": text,
                 "normalized_text": normalized_item.text,
                 "utterance_sequence": sequence,
-                "audio_frame_sequence_start": self._current_audio_start_sequence,
-                "audio_frame_sequence_end": self._current_audio_end_sequence,
+                "audio_frame_sequence_start": turn.get('frame_start') if turn else self._current_audio_start_sequence,
+                "audio_frame_sequence_end": turn.get('frame_end') if turn else self._current_audio_end_sequence,
                 "raw_segment_ids": list(normalized_item.raw_segment_ids),
                 "normalization_diagnostics": diagnostics,
                 **provider_metadata,
@@ -438,11 +465,16 @@ class LiveContinuousSession:
             self.stt_state = "final"
             self.analyzer_status = "queued"
             self.partial_transcript = ""
-            self._current_audio_start_seconds = audio_end
-            self._current_audio_start_sequence = None
-            self._current_audio_end_sequence = None
-            self._current_audio_bytes.clear()
-            self._current_audio_has_meaningful_signal = False
+            diagnostic("item_final_before" if turn else "buffer_clear_before", session=self, item_id=item_id, reset_reason="transcription_completed")
+            if not turn:
+                # Legacy/test adapters without item ranges retain their contract.
+                self._current_audio_start_seconds = audio_end
+                self._current_audio_start_sequence = None
+                self._current_audio_end_sequence = None
+                self._current_audio_bytes.clear()
+                self._pending_audio_frames.clear()
+                self._current_audio_has_meaningful_signal = False
+            diagnostic("item_final_after" if turn else "buffer_clear_after", session=self, item_id=item_id, reset_reason="transcription_completed")
             try:
                 item = self._queue_runtime.register_utterance(
                     evidence=evidence,
@@ -637,7 +669,7 @@ class LiveContinuousSession:
 
     def _render_now_locked(self) -> None:
         self.layout.project(self.state["graph"], self.events)
-        self._rendered_map = map_projection(self.state, self.events, self.layout)
+        self._rendered_map = map_projection(self.state, self.events, self.layout, self._queue_runtime.result.presentation)
         self._coalescer.render_now(self.state["graph"]["revision"])
         self._queue_runtime.mark_rendered()
         self._rendered_at = utc_now()
