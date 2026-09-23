@@ -103,6 +103,35 @@ class RealAnalyzerTests(unittest.TestCase):
             self.assertNotIn("sequence", candidate.__dict__)
             self.assertTrue(event["event_id"].startswith("real:"))
 
+    def test_exact_live_utterance_evidence_alias_is_resolved(self) -> None:
+        session_id = "live-safe"
+        canonical_id = f"live-evidence:{session_id}:1"
+        analyzer = self.analyzer({"events": [{
+            "kind": "node", "node_type": "idea", "label": "橋の点検結果を確認する",
+            "source_evidence_ids": [f"live-evidence:live-utterance:{session_id}:1"],
+        }]})
+        live_utterance = {
+            **utterance("橋の点検結果を確認します", canonical_id),
+            "id": f"live-utterance:{session_id}:1", "session_id": session_id,
+        }
+        candidates = analyzer.analyze(live_utterance, {"nodes": [], "edges": [], "current_topic": {}}, [])
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].source_evidence_ids, (canonical_id,))
+        self.assertEqual(analyzer.last_trace["live_evidence_alias_resolved"], 1)
+
+    def test_other_invalid_live_evidence_reference_is_rejected(self) -> None:
+        session_id = "live-safe"
+        analyzer = self.analyzer({"events": [{
+            "kind": "node", "node_type": "idea", "label": "橋の点検結果を確認する",
+            "source_evidence_ids": ["live-evidence:someone-else:1"],
+        }]})
+        live_utterance = {
+            **utterance("橋の点検結果を確認します", f"live-evidence:{session_id}:1"),
+            "id": f"live-utterance:{session_id}:1", "session_id": session_id,
+        }
+        self.assertEqual(analyzer.analyze(live_utterance, {"nodes": [], "edges": [], "current_topic": {}}, []), [])
+        self.assertEqual(analyzer.last_trace["validation_error"]["code"], "evidence_reference_invalid")
+
     def test_noop_is_valid_and_does_not_touch_graph(self) -> None:
         analyzer = self.analyzer({"events": []})
         candidates = analyzer.analyze(utterance("そうですね"), graph_with_topic(), [])

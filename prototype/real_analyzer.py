@@ -1174,6 +1174,22 @@ class RealAnalyzer:
         text = str(utterance.get("text", ""))
         trace = self.last_trace if self.last_trace is not None else None
 
+        # The live Utterance and its Evidence use related but distinct IDs.
+        # Some otherwise valid provider outputs prepend the Evidence prefix to
+        # the *Utterance* ID. Resolve only that exact, unambiguous live alias;
+        # every other unknown reference remains a hard validation error.
+        live_alias = f"live-evidence:{utterance.get('id', '')}"
+        canonical_live_id = f"live-evidence:{utterance.get('session_id', '')}:{utterance.get('sequence', '')}"
+        if (utterance.get('id') == f"live-utterance:{utterance.get('session_id', '')}:{utterance.get('sequence', '')}"
+                and evidence_ids == {canonical_live_id}):
+            for intent in intents:
+                source_ids = intent.get("source_evidence_ids", [])
+                if live_alias in source_ids:
+                    intent["source_evidence_ids"] = [canonical_live_id if value == live_alias else value
+                                                     for value in source_ids]
+                    if trace is not None:
+                        trace["live_evidence_alias_resolved"] = trace.get("live_evidence_alias_resolved", 0) + 1
+
         # Validate every evidence reference before any candidate is returned.
         for intent in intents:
             missing = set(intent.get("source_evidence_ids", [])) - evidence_ids
