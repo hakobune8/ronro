@@ -181,7 +181,7 @@ class LiveOneUtteranceSession:
         return RealAnalyzer.from_environment(
             schema_validator=self.schema_validator,
             meeting_goal=self.goal,
-            prompt_version="analyzer-prompt-v4",
+            prompt_version=os.getenv("PROMPT_VERSION", "analyzer-prompt-v4"),
             output_schema_version=os.getenv("REAL_ANALYZER_OUTPUT_SCHEMA_VERSION", "v2"),
         )
 
@@ -442,6 +442,7 @@ class LiveOneUtteranceSession:
                 "normalized_utterance": copy.deepcopy(self.normalized_utterance),
                 "generated_events": copy.deepcopy(self.generated_events),
                 "analysis_errors": copy.deepcopy(self.analysis_errors),
+                "correction_clarifications": copy.deepcopy(self._queue_runtime.snapshot()["correction_clarifications"]),
                 "error": copy.deepcopy(self.error),
                 "graph_revision": graph["revision"],
                 "map_updated": self.map_updated,
@@ -591,7 +592,7 @@ class LiveSessionManager:
                     analyzer=(self.analyzer_factory() if self.analyzer_factory is not None else RealAnalyzer.from_environment(
                         schema_validator=self.validator,
                         meeting_goal="論路の論点図を会議中に理解する",
-                        prompt_version="analyzer-prompt-v4",
+                        prompt_version=os.getenv("PROMPT_VERSION", "analyzer-prompt-v4"),
                         output_schema_version=os.getenv("REAL_ANALYZER_OUTPUT_SCHEMA_VERSION", "v2"),
                     )),
                     analyzer_factory=self.analyzer_factory,

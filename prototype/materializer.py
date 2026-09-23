@@ -20,6 +20,10 @@ RELATION_MATRIX: dict[str, tuple[set[str], set[str]]] = {
         {"idea", "option", "concern"},
         {"idea", "option", "decision"},
     ),
+    "discussion_provenance": (
+        {"idea", "option", "concern", "open_item", "decision", "action"},
+        {"idea", "option", "concern", "open_item", "decision", "action"},
+    ),
     "related_to": (
         {"topic", "idea", "option", "concern", "open_item", "decision", "action"},
         {"topic", "idea", "option", "concern", "open_item", "decision", "action"},
@@ -157,6 +161,7 @@ class GraphMaterializer:
             "session_ended": self._session_ended,
             "node_detected": self._node_detected,
             "relation_detected": self._relation_detected,
+            "correct_relation": self._correct_relation,
             "topic_focus_changed": self._topic_focus_changed,
             "confirm_decision": self._confirm_decision,
             "revoke_decision": self._revoke_decision,
@@ -276,7 +281,11 @@ class GraphMaterializer:
             }
         state["graph"]["nodes"].append(node)
 
-    def _relation_detected(self, state: dict[str, Any], event: dict[str, Any], _: list[dict[str, Any]]) -> None:
+    @staticmethod
+    def _relation_key(relation: dict[str, Any]) -> tuple[str, str, str]:
+        return (relation["source_node_id"], relation["target_node_id"], relation["relation_type"] if "relation_type" in relation else relation["type"])
+
+    def _relation_detected(self, state: dict[str, Any], event: dict[str, Any], history: list[dict[str, Any]]) -> None:
         payload = event["payload"]
         source = self._require_node(state, payload["source_node_id"], event)
         target = self._require_node(state, payload["target_node_id"], event)
@@ -292,11 +301,29 @@ class GraphMaterializer:
             )
         if source["status"] == "archived" or target["status"] == "archived":
             raise self._error("unsupported_relation", "Archived Nodes cannot receive new Relations", event)
+        if relation_type == "discussion_provenance" and not event["source_evidence_ids"]:
+            raise self._error("missing_reference", "Discussion provenance requires linking Evidence", event)
+        key = self._relation_key(payload)
+        # A Human rejection cannot be recreated from Evidence that already
+        # existed when the correction was made. Later Evidence may justify it.
+        removal = next((prior for prior in reversed(history)
+                        if prior["event_type"] == "correct_relation"
+                        and prior["payload"]["old_relation"] is not None
+                        and self._relation_key(prior["payload"]["old_relation"]) == key), None)
+        if removal is not None:
+            watermark = removal["payload"]["evidence_sequence_at_correction"]
+            evidence_sequences = {item["id"]: item["sequence"] for item in state["evidence"]}
+            if not any(evidence_sequences[ref] > watermark for ref in event["source_evidence_ids"]):
+                raise self._error("human_correction_preserved", "Old Evidence cannot recreate a Human-rejected Relation", event)
         edge_id = f"edge:{event['session_id']}:{relation_type}:{source['id']}:{target['id']}"
         existing = next((edge for edge in state["graph"]["edges"] if edge["id"] == edge_id), None)
         if existing is not None:
             self._append_unique(existing["source_event_ids"], event["event_id"])
             return
+        if relation_type == "discussion_provenance" and self._provenance_reaches(
+            state["graph"]["edges"], target["id"], source["id"]
+        ):
+            raise self._error("unsupported_relation", "Discussion provenance cycle rejected", event)
         state["graph"]["edges"].append(
             {
                 "id": edge_id,
@@ -306,6 +333,78 @@ class GraphMaterializer:
                 "source_event_ids": [event["event_id"]],
             }
         )
+
+    def _correct_relation(self, state: dict[str, Any], event: dict[str, Any], history: list[dict[str, Any]]) -> None:
+        payload = event["payload"]
+        old, new = payload["old_relation"], payload["new_relation"]
+        if old is None and new is None:
+            raise self._error("invalid_transition", "Correction must change a Relation", event)
+        if old == new:
+            raise self._error("invalid_transition", "Correction has no change", event)
+        edges = state["graph"]["edges"]
+        if old is not None:
+            key = self._relation_key(old)
+            match = next((edge for edge in edges if self._relation_key(edge) == key), None)
+            if match is None:
+                raise self._error("missing_reference", "Old Relation does not exist", event)
+            edges.remove(match)
+        if new is not None:
+            source = self._require_node(state, new["source_node_id"], event)
+            target = self._require_node(state, new["target_node_id"], event)
+            relation_type = new["relation_type"]
+            if relation_type not in {"discussion_provenance", "supports", "opposes"} or source["id"] == target["id"]:
+                raise self._error("unsupported_relation", "Invalid Human semantic Relation", event)
+            allowed_source, allowed_target = RELATION_MATRIX[relation_type]
+            if source["type"] not in allowed_source or target["type"] not in allowed_target:
+                raise self._error("unsupported_relation", "Invalid Human Relation endpoints", event)
+            if source["status"] == "archived" or target["status"] == "archived":
+                raise self._error("unsupported_relation", "Archived Nodes cannot receive Relations", event)
+            if any(self._relation_key(edge) == self._relation_key(new) for edge in edges):
+                raise self._error("duplicate_relation", "Relation already exists", event)
+            if relation_type == "discussion_provenance" and self._provenance_reaches(edges, target["id"], source["id"]):
+                raise self._error("unsupported_relation", "Discussion provenance cycle rejected", event)
+            edges.append({"id": f"edge:{event['session_id']}:{relation_type}:{source['id']}:{target['id']}",
+                          "source_node_id": source["id"], "target_node_id": target["id"],
+                          "type": relation_type, "source_event_ids": [event["event_id"]]})
+
+    @staticmethod
+    def _provenance_reaches(edges: list[dict[str, Any]], start: str, goal: str) -> bool:
+        adjacency: dict[str, set[str]] = {}
+        for edge in edges:
+            if edge["type"] == "discussion_provenance":
+                adjacency.setdefault(edge["source_node_id"], set()).add(edge["target_node_id"])
+        pending = [start]
+        seen: set[str] = set()
+        while pending:
+            node_id = pending.pop()
+            if node_id == goal:
+                return True
+            if node_id not in seen:
+                seen.add(node_id)
+                pending.extend(adjacency.get(node_id, ()))
+        return False
+
+    @staticmethod
+    def _has_provenance_cycle(edges: list[dict[str, Any]]) -> bool:
+        adjacency: dict[str, set[str]] = {}
+        for edge in edges:
+            if edge["type"] == "discussion_provenance":
+                adjacency.setdefault(edge["source_node_id"], set()).add(edge["target_node_id"])
+        visiting: set[str] = set()
+        visited: set[str] = set()
+        def visit(node_id: str) -> bool:
+            if node_id in visiting:
+                return True
+            if node_id in visited:
+                return False
+            visiting.add(node_id)
+            for child in adjacency.get(node_id, ()):
+                if visit(child):
+                    return True
+            visiting.remove(node_id)
+            visited.add(node_id)
+            return False
+        return any(visit(node_id) for node_id in adjacency)
 
     def _topic_focus_changed(self, state: dict[str, Any], event: dict[str, Any], _: list[dict[str, Any]]) -> None:
         topic = self._require_node(state, event["payload"]["topic_id"], event)
@@ -426,6 +525,8 @@ class GraphMaterializer:
                 for source_event_id in edge["source_event_ids"]:
                     self._append_unique(existing["source_event_ids"], source_event_id)
         state["graph"]["edges"] = list(reindexed.values())
+        if self._has_provenance_cycle(state["graph"]["edges"]):
+            raise self._error("unsupported_relation", "Merge would create a discussion provenance cycle", event)
 
     def _move_to_parking_lot(self, state: dict[str, Any], event: dict[str, Any], _: list[dict[str, Any]]) -> None:
         node = self._require_node(state, event["payload"]["node_id"], event)

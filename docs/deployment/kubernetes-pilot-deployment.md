@@ -57,18 +57,17 @@ docs/deployment/
 - A Kubernetes Secret containing `OPENAI_API_KEY`, created out-of-band.
 - StorageClass support for a 1Gi `ReadWriteOnce` PVC.
 
-The target cluster was not available for this packaging pass. Therefore the
-cluster-specific ingress class, StorageClass, registry, TLS Secret, image pull
-permissions, rollout, and smoke test must be verified in the deployment
-environment before use.
+The target cluster is available, but the new semantic-graph candidate must
+still pass image provenance, rollout, route, and live smoke verification
+before Pilot use. These checks cannot be inferred from the older deployed image.
 
-## Frozen Pilot configuration
+## Pilot candidate configuration
 
-The ConfigMap identifies the package as `pilot-001` and supplies the frozen values:
+The candidate ConfigMap identifies `semantic-graph-rc1` and supplies:
 
 - STT: `gpt-transcribe`, Japanese, terminology hints enabled
 - Analyzer: `gpt-5.6-luna`, reasoning `medium`
-- Prompt: `analyzer-prompt-v4`
+- Prompt: `analyzer-prompt-v9-semantic-edge-balance`, output schema `v3`
 - Context: `v1`
 - Normalization: `v2`
 - Type D: `OFF`
@@ -291,8 +290,8 @@ Record these values in the Pilot artifact and release note before Pilot #1:
 
 - git commit SHA
 - image tag and image digest
-- `LIVE_CONFIGURATION_VERSION=pilot-001`
-- prompt `analyzer-prompt-v4`
+- `LIVE_CONFIGURATION_VERSION=semantic-graph-rc1`
+- prompt `analyzer-prompt-v9-semantic-edge-balance`, output schema `v3`
 - STT `gpt-transcribe`
 - Analyzer `gpt-5.6-luna`
 - reasoning `medium`

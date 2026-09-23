@@ -2840,3 +2840,171 @@ playback, save 10/20/30 snapshots and private screenshots, stop audio intake
 at the source endpoint, and preserve the runtime artifact **before** any
 Deployment restart. No source audio, video or full transcript belongs in
 Public Git.
+
+## Offline Discussion Projection Model Spike — Focused Flow and meeting record
+
+This is a **Projection-only, offline Human Review candidate**. It does not
+alter the deployed Shared View, Graph, schema, Analyzer, STT or the prior T1/T2
+decisions. `evaluation/tooling/discussion_projection_spike.py` reads the
+retained T1 Graph at revisions 32/57/72 and final revision 72, plus the
+retained **short failed-T2** Graph at revision 26. Its HTML template and
+1920×1080 capture script are generic; the generated HTML, JSON manifest and
+screenshots containing Graph labels are kept outside Public Git. No media,
+STT, Analyzer, LLM or source playback was used.
+
+| Saved state | Ordinary/total Nodes | Canonical Node-to-Node semantic Relations | Stored short labels | Prototype |
+| --- | ---: | ---: | ---: | --- |
+| T1 5 min | 15/16 | 0 | 0 | six-card / four-step Flow / Flow + latest body |
+| T1 10 min | 29/30 | 0 | 0 | same |
+| T1 15 min / final | 37/38 | 0 | 0 | same + final record |
+| T2 failed short run | 10/12 | 0 | 0 | same + **partial** final-record illustration |
+
+The saved edges in these two Graphs are Topic `contains` only (31 in T1,
+11 in short T2). They provide membership, not evidence that two discussion
+Nodes support, contradict or cause each other. The live prototype therefore
+uses **explicitly labeled chronological order**, never fabricated semantic
+arrows. The deterministic provisional focal rule is the latest active
+Idea/Option/Concern in the current Topic by `updated_at`, falling back to the
+latest active ordinary Node if membership is unavailable; up to three prior
+active Nodes give context. The actual saved T1/T2 Nodes have no material
+updates, so the mockups exercise creation order. A synthetic test confirms
+an older materially updated Node can become latest. A production design must
+identify material updates from accepted Event types, not every incidental
+timestamp touch. Human correction, Topic return and close-together update
+stability require further replay before adoption.
+
+The **Focused Flow + Latest Detail** variant keeps four primary Nodes (within
+the proposed three-to-five budget), with the current focus visually strongest.
+The detail area holds the full Canonical label, marked added/updated, until a
+later relevant change. It does not use `display_label` as an authoritative
+Node property. The Flow uses a stored `display_label` if present, otherwise
+falls back to the Canonical label. Neither old saved Graph contains those
+short labels, so some long T2 Flow cards remain dense: one Flow card is
+visually clipped in the private 1920×1080 capture and is explicitly marked
+as old-data body fallback. This is **not** evidence that the current automatic
+label generator always succeeds. The current six-card T2 comparison clips two
+cards. Full Canonical text remains available in Latest Detail and the final
+record; a long detail body may require closer reading or scrolling, so a
+passive display cannot yet guarantee that *every* long body is fully visible
+at once. No 3–5 m readability PASS is claimed.
+
+The prototype meeting record is **web/HTML first**: a top-screen flow through
+the three saved T1 checkpoints, separate Decision-candidate/confirmed,
+Open Item and Action states, then expandable details preserving every saved
+Canonical Node body (38 T1 Nodes). It avoids a transcript summary and does
+not invent decisions/actions. The T1 overview is a checkpoint-based
+chronology, **not** a semantic map of Node-to-Node relationships; the Graph
+does not yet support a richer claim. The T2 illustration contains only the
+12 Nodes from the earlier ~6-minute failed run and must not be called a full
+30-minute T2 record. The later completed T2 has four empty Provider items
+totaling 5.248 seconds with unverified content, and its full private Graph
+and 10/20/30 screenshots were not retained. Missing speech is not inferred.
+
+The private review entry compares six equal cards, Focused Flow, and Focused
+Flow + Latest Detail at T1 5/10/15 and the saved short T2 state, and includes
+the two final-record illustrations. Actual Chromium screenshots were captured
+at **1920×1080** for all four live states in each mode. T1 mockups show no
+element overflow. The T2 short-run grid and Flow retain the documented
+long-label issue (two and one clipped cards respectively); no font shrinking
+or semantic rewording was performed to conceal it. Three synthetic offline
+tests pass for deterministic selection, non-mutation, material-update focus
+and persistent-state separation. Physical-distance and substantive Human
+scores remain uncollected.
+
+**Decision for this Spike:** Live **D. More semantic structure required** for
+a *relation-aware* Focused Flow. **C. Focused Flow + Latest Detail** is the
+best visual hypothesis of the three and is available for Human comparison,
+but is not ready for Production adoption. Its visual hierarchy makes the
+latest point and preceding path clearer than six equal cards, while Flow
+alone omits the full current Canonical addition. Yet chronological adjacency
+cannot be labeled as semantic relation, and a rolling four-card window moves
+up to three surviving cards each time a new focus enters. That violates the
+desired stable mental map under frequent updates. A production follow-up
+must either use actual accepted Node-to-Node relations or explicitly commit
+to a sequence-only design with a stable context layout; neither can be
+asserted from these two saved Graphs. Final **B. Discussion Flow-centered Meeting Record** as
+the primary human-facing format, with optional PDF export later and the
+Canonical Graph/Events as a separate machine-readable source. The first
+screen is plausibly scan-friendly but its 30-second comprehension and value
+relative to minutes are unproven until Human Review. If a *semantic* final
+flow is essential, meaningful Node-to-Node relations or explicit focus
+history must be present in the accepted data; this Spike does not create new
+Canonical types or mask that gap with prose generation. RFC-0006 stays open.
+
+## T1 Discussion Relation Model Spike
+
+This is a separate, offline architecture review; it does not change the T1
+quality decision, rerun audio, or alter Product behavior. The source-priority
+review and full architectural conclusion are in
+[Discussion Relation Model Spike](discussion-relation-model-spike.md).
+
+T1's retained final Graph has 38 Nodes and 31 Edges. All Edges are structural
+`contains` links from the sole Topic; there are **no accepted semantic
+Node-to-Node Relations**. A representative 16-transition review found possible
+elaboration, qualification, problem/response and comparison patterns, along
+with clear chronological topic movement. None can be accepted as an
+Evidence-backed semantic Relation because the accessible retained files have
+Node labels and Evidence IDs but not the corresponding Final speech text.
+The private Human Review artifact therefore draws no confirmed semantic line
+and labels unlinked Nodes as *unknown*, not independently rooted.
+
+The current Canonical contract already admits `supports` and `opposes` as well
+as Topic containment and option membership. The absence of T1 semantic edges
+does not by itself show a missing enum. `related_to` would be a particularly
+poor way to fill a visually sparse map. A truthful Live Focused Flow and Final
+Meeting Record can both derive from Graph plus Event sequence, keeping
+chronological movement distinct from semantic links; precise links may add
+value only after their source utterances can be reviewed.
+
+**Decision: D. MORE EVIDENCE REQUIRED.** One next Spike is recommended:
+private Evidence-backed, blind pairwise relation annotation with an explicit
+none/uncertain option, using authorized retained T1 Evidence if recoverable or
+a consented human-owned discussion otherwise. Only then should an extension
+to the existing relation model be proposed. T2's empty-item issue remains
+separate; T2/T3, Pilot, Release, and RFC-0006 do not advance here.
+
+### Relation Evaluation Corpus follow-up
+
+The previous T1-centered next-step recommendation is superseded by the
+[Relation Evaluation Corpus](../../evaluation/relation-corpus/README.md). T1
+and T2 are ecological failure-finding workloads, **not a normative relation
+Gold Standard**. Their accessible retained data lacks utterance text needed
+for defensible pair annotation; both are marked `UNVERIFIABLE` rather than
+being labeled from Node names. Five separate human-authored Japanese meeting
+archetypes (exploration, technical problem, option comparison, decision-making,
+execution planning) provide 31 Evidence/command records, 27 proposed Node
+units, and 31 candidate pairs. One author-intended pass marks 16 `present`,
+9 `none`, and 6 `uncertain`. Only two `supports` and one `opposes` pair map
+precisely to current semantic types. These selected pairs are a boundary
+test, **not** measured population recall or a justification for 13 new edges.
+
+An offline blind Human annotation sheet and an A/B/C sequence/current-types/
+author-intent comparison are included with the Corpus. Independent Human
+agreement and real-world semantic precision remain **unmeasured**. The
+follow-up decision is **E. MORE DIVERSE EVIDENCE REQUIRED** before any
+Canonical relation extension. Product, Analyzer, Schema, and deployed Shared
+View remain unchanged; T1/T2 audio was not rerun, and RFC-0006 remains pending.
+
+### Minimal Relation Model follow-up
+
+The independent Human's 31 pair-level judgments were subsequently provided
+and preserved separately from the Corpus author's annotation. The
+[Minimal Relation Model Spike](../../evaluation/relation-corpus/minimal-model-spike.md)
+tests only existing `supports`/`opposes` plus one *conceptual* discussion-origin
+relation. Author/Human three-way outcome agreement is 27/31. The sparse
+reclassification retains 2 supports, 1 opposes, 12 direct discussion-origin
+links, 14 no-direct-edge pairs, and 2 uncertain pairs. It deliberately omits
+option-comparison sibling links, reversed-origin links, and a transitive
+Issue→Decision shortcut. The technical cases carry a documented risk that a
+plain arrow could be misread as physical causality.
+
+**Offline decision: A. MINIMAL MODEL HOLDS provisionally on the controlled
+Corpus**, not as an adopted Canonical schema or a real-world precision claim.
+Exactly one next Spike is a short, consented, Evidence-complete real-world
+Relation Probe with Human review of proposed and omitted edges. T1/T2 remain
+empirical context, not taxonomy Ground Truth; no audio rerun or Product change
+occurred in this follow-up.
+
+### Correctable Working Graph runtime acceptance follow-up
+
+The opt-in semantic-Graph candidate was tested through the actual Analyzer on controlled R1–R5 Evidence, three independent fresh runs per archetype. The full result and Human-correction design are recorded in [Minimal Semantic Graph — Runtime acceptance and Correctable Working Graph](minimal-semantic-graph-hypothesis.md). The v7 Graph accepted no known unsafe Action/Decision state change in those runs, but R4's candidate Decision was missing in all three runs, provenance coverage varied substantially, and two unsafe Action proposals were rejected by the deterministic boundary. An explicit Human-origin relation-correction Event and stale-Evidence suppression now pass local tests; real-microphone conversational correction has not been accepted. **Deploy candidate: NOT READY.** T1/T2 results and deployed Shared View are unchanged; T2/T3/Pilot/Release do not advance.

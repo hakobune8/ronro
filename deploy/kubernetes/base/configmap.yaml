@@ -7,8 +7,9 @@ metadata:
     app.kubernetes.io/component: runtime-config
 data:
   RUNTIME_ENVIRONMENT: pilot
-  LIVE_CONFIGURATION_VERSION: pilot-001
-  PROMPT_VERSION: analyzer-prompt-v4
+  LIVE_CONFIGURATION_VERSION: semantic-graph-rc1
+  PROMPT_VERSION: analyzer-prompt-v9-semantic-edge-balance
+  REAL_ANALYZER_OUTPUT_SCHEMA_VERSION: v3
   NORMALIZATION_VERSION: v2
   CONTEXT_VERSION: v1
   TYPE_D: "OFF"

@@ -26,7 +26,7 @@ from typing import Any, Iterable, Mapping, Protocol
 
 from .analyzer import CandidateEvent
 from .errors import PrototypeError
-from .materializer import RELATION_MATRIX
+from .materializer import GraphMaterializer, RELATION_MATRIX
 from .schema import SchemaValidator
 from .display_labels import INSTRUCTION as DISPLAY_INSTRUCTION, POLICY_VERSION
 
@@ -36,6 +36,10 @@ PROMPT_VERSION_V2 = "analyzer-prompt-v2"
 PROMPT_VERSION_V3 = "analyzer-prompt-v3"
 PROMPT_VERSION_V4 = "analyzer-prompt-v4"
 PROMPT_VERSION_V5 = "analyzer-prompt-v5"
+PROMPT_VERSION_V6 = "analyzer-prompt-v6-semantic-graph-hypothesis"
+PROMPT_VERSION_V7 = "analyzer-prompt-v7-correctable-working-graph"
+PROMPT_VERSION_V8 = "analyzer-prompt-v8-explicit-candidate-decision"
+PROMPT_VERSION_V9 = "analyzer-prompt-v9-semantic-edge-balance"
 HUMAN_EVENT_TYPES = {
     "confirm_decision",
     "revoke_decision",
@@ -49,6 +53,7 @@ HUMAN_EVENT_TYPES = {
     "update_action",
     "set_current_topic",
     "undo_last_correction",
+    "correct_relation",
 }
 NODE_TYPES = {"topic", "idea", "option", "concern", "open_item", "decision", "action"}
 EXPLICIT_ACTION_MARKERS = (
@@ -410,6 +415,39 @@ class AnalysisContextBuilder:
             },
         }
 
+    def augment_for_semantic_relations(
+        self, context: dict[str, Any], graph: Mapping[str, Any], utterance: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Bounded cross-Topic retrieval for opt-in late relations.
+
+        Lexical overlap only retrieves candidates; it never asserts an edge.
+        Recent/current-context Nodes remain available when wording differs.
+        """
+        text = re.sub(r"[\s　。、・:：「」『』（）()\-—]+", "", str(utterance.get("text", ""))).lower()
+        grams = {text[i:i + 2] for i in range(max(0, len(text) - 1))}
+        existing = {n["id"] for n in context["relevant_nodes"]}
+        nodes = [n for n in graph.get("nodes", []) if n.get("status") not in {"archived", "parked"}]
+        def lexical(node: Mapping[str, Any]) -> int:
+            label = re.sub(r"[\s　。、・:：「」『』（）()\-—]+", "", str(node.get("label", ""))).lower()
+            return len(grams & {label[i:i + 2] for i in range(max(0, len(label) - 1))})
+        # Prefer strongly mentioned old Nodes, then keep existing current-Topic
+        # context and latest Nodes. Stable IDs break all remaining ties.
+        matched = sorted((n for n in nodes if lexical(n) >= 2),
+                         key=lambda n: (-lexical(n), n["id"]))
+        current = sorted((n for n in nodes if n["id"] in existing), key=lambda n: n["id"])
+        recent = sorted(nodes, key=lambda n: (str(n.get("updated_at") or ""), n["id"]), reverse=True)
+        ordered = matched + current + recent
+        selected: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for node in ordered:
+            if node["id"] not in seen:
+                selected.append(self._node_summary(node))
+                seen.add(node["id"])
+                if len(selected) >= self.node_limit:
+                    break
+        context["relevant_nodes"] = selected
+        return context
+
     @staticmethod
     def _node_summary(node: Mapping[str, Any]) -> dict[str, Any]:
         return {
@@ -439,6 +477,14 @@ def build_analyzer_prompt(
         return build_analyzer_prompt_v4(context)
     if prompt_version == PROMPT_VERSION_V5:
         return build_analyzer_prompt_v5(context)
+    if prompt_version == PROMPT_VERSION_V6:
+        return build_analyzer_prompt_v6(context)
+    if prompt_version == PROMPT_VERSION_V7:
+        return build_analyzer_prompt_v7(context)
+    if prompt_version == PROMPT_VERSION_V8:
+        return build_analyzer_prompt_v8(context)
+    if prompt_version == PROMPT_VERSION_V9:
+        return build_analyzer_prompt_v9(context)
     if prompt_version == PROMPT_VERSION_V3:
         return build_analyzer_prompt_v3(context)
     if prompt_version == PROMPT_VERSION_V2:
@@ -839,6 +885,123 @@ Input: an unfinished or targetless fragment such as “なので…” -> events
     return system_prompt, payload
 
 
+def build_analyzer_prompt_v6(context: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Opt-in working hypothesis: sparse, Evidence-backed Node provenance."""
+
+    system_prompt, payload = build_analyzer_prompt_v5(context)
+    system_prompt = system_prompt.replace(PROMPT_VERSION_V5, PROMPT_VERSION_V6)
+    system_prompt = system_prompt.replace(
+        "Allowed relation_type values are exactly: contains, has_option, supports, opposes, related_to.",
+        "For this hypothesis, emit relation_type only from: contains, has_option, supports, opposes, discussion_provenance.",
+    )
+    system_prompt = system_prompt.replace(
+        "related_to connects two non-archived nodes. Do not invent other relations.",
+        "Legacy related_to remains readable for replay but must not be newly emitted. Do not invent other relations.",
+    )
+    system_prompt = system_prompt.replace(
+        "Use supports, opposes, or related_to only when the relation is explicit and important.",
+        "Use supports, opposes, or discussion_provenance only when the relation is explicit and important.",
+    )
+    system_prompt += """
+
+DISCUSSION PROVENANCE — WORKING HYPOTHESIS
+Use discussion_provenance only between non-Topic Nodes when the current utterance
+clearly establishes that target B arose from discussion of source A. It records
+discussion origin, NOT physical causation, proof, support, opposition, resolution,
+or mere order/similarity. Prefer no edge to a speculative edge. A shared Topic,
+adjacent utterances, a Topic Return, or sibling Options do not establish an edge.
+Do not emit redundant transitive shortcuts (Issue→Decision when Issue→Option→Decision
+already explains the path) unless current Evidence separately establishes the direct link.
+Multiple parents are allowed only when each is explicitly supported. Never add a
+provenance cycle. Use source_evidence_ids from the CURRENT utterance that actually
+establishes the connection, including for late links between existing Nodes.
+The relation never creates/confirms a Decision, resolves an Open Item, creates an
+Action, or supplies Owner/Due. supports/opposes remain distinct argument relations.
+Do not use related_to as a substitute for uncertain provenance.
+"""
+    return system_prompt, payload
+
+
+def build_analyzer_prompt_v7(context: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    """One versioned, general-purpose correction of the v6 acceptance defects."""
+    system_prompt, payload = build_analyzer_prompt_v6(context)
+    system_prompt = system_prompt.replace(PROMPT_VERSION_V6, PROMPT_VERSION_V7)
+    system_prompt += """
+
+CORRECTABLE WORKING GRAPH — V7
+The Graph is a working interpretation that participants can correct. Prefer
+useful, Evidence-defensible discussion provenance when a point is introduced
+as a response, specific development, open question, chosen option, or concrete
+follow-up to an existing point. The edge means discussion origin only, not
+physical causality or resolution. Never connect mere temporal neighbors,
+sibling alternatives, or unrelated points to fill the map. Rejected Human
+relations in the supplied Event history must not be recreated from old Evidence;
+new utterances may provide genuinely new support.
+
+Decision procedure is NOT an Action. A chair saying a proposal is a Decision
+candidate or that they will confirm it if nobody objects does not assign
+operational work. Represent an explicit candidate Decision as a candidate
+Decision Node; only a Human confirmation event can confirm it. Do not invent
+Action, Owner, Due, consensus, negation reversal, or stronger certainty.
+"""
+    return system_prompt, payload
+
+
+def build_analyzer_prompt_v8(context: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Make an explicitly named decision candidate distinct from commitment."""
+    system_prompt, payload = build_analyzer_prompt_v7(context)
+    system_prompt = system_prompt.replace(PROMPT_VERSION_V7, PROMPT_VERSION_V8)
+    system_prompt += """
+
+EXPLICIT DECISION CANDIDATE — V8
+The earlier commitment threshold applies to inferring a choice from ordinary
+discussion. A participant can instead explicitly name a *candidate decision*
+without committing to or confirming it. If the CURRENT utterance explicitly
+says that a concrete named option/policy is being put forward as a decision
+candidate (e.g. 「この方針を決定候補として出します」 with the policy named in the
+same utterance), emit one decision Node with candidate status. It is not
+confirmed; conditional future checking or lack of objection is not consent.
+Do not convert procedural 「確認します」 or 「異論がなければ確認します」 into an
+Action. Do not create a candidate from a mere option, question, preference,
+or anaphoric 「それで」 without an explicit named target in the current speech.
+Where a matching Option already exists, use discussion_provenance from the
+Option to the candidate Decision only if this speech identifies that Option
+as the candidate's origin. No automatic Human confirmation event.
+"""
+    return system_prompt, payload
+
+
+def build_analyzer_prompt_v9(context: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Remove legacy Topic-edge precedence without lowering semantic safety."""
+    system_prompt, payload = build_analyzer_prompt_v8(context)
+    system_prompt = system_prompt.replace(PROMPT_VERSION_V8, PROMPT_VERSION_V9)
+    system_prompt = system_prompt.replace(
+        "Prefer one contains relation for a child under a newly created Topic and has_option for options.",
+        "Use contains/has_option for Topic membership, but these do not replace a distinct Evidence-backed Node-to-Node relation.",
+    ).replace(
+        "When contains is sufficient, do not add cross-relations.",
+        "Do not add a semantic Node-to-Node edge merely to duplicate Topic membership.",
+    ).replace(
+        "avoid redundant Ideas, prefer contains/has_option, and do not use related_to",
+        "avoid redundant Ideas, preserve Topic membership and independent semantic edges, and do not use related_to",
+    )
+    system_prompt += """
+
+SEMANTIC EDGE BALANCE — V9
+After choosing a substantive new Node, check its explicit relationship to
+existing discussion Nodes in the supplied context. If the current utterance
+introduces an Option in response to a stated Issue, gives a reason for an
+Option, states a Concern against an Option, names an Option as a candidate
+Decision, or assigns concrete follow-up arising from an unresolved issue,
+include the precise Evidence-backed Node-to-Node relation in this SAME output.
+Topic contains/has_option may coexist; it is not the answer to this check.
+Do not add an edge when the origin/argument is only guessed from adjacency,
+shared Topic, similar vocabulary, or an inferred real-world causal link.
+Independent roots and uncertainty remain unconnected. No transitive shortcuts.
+"""
+    return system_prompt, payload
+
+
 class RealAnalyzer:
     """Provider-backed Analyzer with the M6 CandidateEvent boundary."""
 
@@ -901,6 +1064,8 @@ class RealAnalyzer:
             recent_events=recent_events,
             meeting_goal=self.meeting_goal,
         )
+        if self.prompt_version in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9}:
+            context = self.context_builder.augment_for_semantic_relations(context, current_graph, utterance)
         context_measure = self.context_builder.measure(context)
         system_prompt, user_payload = build_analyzer_prompt(context, prompt_version=self.prompt_version)
         if self.output_schema_version == "v3":
@@ -967,7 +1132,11 @@ class RealAnalyzer:
             if self.output_schema_version == "v3":
                 for intent, hint in zip([i for i in output["events"] if i.get("kind") == "node"], raw_hints):
                     intent["display_label"] = hint
-            candidates = self._to_candidates(output, utterance, current_graph)
+            visible_ids = ({node["id"] for node in context["relevant_nodes"]}
+                           if self.prompt_version in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9} else None)
+            candidates = self._to_candidates(output, utterance, current_graph,
+                                             visible_node_ids=visible_ids,
+                                             recent_events=recent_events)
             for candidate in candidates:
                 # Sequence is a temporary validation placeholder.  The replay
                 # boundary replaces it with the canonical global sequence.
@@ -997,6 +1166,8 @@ class RealAnalyzer:
         output: Mapping[str, Any],
         utterance: Mapping[str, Any],
         graph: Mapping[str, Any],
+        *, visible_node_ids: set[str] | None = None,
+        recent_events: Iterable[dict[str, Any]] = (),
     ) -> list[CandidateEvent]:
         intents = list(output.get("events", []))
         evidence_ids = set(utterance.get("evidence_ids", []))
@@ -1092,6 +1263,13 @@ class RealAnalyzer:
         for intent in intents:
             kind = intent.get("kind")
             if kind == "relation":
+                if visible_node_ids is not None and any(
+                    ref.get("existing_node_id") not in visible_node_ids
+                    for ref in (intent["source"], intent["target"])
+                    if ref.get("existing_node_id")
+                ):
+                    self._critical("relation_reference_not_in_context", trace)
+                    continue
                 source_id = self._resolve_ref(intent["source"], node_refs, graph, node_intents)
                 target_id = self._resolve_ref(intent["target"], node_refs, graph, node_intents)
                 if source_id is None or target_id is None:
@@ -1103,10 +1281,43 @@ class RealAnalyzer:
                     self._critical("relation_reference_missing", trace)
                     continue
                 relation_type = intent["relation_type"]
+                relation_key = (source_id, target_id, relation_type)
+                removal = next((event for event in reversed(list(recent_events))
+                                if event.get("event_type") == "correct_relation"
+                                and event["payload"].get("old_relation") is not None
+                                and (event["payload"]["old_relation"]["source_node_id"],
+                                     event["payload"]["old_relation"]["target_node_id"],
+                                     event["payload"]["old_relation"]["relation_type"]) == relation_key), None)
+                if removal is not None and utterance.get("sequence", 0) <= removal["payload"]["evidence_sequence_at_correction"]:
+                    self._critical("human_relation_correction_respected", trace, critical=False)
+                    continue
+                if self.prompt_version not in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9} and relation_type == "discussion_provenance":
+                    self._critical("hypothesis_relation_not_enabled", trace)
+                    continue
+                if self.prompt_version in {PROMPT_VERSION_V6, PROMPT_VERSION_V7, PROMPT_VERSION_V8, PROMPT_VERSION_V9} and relation_type == "related_to":
+                    self._critical("legacy_related_to_rejected", trace)
+                    continue
+                if (self.prompt_version == PROMPT_VERSION_V9 and relation_type == "opposes"
+                        and not self._explicit_opposition(text)):
+                    self._critical("weak_opposition_rejected", trace, critical=False)
+                    continue
                 allowed_source, allowed_target = RELATION_MATRIX[relation_type]
                 if source["type"] not in allowed_source or target["type"] not in allowed_target:
                     self._critical("invalid_relation_rejected", trace)
                     continue
+                if relation_type == "discussion_provenance":
+                    if not intent["source_evidence_ids"] or source_id == target_id:
+                        self._critical("unsupported_provenance_rejected", trace)
+                        continue
+                    accepted_edges = list(graph.get("edges", [])) + [
+                        {"type": c.payload["relation_type"],
+                         "source_node_id": c.payload["source_node_id"],
+                         "target_node_id": c.payload["target_node_id"]}
+                        for c in candidates if c.event_type == "relation_detected"
+                    ]
+                    if GraphMaterializer._provenance_reaches(accepted_edges, target_id, source_id):
+                        self._critical("provenance_cycle_rejected", trace)
+                        continue
                 candidate(
                     "relation_detected",
                     {
@@ -1157,6 +1368,14 @@ class RealAnalyzer:
         return None
 
     @staticmethod
+    def _explicit_opposition(text: str) -> bool:
+        """A drawback alone is not an argument that opposes an option."""
+        return bool(re.search(
+            r"反対|賛成できない|支持できない|採用できない|この案では.{0,24}(?:できない|満たせない|成立しない)|"
+            r"(?:案|方法|方針).{0,16}(?:却下|除外|対象外|不適切)", text,
+        ))
+
+    @staticmethod
     def _resolve_ref(
         ref: Mapping[str, Any],
         node_refs: Mapping[int, str | None],
@@ -1190,12 +1409,18 @@ class RealAnalyzer:
 
     @staticmethod
     def _explicit_action(text: str) -> bool:
+        if "決定候補" in text or ("異論がなければ" in text and "確認します" in text):
+            return False
         return bool(any(marker in text for marker in EXPLICIT_ACTION_MARKERS) and not any(marker in text for marker in ACTION_SUGGESTION_MARKERS))
 
     @staticmethod
     def _explicit_value(value: Any, text: str) -> bool:
         if value is None:
             return True
+        if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            year, month, day = (int(part) for part in value.split("-"))
+            if re.search(rf"{year}年0?{month}月0?{day}日", text):
+                return True
         return str(value) in text
 
     @staticmethod

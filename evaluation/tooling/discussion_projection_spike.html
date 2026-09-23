@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>論点図・Focused Flow／会議後記録｜非公開レビュー</title>
+<style>
+  *{box-sizing:border-box}body{margin:0;background:#e7edf1;color:#142b3d;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+  .review{max-width:1600px;margin:0 auto;padding:24px 28px}.review h1{font-size:30px;margin:0 0 8px}.review p{line-height:1.5;margin:8px 0}
+  .tools{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}.tools button{border:1px solid #9badb8;background:#fff;border-radius:8px;padding:10px 16px;font-size:17px;cursor:pointer}.tools button[aria-pressed=true]{background:#163d57;color:#fff}
+  .note{font-size:16px;color:#405565}.stage{position:relative;width:1920px;height:1080px;transform-origin:top left;background:#f9fbfc;box-shadow:0 8px 36px #12273824;overflow:hidden}
+  .live{padding:52px 76px 48px;display:flex;flex-direction:column;gap:28px}.live-head{display:flex;justify-content:space-between;align-items:center;min-height:60px}.topic{font-size:31px;color:#375368;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:1450px}.status{font-size:19px;color:#59717f}
+  .grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,1fr);gap:20px;flex:1;min-height:0}.grid-card{border-left:7px solid #347993;background:#edf3f5;border-radius:8px;padding:24px 30px;font-size:39px;line-height:1.35;overflow:hidden;overflow-wrap:anywhere}.grid-card.concern{border-color:#b68545}.grid-foot{font-size:24px;color:#667987;text-align:right;min-height:28px}
+  .flow-area{flex:1;min-height:0;display:flex;flex-direction:column}.flow-title{font-size:24px;color:#466477;margin-bottom:20px}.flow-cards{display:grid;grid-template-columns:1fr 54px 1fr 54px 1fr 54px 1.22fr;align-items:stretch;gap:6px;flex:1;min-height:0}.flow-card{background:#e9f1f4;border-radius:16px;border-top:7px solid #7394a3;padding:27px 25px;display:flex;flex-direction:column;justify-content:center;overflow:hidden}.flow-card.focus{background:#daeaf0;border-color:#177192;box-shadow:0 0 0 3px #a6cbd9}.flow-card .eyebrow{font-size:20px;color:#4d6878;margin-bottom:20px}.flow-card .meaning{font-size:34px;line-height:1.32;font-weight:650;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5;overflow:hidden;overflow-wrap:anywhere}.flow-card.focus .meaning{font-size:40px}.flow-card .long{font-size:17px;color:#637986;margin-top:12px}.arrow{align-self:center;font-size:38px;color:#7792a0;text-align:center}.flow-legend{font-size:18px;color:#6d8190;margin-top:16px}
+  .flow-card .meaning{-webkit-line-clamp:4}
+  .latest-detail{height:260px;background:#fff;border:2px solid #c1d2db;border-radius:16px;padding:20px 28px;display:flex;flex-direction:column;gap:12px}.latest-detail .eyebrow{font-size:20px;color:#456577}.latest-detail .full{font-size:29px;line-height:1.43;overflow:auto;overflow-wrap:anywhere;flex:1}.latest-detail .overflow-note{font-size:17px;color:#5d7281}.rail{height:92px;border-top:1px solid #ccd9e0;display:flex;align-items:center;gap:28px;font-size:21px;color:#436174}.rail-item{max-width:410px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rail strong{color:#1b445a}
+  .record{width:1920px;min-height:1080px;background:#f9fbfc;padding:70px 110px;color:#172d3b}.record h1{font-size:54px;margin:0 0 18px}.record .sub{font-size:24px;color:#526c7c;margin:0 0 34px}.record .overview{min-height:610px;display:grid;grid-template-columns:1.8fr 1fr;gap:35px}.record .flow-panel,.record .state-panel{background:#fff;border:1px solid #d3e0e6;border-radius:20px;padding:34px}.record h2{font-size:34px;margin:0 0 18px}.record .chapter{display:grid;grid-template-columns:120px 1fr;gap:24px;padding:23px 4px;border-bottom:1px solid #e4edf1;font-size:27px;line-height:1.4}.record .chapter .step{font-size:21px;color:#517082}.record .chapter:last-child{border-bottom:0}.record .state-row{font-size:24px;line-height:1.4;margin-bottom:22px}.record .state-row strong{display:block;color:#416174;font-size:19px;margin-bottom:6px}.record .record-note{border-top:1px solid #d2e0e6;padding:24px 0;font-size:23px;color:#536a78}.record .details{margin-top:70px}.record .details h2{margin-bottom:28px}.record details{border-bottom:1px solid #d4e1e7;padding:14px 0;font-size:23px}.record summary{cursor:pointer;font-weight:600}.record details p{font-size:22px;line-height:1.6;margin:15px 0}.record .evidence{font-size:17px;color:#68808d}
+  @media print{body{background:white}.review{display:none}.stage{box-shadow:none;transform:none!important}.record{break-before:page}}
+</style>
+<div class="review">
+  <h1>Focused Flow / 会議後の論点図 — 非公開Human Review</h1>
+  <p>保存済みGraphから作成したオフライン試作。矢印は<b>議論の検出順</b>であり、意味的な因果・支持関係を表しません。原文・証拠由来の詳細を含むため公開不可。</p>
+  <div class="tools" id="datasets"></div><div class="tools" id="modes"></div>
+  <p class="note" id="context"></p>
+  <p class="note">比較：①現在の6枚 ②Focused Flow ③Focused Flow＋最新本文。最終記録では全Nodeを時系列で確認できます。評価観点：現在地／直前の文脈／流れ／最新変更／負荷／安定／会議価値。</p>
+</div>
+<div id="stage" class="stage"></div>
+<script id="data" type="application/json">__PRIVATE_DATA__</script>
+<script>
+const data=JSON.parse(document.getElementById('data').textContent);
+const params=new URLSearchParams(location.search);
+let dataset=params.get('dataset')||'t1-15', mode=params.get('mode')||'detail';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const label=n=>n?.display||n?.canonical||'';
+function buttons(){
+  const ds=[['t1-5','T1 5分'],['t1-10','T1 10分'],['t1-15','T1 15分'],['t2-short','T2 保存済み短区間'],['final-t1','T1 会議後記録']];
+  document.getElementById('datasets').innerHTML=ds.map(([id,name])=>`<button data-dataset="${id}" aria-pressed="${dataset===id}">${name}</button>`).join('');
+  const ms=[['grid','6枚'],['flow','Focused Flow'],['detail','Flow＋最新本文'],['final','会議後記録']];
+  document.getElementById('modes').innerHTML=ms.map(([id,name])=>`<button data-mode="${id}" aria-pressed="${mode===id}">${name}</button>`).join('');
+  document.querySelectorAll('button[data-dataset]').forEach(b=>b.onclick=()=>{dataset=b.dataset.dataset;mode=dataset.startsWith('final')?'final':mode;render()});
+  document.querySelectorAll('button[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;render()});
+}
+function rail(d){const title={candidate:'決定候補',confirmed:'確定事項',open_item:'未解決事項',action:'次の対応'};return Object.entries(d.rail).flatMap(([k,v])=>v.map(n=>`<div class="rail-item"><strong>${title[k]}</strong> ${esc(label(n))}</div>`)).join('')}
+function grid(d){const cards=d.grid.map(n=>`<div class="grid-card ${esc(n.type)}">${esc(label(n))}</div>`).join('');return `<div class="stage live"><div class="live-head"><div class="topic">${esc(d.topic?.canonical||'議論中')}</div><div class="status">● 聞き取り中</div></div><div class="grid">${cards}</div><div class="grid-foot">${d.ordinary_count>6?'ほか'+(d.ordinary_count-6)+'件':''}</div><div class="rail">${rail(d)}</div></div>`}
+function focused(d,withDetail){let n=d.flow;let cells=[];for(let i=0;i<4;i++){const x=n[i-(4-n.length)];if(i)cells.push('<div class="arrow" aria-label="次に検出">›</div>');cells.push(x?`<div class="flow-card ${x.id===d.latest?.id?'focus':''}"><div class="eyebrow">${x.id===d.latest?.id?'現在の焦点':'直前の論点'}</div><div class="meaning">${esc(label(x))}</div>${!x.has_display_label?'<div class="long">旧データ：本文表示。全文は会議後記録へ</div>':''}</div>`:'<div></div>')}
+  return `<div class="stage live"><div class="live-head"><div class="topic">議論の流れ</div><div class="status">● 聞き取り中</div></div><div class="flow-area"><div class="flow-title">今の議論</div><div class="flow-cards">${cells.join('')}</div><div class="flow-legend">左から右へ：検出順（意味的な関係を示す矢印ではありません）</div></div>${withDetail?`<div class="latest-detail"><div class="eyebrow">最新の${esc(d.latest?.change||'追加')} ・ 本文</div><div class="full">${esc(d.latest?.canonical||'—')}</div><div class="overflow-note">全文が収まらない場合は、この領域内で続きがあります。会議後記録にも全文を保持します。</div></div>`:''}<div class="rail">${rail(d)}</div></div>`;
+}
+function finalRecord(d){const checkpoints=d.checkpoints||[{time:'保存区間',nodes:d.flow}];const chapters=checkpoints.map(c=>`<div class="chapter"><div class="step">${esc(c.time)}</div><div>${c.nodes.map(n=>esc(label(n))).join('<br>')}</div></div>`).join('');
+  const states=Object.entries(d.rail).map(([k,arr])=>`<div class="state-row"><strong>${({candidate:'決定候補',confirmed:'確定事項',open_item:'未解決事項',action:'次の対応'})[k]}</strong>${arr.length?arr.map(n=>esc(n.canonical)).join('<br>'):'記録なし'}</div>`).join('');
+  const details=d.nodes.map((n,i)=>`<details><summary>${String(i+1).padStart(2,'0')} · ${esc(label(n))}</summary><p>${esc(n.canonical)}</p><div class="evidence">証拠参照 ${n.evidence_count}件 · 元イベント ${n.source_event_count}件（内部IDは表示しない）</div></details>`).join('');
+  return `<article class="record"><h1>議論の全体像</h1><p class="sub">${esc(d.source)} · Graph revision ${d.revision} · 会議後の論点図（試作）</p><div class="overview"><section class="flow-panel"><h2>議論はどう進んだか</h2>${chapters}</section><section class="state-panel"><h2>何が残ったか</h2>${states}</section></div><div class="record-note">${esc(d.limitation)} この流れは検出順の区切りで、Node間の意味的関係を推測していません。全${d.nodes.length} Nodeを下で確認できます。</div><section class="details"><h2>論点の詳細（Canonical本文）</h2>${details}</section></article>`;
+}
+function render(){const d=data[dataset];if(!d)return;buttons();document.getElementById('context').textContent=`${d.source} ／ Graph rev ${d.revision} ／ ${d.limitation} ／ display_label保存済み ${d.nodes.filter(n=>n.has_display_label).length}件`;document.getElementById('stage').outerHTML=mode==='final'?finalRecord(d):mode==='grid'?grid(d):focused(d,mode==='detail');document.querySelector('.stage, .record')?.setAttribute('id','stage');history.replaceState(null,'',`?dataset=${dataset}&mode=${mode}`);window.requestAnimationFrame(()=>{const el=document.getElementById('stage');if(el){const scale=Math.min(window.innerWidth,1920)/1920;el.style.transform=`scale(${scale})`;el.style.transformOrigin='top left';el.style.marginBottom=mode==='final'?`${(el.scrollHeight)*(scale-1)}px`:`${1080*(scale-1)}px`}})}
+window.addEventListener('resize',render);render();
+</script>
+</html>

@@ -125,6 +125,32 @@
     .discussion-active .flow-list { flex: 1; }
     .discussion-active .flow-item { flex: 0 1 auto; min-width: 0; font-size: 32px; }
     .discussion-active .flow-item.current { border-bottom-color: transparent; color: var(--ink); }
+    .focused-main { display: grid; grid-template-columns: minmax(0,1fr) 420px; gap: 22px; min-height: 0; }
+    .focused-map { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 28px 34px; }
+    .focused-heading { margin: 0 0 18px; font-size: 28px; font-weight: 700; }
+    .focused-content { display: flex; flex: 1; min-height: 0; flex-direction: column; justify-content: center; }
+    .focused-row { display: flex; justify-content: center; align-items: stretch; gap: 16px; margin: 15px 0; }
+    .focused-node { width: min(100%,520px); padding: 18px 22px; border: 2px solid #bbcfda; border-radius: 15px; background: #fff; font-size: 29px; line-height: 1.35; font-weight: 650; overflow-wrap: anywhere; }
+    .focused-node.current { border: 4px solid #28668b; background: #f0f8fc; font-size: 37px; }
+    .focused-sparse .focused-node { width: min(100%,700px); padding: 26px 30px; font-size: 34px; }
+    .focused-sparse .focused-node.current { font-size: 45px; }
+    .focused-sparse .focused-relation { font-size: 22px; }
+    .focused-node.context { color: #425d6e; font-size: 25px; }
+    .focused-node.argument { border-left: 6px solid #449777; font-size: 25px; }
+    .focused-node.argument.opposes { border-left-color: #b97468; }
+    .focused-relation { color: #516d7b; font-size: 20px; text-align: center; }
+    .focused-argument-label { color: #286d52; font-size: 18px; font-weight: 600; margin-bottom: 5px; }
+    .focused-node.opposes .focused-argument-label { color: #965249; }
+    .focused-side { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+    .focused-latest { flex: 0 0 auto; max-height: 34%; overflow: auto; padding: 20px 24px; border-radius: 16px; background: #edf3f6; }
+    .focused-latest h2 { margin: 0 0 12px; font-size: 23px; }
+    .focused-latest p { margin: 0; font-size: 23px; line-height: 1.5; overflow-wrap: anywhere; }
+    .focused-side .persistent-rail { flex: 0 1 auto; max-height: calc(100% - 180px); overflow: hidden; padding: 10px 20px; border: 1px solid #d7e1e7; border-radius: 16px; background: #fff; }
+    .focused-side .persistent-section { padding: 10px 0; }
+    .focused-side .persistent-section h2 { font-size: 26px; margin-bottom: 6px; }
+    .focused-side .persistent-item { font-size: 26px; line-height: 1.35; }
+    .focused-side .side-empty { font-size: 20px; }
+    .focused-side .action-details { font-size: 18px; color: #53697d; }
     .passive { padding: 50px; font-size: 28px; }
   </style>
 </head>
@@ -180,6 +206,9 @@
     const params = new URLSearchParams(window.location.search);
     const demoFixture = params.get('fixture');
     const demoSequence = params.get('sequence');
+    // Focused Flow is the candidate default; the prior six-card projection
+    // remains available as a comparison/fallback, not as the primary meeting view.
+    const semanticFocused = params.get('view') !== 'grid';
     if (params.get('viewport') === '1920x1080') document.documentElement.classList.add('capture-1920');
     const $ = (id) => document.getElementById(id);
     const HIGHLIGHT_MS = 4500;
@@ -275,6 +304,48 @@
         card.dataset.textFit = fits ? 'fit' : 'unresolved';
       }
     }
+
+    function renderFocusedFlow(snapshot, nodes, displayText, actionDetails, fresh) {
+      const flow = snapshot.map.semantic_focus;
+      if (!flow) return null;
+      const focus = flow.nodes.find(node => node.position === 'focus');
+      const currentTopic = nodes.get(snapshot.state.graph.current_topic?.primary_topic_id);
+      const ancestors = flow.nodes.filter(node => node.position === 'ancestor');
+      const parents = flow.nodes.filter(node => node.position === 'parent');
+      const children = flow.nodes.filter(node => node.position === 'child');
+      const descendants = flow.nodes.filter(node => node.position === 'descendant');
+      const args = flow.nodes.filter(node => ['argument', 'context'].includes(node.position));
+      const card = (node, extra = '') => `<div class="focused-node ${extra}${fresh.has(node.id) ? ' just-updated' : ''}">${escapeHtml(node.label)}</div>`;
+      const row = values => `<div class="focused-row">${values.map(node => card(node)).join('')}</div>`;
+      const argument = node => {
+        const incoming = flow.argument_edges.find(edge => edge.source_node_id === node.id && edge.target_node_id === focus?.id);
+        const outgoing = flow.argument_edges.find(edge => edge.source_node_id === focus?.id && edge.target_node_id === node.id);
+        const edge = incoming || outgoing;
+        const opposes = edge?.type === 'opposes';
+        const caption = incoming ? (opposes ? 'この話への懸念' : 'この話を支える理由')
+          : outgoing ? (opposes ? 'この話が反対する案' : 'この話が後押しする案') : 'あわせて出た話';
+        return `<div class="focused-node argument${opposes ? ' opposes' : ''}"><div class="focused-argument-label">${caption}</div>${escapeHtml(node.label)}</div>`;
+      };
+      const persistent = snapshot.map.shared?.rail || {};
+      const headings = {candidate:'決定候補',confirmed:'確定事項',open_item:'未解決事項',action:'次の対応'};
+      const sections = Object.entries(headings).map(([key,heading]) => {
+        const ids = persistent[key]?.node_ids || [];
+        if (!ids.length && !['candidate','open_item'].includes(key)) return '';
+        return `<section class="persistent-section ${key}"><h2>${heading}</h2>${ids.map(id => {
+          const node = nodes.get(id);
+          return node ? `<div class="persistent-item${fresh.has(id) ? ' just-updated' : ''}">${escapeHtml(displayText(node))}${actionDetails(node)}</div>` : '';
+        }).join('') || '<div class="side-empty">まだありません</div>'}${persistent[key]?.overflow ? `<div class="topic-more">ほか${persistent[key].overflow}件</div>` : ''}</section>`;
+      }).join('');
+      return `<section class="focused-map" aria-label="今話していること"><h1 class="focused-heading">今話していること</h1><div class="focused-content">
+        ${ancestors.length ? `<div class="focused-row">${ancestors.map(node => card(node,'context')).join('')}</div><div class="focused-relation">この話から ┊</div>` : ''}
+        ${parents.length ? `${row(parents)}<div class="focused-relation">この話を受けて ┊</div>` : ''}
+        ${focus ? `<div class="focused-row">${card(focus,'current')}</div>` : `<div class="focused-row"><div class="focused-node current">${escapeHtml(currentTopic?.label || '議論を整理しています')}</div></div>`}
+        ${children.length ? `<div class="focused-relation">┊ ここから出た話</div>${row(children)}` : ''}
+        ${descendants.length ? `<div class="focused-relation">┊ その先の話</div><div class="focused-row">${descendants.map(node => card(node,'context')).join('')}</div>` : ''}
+        ${args.length ? `<div class="focused-row">${args.map(argument).join('')}</div>` : ''}</div></section>
+        <aside class="focused-side">${flow.latest_detail ? `<section class="focused-latest"><h2>新しく加わったこと</h2><p>${escapeHtml(flow.latest_detail.canonical)}</p></section>` : ''}
+        <div class="persistent-rail">${sections}</div></aside>`;
+    }
     window.addEventListener('resize', fitDiscussionCards);
     document.fonts.ready.then(fitDiscussionCards);
 
@@ -294,6 +365,7 @@
         highlightedUntil.clear();
         previousFocusId = null;
         main.classList.add('no-rail');
+        main.classList.remove('focused-main', 'focused-sparse');
         main.innerHTML = '<section class="passive"><h1>会議の開始を待っています</h1><p>スマートフォンで <a href="/session">会議をはじめる</a></p></section>';
         $('flow-list').innerHTML = '';
         document.querySelector('.flow-band').hidden = true;
@@ -316,8 +388,11 @@
       }).join('');
       const headings = {candidate: '決定候補', confirmed: '確定事項', open_item: '未解決事項', action: '次の対応'};
       const rail = Object.entries(shared.rail).filter(([,value]) => value.node_ids.length);
-      main.classList.toggle('no-rail', !rail.length);
-      main.innerHTML = `<section class="current-discussion" aria-label="今話していること"><div class="topic-items">${cards}</div>
+      const focusedMarkup = semanticFocused ? renderFocusedFlow(snapshot, nodes, displayText, actionDetails, fresh) : null;
+      main.classList.toggle('no-rail', !rail.length && !focusedMarkup);
+      main.classList.toggle('focused-main', Boolean(focusedMarkup));
+      main.classList.toggle('focused-sparse', Boolean(focusedMarkup && (snapshot.map.semantic_focus?.nodes.length || 0) <= 2));
+      main.innerHTML = focusedMarkup || `<section class="current-discussion" aria-label="今話していること"><div class="topic-items">${cards}</div>
         <div class="topic-more">${shared.overflow ? 'ほか'+shared.overflow+'件' : ''}</div></section>`
         + (rail.length ? `<aside class="persistent-rail">${rail.map(([key,value]) =>
           `<section class="persistent-section ${key}"><h2>${headings[key]}</h2>
@@ -327,11 +402,12 @@
       const generic = label => ['その他','未分類','other','others','misc','other discussion items'].includes(String(label).trim().toLowerCase());
       const flow = (snapshot.map.recent_flow || []).filter(item => nodes.has(item.topic_id) && !generic(item.label));
       const meaningfulFlow = new Set(flow.map(item => item.topic_id)).size > 1;
-      document.querySelector('.flow-band').hidden = !meaningfulFlow;
-      document.querySelector('.shared-shell').classList.toggle('has-flow', meaningfulFlow);
+      const showFlow = focusedMarkup ? flow.length > 0 : meaningfulFlow;
+      document.querySelector('.flow-band').hidden = !showFlow;
+      document.querySelector('.shared-shell').classList.toggle('has-flow', showFlow);
       // Presentation only: newest/current at the fixed left edge; history stays chronological upstream.
       const recent = flow.slice(-4).reverse();
-      $('flow-list').innerHTML = meaningfulFlow ? recent.map((item,index) =>
+      $('flow-list').innerHTML = showFlow ? recent.map((item,index) =>
         `${index ? '<span class="flow-arrow">←</span>' : ''}<span class="flow-item${index === 0 && item.topic_id === graph.current_topic?.primary_topic_id ? ' current' : ''}${index === 0 && fresh.has(item.topic_id) ? ' just-updated' : ''}">${escapeHtml(item.label)}</span>`).join('') : '';
       fitDiscussionCards();
     }

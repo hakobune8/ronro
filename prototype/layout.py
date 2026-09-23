@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Iterable
 from .display_labels import display_projection
+from .semantic_projection import focused_flow
 
 
 MAIN_LANE_GAP = 320
@@ -298,10 +299,14 @@ def map_projection(
         "actions": sum(node["type"] == "action" and node["status"] != "archived" for node in nodes),
         "parked": sum(node["status"] == "parked" for node in nodes),
     }
+    display_labels = display_projection(graph, presentation)
+    semantic_labels = {node_id: value["text"] for node_id, value in display_labels.items()
+                       if value.get("text")}
     return {
         **projected,
         "presentation": copy.deepcopy(presentation or {}),
-        "display_labels": display_projection(graph, presentation),
+        "display_labels": display_labels,
+        "semantic_focus": focused_flow(graph, event_list, semantic_labels),
         "recent_flow": recent_topic_flow(event_list, graph),
         "counts": counts,
         "observation": None,

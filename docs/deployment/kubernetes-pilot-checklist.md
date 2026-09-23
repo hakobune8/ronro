@@ -18,7 +18,7 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 - [ ] Namespace `discussion-map-pilot` exists.
 - [ ] API Secret `discussion-map-openai` created out-of-band.
 - [ ] TLS Secret provisioned for the exact Pilot hostname.
-- [ ] ConfigMap shows `pilot-001`.
+- [ ] ConfigMap shows candidate configuration `semantic-graph-rc1` and Analyzer output schema `v3`.
 - [ ] PVC `discussion-map-pilot-evaluation` is Bound.
 - [ ] Deployment has `replicas=1` and `strategy=Recreate`.
 - [ ] Pod is Ready.
@@ -72,8 +72,8 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 
 - [ ] `git commit` SHA recorded.
 - [ ] Image tag/digest recorded.
-- [ ] Configuration version `pilot-001` recorded.
-- [ ] Prompt `analyzer-prompt-v4` recorded.
+- [ ] Configuration version `semantic-graph-rc1` recorded.
+- [ ] Prompt `analyzer-prompt-v9-semantic-edge-balance` recorded.
 - [ ] STT `gpt-transcribe` recorded.
 - [ ] Analyzer `gpt-5.6-luna` / reasoning `medium` recorded.
 - [ ] No Pilot has started during smoke testing.

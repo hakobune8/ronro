@@ -389,6 +389,7 @@ class LiveAnalyzerRuntime:
         self.layout.project(self.result.state["graph"], self.result.events)
         self._lock = threading.RLock()
         self._analysis_errors: list[dict[str, Any]] = []
+        self._correction_clarifications: list[dict[str, Any]] = []
         self._worker = SingleAnalyzerWorker(
             self.queue,
             self._process_item,
@@ -478,6 +479,7 @@ class LiveAnalyzerRuntime:
             return {
                 "queue": self.queue.snapshot(),
                 "analysis_errors": copy.deepcopy(self._analysis_errors),
+                "correction_clarifications": copy.deepcopy(self._correction_clarifications),
                 "worker_alive": self._worker.alive,
                 "state": copy.deepcopy(self.result.state),
                 "events": copy.deepcopy(list(self.result.events)),
@@ -533,6 +535,39 @@ class LiveAnalyzerRuntime:
             item.start_graph_revision = start_revision
             graph = copy.deepcopy(self.result.state["graph"])
             recent_events = copy.deepcopy(list(self.result.events))
+
+        from .relation_correction import interpret_relation_correction
+        correction = interpret_relation_correction(str(utterance.get("text", "")), graph, recent_events)
+        if correction is not None:
+            with self._lock:
+                if "clarification" in correction:
+                    self._correction_clarifications.append({
+                        "utterance_sequence": item.utterance_sequence,
+                        "question": correction["clarification"],
+                    })
+                    item.generated_events = []
+                else:
+                    command = {**correction,
+                               "occurred_at": str(utterance["ended_at"]),
+                               "expected_revision": self.result.state["graph"]["revision"],
+                               "source_evidence_ids": list(utterance["evidence_ids"])}
+                    try:
+                        applied = HumanCommandHandler(self.replay_runner).handle(self.result, command)
+                    except PrototypeError as exc:
+                        self._correction_clarifications.append({
+                            "utterance_sequence": item.utterance_sequence,
+                            "question": "どの論点の関係を直すか確認してください。",
+                            "code": exc.code,
+                        })
+                        item.generated_events = []
+                    else:
+                        self.result = applied.result
+                        item.generated_events = [copy.deepcopy(applied.event)]
+                        self.layout.project(self.result.state["graph"], self.result.events)
+                item.analyzer_seconds = 0.0
+                item.analyzer_end_at = utc_now()
+                item.graph_updated_at = utc_now()
+            return
 
         candidates = self._analyze(utterance, graph, recent_events)
         with self._lock:

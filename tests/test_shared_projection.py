@@ -89,7 +89,7 @@ class SharedProjectionTests(unittest.TestCase):
         harness=r'''
 const assert=require('node:assert/strict');
 const elements=new Map();
-function element(key){if(!elements.has(key))elements.set(key,{innerHTML:'',textContent:'',hidden:false,classList:{toggle(){},add(){}}});return elements.get(key);}
+function element(key){if(!elements.has(key))elements.set(key,{innerHTML:'',textContent:'',hidden:false,classList:{toggle(){},add(){},remove(){}}});return elements.get(key);}
 global.document={getElementById:element,querySelector:element,querySelectorAll:()=>[],fonts:{ready:Promise.resolve()},documentElement:element('html')};
 global.window={location:{search:''},addEventListener(){}};
 '''+js+r'''
@@ -155,6 +155,35 @@ snapshot.live_state.runtime_state='idle';renderShared(snapshot);
 assert(element('shared-main').innerHTML.includes('/session'));
 snapshot.live_state.runtime_state='active';renderShared(snapshot);
 assert(element('shared-main').innerHTML.includes('ほか3件'));
+'''
+        result=subprocess.run([shutil.which('node')],input=harness,text=True,capture_output=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node.js needed for DOM logic smoke')
+    def test_focused_view_keeps_macro_topic_flow_and_return(self):
+        source=(ROOT/'prototype/web/shared.html').read_text()
+        js=re.search(r'<script>(.*?)</script>',source,re.S).group(1)
+        js=js.replace('    refresh();', '').replace('    if (!demoFixture) window.setInterval(refresh, 1000);','')
+        harness=r'''
+const assert=require('node:assert/strict');
+const elements=new Map();
+function element(key){if(!elements.has(key))elements.set(key,{innerHTML:'',textContent:'',hidden:false,classList:{toggle(){},add(){},remove(){}}});return elements.get(key);}
+global.document={getElementById:element,querySelector:element,querySelectorAll:()=>[],fonts:{ready:Promise.resolve()},documentElement:element('html')};
+global.window={location:{search:''},addEventListener(){}};
+'''+js+r'''
+const graph={nodes:[{id:'t1',type:'topic',label:'交通'}, {id:'t2',type:'topic',label:'住民参加'}],current_topic:{primary_topic_id:'t1'}};
+const rail=Object.fromEntries(['candidate','confirmed','open_item','action'].map(key=>[key,{node_ids:[],overflow:0}]));
+const snapshot={state:{graph},map:{shared:{slots:[null,null,null,null,null,null],overflow:0,rail},semantic_focus:{nodes:[],focus_id:null,latest_detail:null,argument_edges:[]},recent_flow:[{topic_id:'t1',label:'交通'}]},live_state:{runtime_state:'active'}};
+renderShared(snapshot);
+assert(!element('.flow-band').hidden); // One Topic still describes the macro location.
+assert(element('shared-main').innerHTML.includes('focused-map'));
+assert(element('flow-list').innerHTML.startsWith('<span class="flow-item current">交通</span>'));
+snapshot.map.recent_flow.push({topic_id:'t2',label:'住民参加'},{topic_id:'t1',label:'交通'});
+renderShared(snapshot);
+assert.equal((element('flow-list').innerHTML.match(/flow-item current/g)||[]).length,1);
+assert(element('flow-list').innerHTML.startsWith('<span class="flow-item current">交通</span>'));
+assert(element('flow-list').innerHTML.includes('←'));
+assert(element('shared-main').innerHTML.includes('交通'));
 '''
         result=subprocess.run([shutil.which('node')],input=harness,text=True,capture_output=True)
         self.assertEqual(result.returncode,0,result.stderr)

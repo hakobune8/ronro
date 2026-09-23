@@ -37,6 +37,7 @@ class HumanCommandHandler:
         "set_current_topic",
         "undo_last_correction",
         "archive_node",
+        "correct_relation",
     }
 
     def __init__(self, replay_runner: ReplayRunner) -> None:
@@ -164,6 +165,28 @@ class HumanCommandHandler:
             if node["status"] == "archived":
                 raise self._command_error("Node is already archived")
             payload = {"node_id": node["id"]}
+        elif command_type == "correct_relation":
+            old = command.get("old_relation")
+            new = command.get("new_relation")
+            if old is None and new is None:
+                raise PrototypeError("command_invalid", "A relation correction needs an old or new relation")
+            for relation in (old, new):
+                if relation is None:
+                    continue
+                if not isinstance(relation, dict) or set(relation) != {"source_node_id", "target_node_id", "relation_type"}:
+                    raise PrototypeError("command_invalid", "Relation correction needs exact endpoints and type")
+                if relation["relation_type"] not in {"discussion_provenance", "supports", "opposes"}:
+                    raise PrototypeError("command_invalid", "Only semantic Relations can be corrected here")
+                self._require_node(state, relation["source_node_id"])
+                self._require_node(state, relation["target_node_id"])
+            payload = {
+                "old_relation": old,
+                "new_relation": new,
+                "evidence_sequence_at_correction": max(
+                    (item["sequence"] for item in state["evidence"]), default=0
+                ),
+                "declared_independent": command.get("declared_independent") is True,
+            }
         else:
             payload = self._undo_payload(result, command)
 

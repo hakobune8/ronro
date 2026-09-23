@@ -624,6 +624,7 @@ class LiveContinuousSession:
                     "normalized_utterance": copy.deepcopy(self.normalized_utterance),
                     "generated_events": copy.deepcopy(self.generated_events),
                     "analysis_errors": copy.deepcopy(self.analysis_errors),
+                    "correction_clarifications": copy.deepcopy(self._queue_runtime.snapshot()["correction_clarifications"]),
                     "error": copy.deepcopy(self.error),
                     "graph_revision": graph["revision"],
                     "rendered_revision": coalescing["rendered_revision"],

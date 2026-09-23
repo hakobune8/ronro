@@ -10,6 +10,8 @@
 
 本書は、Prototype 1で使用するDiscussion Eventの最小Catalogである。
 
+> 2026-09-23追記: `discussion_provenance` は[最小意味Graph仮説実装](../evaluation/minimal-semantic-graph-hypothesis.md)で追加された、Evidence必須のNode間Relationである。議論上の派生のみを表し、物理的因果・決定の確定・未解決事項の解決・Actionの実行を表さない。現行Prompt/本番画面へは未適用で、分類はHuman Review待ちの作業仮説である。
+
 目的は、Fixed Transcriptを同じ順序でReplayしたとき、同じEvent Streamから同じDiscussion Graphを再現できるようにすることである。
 
 本書では次を維持する。
@@ -587,7 +589,12 @@ Human CorrectionはGraphを直接変更せず、必ずEvent StreamへAppendす�
 | restore_from_parking_lot | parked Node | statusがparked | statusをactiveへ戻す |
 | update_action | action Node | 対象がaction | description、owner、due_date、statusを明示部分だけ更新 |
 | set_current_topic | topic Node | 対象がtopic | current_topicをhuman_correctedへ変更 |
+| correct_relation | semantic Relation | old/new Relationの片方以上、Human revision一致 | 線の削除・追加・向き先または型の変更を1 Eventで適用 |
 | undo_last_correction | 直前Correction | 対象が最新の可逆Human Correction | 逆操作を新しいEventとして適用 |
+
+### 11.0 Correctable Working Graph — provisional candidate
+
+`correct_relation` は現在の作業仮説を会議中に訂正するHuman-origin Eventである。`old_relation` / `new_relation` はそれぞれ nullable な source/target/type の組で、片方だけなら削除・追加、両方なら原子的な付け替えを表す。対象は `discussion_provenance`、`supports`、`opposes` に限定する。Eventには発話による訂正ならそのEvidence IDを保持し、当初のAnalyzer Eventも残す。Decision確認、Open Item解決、Action/Owner/Dueには一切作用しない。訂正時点のEvidence sequence watermark以前の古いEvidenceだけから同じ線を再提案しても拒否し、その後の新しいEvidenceなら再提案可能にする。曖昧な発話からは対象IDを推測せず、Graphを変えない。`undo_last_correction` の現行対象はrenameのみであり、Relationの差し戻しは新しい `correct_relation` Eventで表す。この機能はローカル候補で、発話訂正の実運用精度は未承認である。
 
 ### 11.1 Decision Correction
 

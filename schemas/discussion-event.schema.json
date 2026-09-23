@@ -198,6 +198,15 @@
       }
     },
     {
+      "if": {"properties": {"event_type": {"const": "correct_relation"}}},
+      "then": {
+        "properties": {
+          "actor": {"const": "human"},
+          "payload": {"$ref": "#/$defs/correctRelationPayload"}
+        }
+      }
+    },
+    {
       "if": {
         "properties": {
           "event_type": {
@@ -489,7 +498,8 @@
         "has_option",
         "supports",
         "opposes",
-        "related_to"
+        "related_to",
+        "discussion_provenance"
       ]
     },
     "eventType": {
@@ -501,6 +511,7 @@
         "session_ended",
         "node_detected",
         "relation_detected",
+        "correct_relation",
         "topic_focus_changed",
         "confirm_decision",
         "revoke_decision",
@@ -605,6 +616,17 @@
         "relation_type": {
           "$ref": "#/$defs/edgeType"
         }
+      }
+    },
+    "correctRelationPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["old_relation", "new_relation", "evidence_sequence_at_correction"],
+      "properties": {
+        "old_relation": {"anyOf": [{"$ref": "#/$defs/relationDetectedPayload"}, {"type": "null"}]},
+        "new_relation": {"anyOf": [{"$ref": "#/$defs/relationDetectedPayload"}, {"type": "null"}]},
+        "evidence_sequence_at_correction": {"type": "integer", "minimum": 0},
+        "declared_independent": {"type": "boolean"}
       }
     },
     "topicFocusChangedPayload": {
