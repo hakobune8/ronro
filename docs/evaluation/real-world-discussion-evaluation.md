@@ -2753,3 +2753,90 @@ Any T2 run with possible gaps must report **Evidence completeness unknown**,
 not `Evidence loss = 0`, and cannot be called a clean PASS on that evidence.
 This change is a continuity mitigation for evaluation, not demonstrated
 recovery of lost speech or a Pilot-baseline decision.
+
+## T2 Retry 4 — full fixed interval, explicit possible-audio-gap accounting
+
+This is a separate run from the earlier six-minute and fifteen-minute T2
+failures; those results remain unchanged. The frozen product source was commit
+`83cd2d2` on `t2-retry-rc1`, published by GitHub Actions run
+`35846388110` as `ghcr.io/hakobune8/ronro@sha256:6b8fe492a9f78e82258e1f320f3bb490e2cb39e9c5a8bc52d1819dd6797ef500`.
+The deployed evaluation configuration retained `gpt-transcribe`, generic
+Japanese meeting context, keyword `論路`, `server_vad_bounded` and 30-second
+fallback. The **opt-in evaluation-only** `LIVE_STT_EMPTY_VAD_POLICY=warn_short_no_delta`
+was enabled for this run; it was removed again afterward. The digest remained
+unchanged. The generic and Pilot-safe default is `strict`.
+
+The official NILIM Player ran in Safari through BlackHole to Chrome RONRO.
+A fresh out-of-interval provenance session yielded three consecutive
+source-corresponding Finals; Finals stopped during Pause and resumed after
+playback. Its Drain ended cleanly. The T2 session then began with zero
+Evidence, utterances, Queue items and Graph Nodes. The official 00:57:00 to
+01:27:00 interval was replayed once, continuously. Its non-content Player
+monitor recorded 3,596 samples: source elapsed 1800.119 s against wall time
+1800.156 s, zero resets, unready states, premature pauses, mute states or
+rate changes. The Player paused at approximately 01:27:00.346. RONRO audio
+capture included about 27 s of pre-roll silence and 66 s of post-roll
+silence before the operator ended the session; **no later source content**
+was played or ingested. The delayed intake stop is a procedure deviation,
+not a longer source interval, and should be eliminated in any repeat.
+
+| Source elapsed | Finals | Partials | Topics | Nodes | Relations | Open Items | Visible / overflow | Graph / Render | Possible gaps |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10 min | 37 | 2,970 | 2 | 30 | 20 | 2 | 6 / 20 | 54 / 54 | 1 (0.736 s) |
+| 20 min | 66 | 5,239 | 3 | 56 | 35 | 3 | 6 / 44 | 96 / 96 | 4 (5.248 s) |
+| 30 min / drained | 97 | 7,749 | 4 | 79 | 52 | 4 | 6 / 65 | 138 / 138 | 4 (5.248 s) |
+
+The recent-card area moved from coastal topics at 10 minutes to dam-related
+technical matters at 20 minutes and later sediment-movement discussion at
+30 minutes. The Topic-flow display showed transitions and a return. This is
+positive evidence that Stable Recency no longer freezes the Shared View on
+the initial cards. However, at the final snapshot the broad current Topic
+label was less specific than the visible sediment-related cards, and several
+technical labels were visually dense in the smaller observed Chrome window.
+Do not infer 1920×1080 or physical 3–5 m readability from that window.
+
+Provider item accounting for the T2 audio connection: 101 distinct committed
+items and 101 distinct completed items, of which 97 contained non-empty
+Finals and four were short automatic Server VAD empty completions (0.736,
+1.344, 1.888 and 1.280 s; each zero deltas). Boundary reasons for the 97
+Finals were 65 `server_vad` and 32 `bounded_fallback`; the latter is frequent
+enough to review before any Pilot baseline decision. No long, explicit-commit,
+unknown-range or partially recognized empty item was downgraded. Four
+`possible_untranscribed_audio` warnings remained visible in metrics; their
+content has **not** been verified as silence. Completed-Final Evidence was
+97/97, but **overall Evidence completeness is unverified**, not loss zero.
+
+Queue max depth was 4; pending, processing and failed were all zero after
+Drain. STT and Analyzer failures were zero. Graph/Render both reached revision
+138; there were no dangling references or duplicate node IDs/Topic labels.
+Automatic confirmation was zero. No Decision or Action was generated; four
+Open Items were generated, including at least one question-shaped item that
+merits Human review for persistence. No owner or due date was invented.
+
+Queue wait p50/p95/max was 0.005/4.045/4.624 s; Analyzer was
+3.755/7.114/8.921 s. All-event E2E was 6.815/44.016/49.908 s, but this
+includes 27 Graph-unchanged events waiting for render/coalescing. For the 70
+Graph-changing events, E2E was approximately 6.701/9.666/11.227 s.
+STT-finalization latency, token use and cost were not available; no values
+are inferred. Node economy was 79/97 = 0.81 Nodes per Final, 19.75 Nodes per
+Topic, and at most two new Nodes per Final.
+
+Presentation metadata accepted generated `display_label` for 63/79 Nodes;
+16/79 safely fell back to Canonical text. At the final six-card view, two
+cards used fallback text. Semantic quality of all generated labels and the
+four possible audio gaps still need Human/source review. The captured live
+screens were inspected transiently, but a private saved-T2 replay and
+1920×1080 screenshot package was **not** finalized before the evaluation
+Pod was recycled to restore strict mode. This artifact-retention limitation
+prevents a final Human-map-quality acceptance claim from this run.
+
+**Decision: B. T2 USABLE — Human Review before next step.** The fixed
+30-minute source interval and pipeline completed without a crash, but four
+explicitly uncertain audio regions, frequent fallback segmentation, technical
+card density and incomplete saved-review artifacts prevent T2 PASS. T3,
+Live Pilot, RFC-0006 finalization and release remain on hold. A repeat, if
+needed for final acceptance, must arm the existing evaluation observer before
+playback, save 10/20/30 snapshots and private screenshots, stop audio intake
+at the source endpoint, and preserve the runtime artifact **before** any
+Deployment restart. No source audio, video or full transcript belongs in
+Public Git.
