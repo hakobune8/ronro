@@ -57,7 +57,9 @@ class SharedViewTests(unittest.TestCase):
             "font-size: 22px",
             "font-size: 20px",
             "font-size: 18px",
-            "slice(0, 6)",
+            "shared.slots.map",
+            "font-size: 40px",
+            "確定事項",
             "＋ほか${remaining}件",
             "topic-more",
         ):

@@ -21,9 +21,12 @@ class StableLayout:
 
     def __init__(self) -> None:
         self._placements: dict[str, dict[str, Any]] = {}
+        from .shared_projection import SharedProjection
+        self.shared_projection = SharedProjection()
 
     def reset(self) -> None:
         self._placements.clear()
+        self.shared_projection.reset()
 
     def project(
         self,
@@ -298,4 +301,5 @@ def map_projection(
         "recent_flow": recent_topic_flow(event_list, graph),
         "counts": counts,
         "observation": None,
+        **({"shared": layout.shared_projection.project(state, event_list)} if "evidence" in state and "utterances" in state else {}),
     }
