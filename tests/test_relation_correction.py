@@ -108,6 +108,44 @@ class RelationCorrectionTests(unittest.TestCase):
         self.assertIn("clarification", interpreted)
         self.assertEqual(canonical_json(result.state), canonical_json(copy.deepcopy(result.state)))
 
+    def test_live_facilitator_control_exposes_correction_without_shared_controls(self):
+        control = (ROOT / "prototype/web/index.html").read_text(encoding="utf-8")
+        shared = (ROOT / "prototype/web/shared.html").read_text(encoding="utf-8")
+        for required in (
+            'id="relation-correction-panel"', 'id="correction-clarifications"',
+            'id="correction-old"', 'id="correction-source"', 'id="correction-target"',
+            'id="correction-type"', 'id="correction-independent"',
+            "'/api/live/commands'", "command_type: 'correct_relation'",
+            'controller_id: controllerInstanceId()',
+            "applyLiveSnapshot(result.snapshot)",
+        ):
+            self.assertIn(required, control)
+        self.assertNotIn('id="relation-correction-panel"', shared)
+        self.assertNotIn('/api/live/commands', shared)
+
+    def test_live_facilitator_command_removes_edge_and_replays(self):
+        result, ids = self.setup_graph()
+        old = self.shape(ids["r4-n2"], ids["r4-n5"])
+        runtime = LiveAnalyzerRuntime(session_id="hypothesis-r4", schema_validator=self.validator,
+                                      replay_runner=self.runner, initial_result=result, analyzer=_UnexpectedAnalyzer())
+        try:
+            event = runtime.execute_command({
+                "command_type": "correct_relation", "old_relation": old, "new_relation": None,
+                "declared_independent": True, "expected_revision": result.state["graph"]["revision"],
+                "occurred_at": "2026-09-23T01:02:00Z", "source_evidence_ids": [],
+            })
+            snapshot = runtime.snapshot()
+            self.assertEqual(event["actor"], "human")
+            self.assertEqual(event["event_type"], "correct_relation")
+            self.assertFalse(any(edge["source_node_id"] == old["source_node_id"]
+                                 and edge["target_node_id"] == old["target_node_id"]
+                                 for edge in snapshot["state"]["graph"]["edges"]))
+            replay = self.runner.replay_events(session_id="hypothesis-r4", evidence=snapshot["state"]["evidence"],
+                                               utterances=snapshot["state"]["utterances"], events=snapshot["events"])
+            self.assertEqual(canonical_json(snapshot["state"]), canonical_json(replay.state))
+        finally:
+            runtime.close()
+
     def test_spoken_add_and_argument_type_change(self):
         result, ids = self.setup_graph()
         request = interpret_relation_correction("これはさっきの給水車の話から出た", result.state["graph"], result.events)

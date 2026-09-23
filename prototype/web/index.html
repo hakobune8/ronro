@@ -60,6 +60,13 @@
     .live-status-badge.active { border-color: var(--success); color: var(--success); background: #f2fff5; }
     .live-status-badge.busy { border-color: var(--warning); color: var(--warning); background: #fffaf0; }
     .live-status-badge.error { border-color: var(--danger); color: var(--danger); background: #fff4f4; }
+    .relation-correction { margin: 0 0 12px; padding: 12px 14px; }
+    .relation-correction summary { cursor: pointer; font-size: 14px; font-weight: 700; }
+    .relation-correction p { margin: 8px 0; color: var(--muted); font-size: 12px; }
+    .relation-correction-fields { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+    .relation-correction-fields label { min-width: 170px; max-width: 360px; flex: 1; }
+    .relation-correction-fields select { display: block; width: 100%; }
+    .correction-clarifications { color: #8a4b11; font-size: 12px; }
     .evaluation-panel { margin: 10px 0 12px; }
     .evaluation-controls, .evaluation-feedback, .evaluation-review { display: flex; align-items: end; gap: 7px; flex-wrap: wrap; padding: 10px 13px; }
     .evaluation-controls label, .evaluation-feedback label, .evaluation-review label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 10px; font-weight: 700; }
@@ -247,6 +254,23 @@
       </div>
       <pre id="live-event-log" class="live-event-log">No Live runtime events.</pre>
     </section>
+
+    <details class="relation-correction" id="relation-correction-panel">
+      <summary>論点のつながりを訂正する（進行役）</summary>
+      <p>参加者の指摘が曖昧なときは確認してから操作してください。変更は会議の履歴に残り、共有画面にも反映されます。</p>
+      <div id="correction-clarifications" class="correction-clarifications" aria-live="polite"></div>
+      <div class="relation-correction-fields">
+        <label>直すつながり<select id="correction-old"><option value="">新しくつなぐ（既存の線なし）</option></select></label>
+        <button id="correction-remove" class="danger" disabled>選んだつながりを外す</button>
+        <label><input id="correction-independent" type="checkbox"> 別の独立した論点として扱う</label>
+      </div>
+      <div class="relation-correction-fields">
+        <label>どの話から<select id="correction-source"><option value="">選んでください</option></select></label>
+        <label>どの話へ<select id="correction-target"><option value="">選んでください</option></select></label>
+        <label>つながり方<select id="correction-type"><option value="discussion_provenance">この話を受けて生じた</option><option value="supports">根拠・支持</option><option value="opposes">懸念・反対</option></select></label>
+        <button id="correction-apply" class="primary" disabled>つなぐ／つなぎ直す</button>
+      </div>
+    </details>
 
     <details class="evaluation-panel">
       <summary>Evaluation Mode / Observer</summary>
@@ -506,6 +530,87 @@
         render();
       }
       updateLivePanel(snapshot);
+    }
+
+    function semanticLiveEdges() {
+      return model?.live ? model.state.graph.edges.filter((edge) =>
+        ['discussion_provenance', 'supports', 'opposes'].includes(edge.type)) : [];
+    }
+
+    function correctionEdgeShape(edge) {
+      return edge ? { source_node_id: edge.source_node_id, target_node_id: edge.target_node_id, relation_type: edge.type } : null;
+    }
+
+    function renderRelationCorrection() {
+      const oldSelect = $('correction-old');
+      const sourceSelect = $('correction-source');
+      const targetSelect = $('correction-target');
+      const previousOld = oldSelect.selectedOptions[0]?.dataset.edgeKey || '';
+      const previousSource = sourceSelect.value;
+      const previousTarget = targetSelect.value;
+      const live = Boolean(model?.live);
+      const nodes = live ? model.state.graph.nodes.filter((node) => node.type !== 'topic' && node.status !== 'archived') : [];
+      const nodeLabels = new Map(nodes.map((node) => [node.id, node.label]));
+      const edges = semanticLiveEdges();
+      const edgeNames = { discussion_provenance: 'この話を受けて生じた', supports: '根拠・支持', opposes: '懸念・反対' };
+      oldSelect.replaceChildren(new Option('新しくつなぐ（既存の線なし）', ''));
+      edges.forEach((edge, index) => {
+        const option = new Option(`${nodeLabels.get(edge.source_node_id) || '以前の論点'} → ${nodeLabels.get(edge.target_node_id) || '以前の論点'}（${edgeNames[edge.type]}）`, String(index));
+        option.dataset.edgeKey = JSON.stringify(correctionEdgeShape(edge));
+        oldSelect.add(option);
+      });
+      const selectedOld = Array.from(oldSelect.options).find((option) => option.dataset.edgeKey === previousOld);
+      if (selectedOld) oldSelect.value = selectedOld.value;
+      const fillNodes = (select, previous) => {
+        select.replaceChildren(new Option('選んでください', ''));
+        nodes.forEach((node) => select.add(new Option(node.label, node.id)));
+        if (nodeLabels.has(previous)) select.value = previous;
+      };
+      fillNodes(sourceSelect, previousSource);
+      fillNodes(targetSelect, previousTarget);
+      const clarification = model?.live_state?.correction_clarifications || [];
+      $('correction-clarifications').textContent = clarification.length
+        ? `最近の確認依頼（対応後も履歴として表示）：${clarification.slice(-3).map((item) => item.question).join(' ／ ')}` : '';
+      const available = live && ['active', 'capturing', 'connected'].includes(model.live_state?.runtime_state);
+      oldSelect.disabled = !available || !edges.length;
+      sourceSelect.disabled = !available || !nodes.length;
+      targetSelect.disabled = !available || !nodes.length;
+      $('correction-type').disabled = !available;
+      $('correction-independent').disabled = !available || oldSelect.value === '';
+      $('correction-remove').disabled = !available || oldSelect.value === '';
+      $('correction-apply').disabled = !available || !sourceSelect.value || !targetSelect.value || sourceSelect.value === targetSelect.value;
+    }
+
+    async function executeLiveRelationCorrection(removeOnly) {
+      if (!model?.live) return;
+      const oldIndex = $('correction-old').value;
+      const oldEdge = oldIndex === '' ? null : semanticLiveEdges()[Number(oldIndex)];
+      if (oldIndex !== '' && !oldEdge) { setStatus('訂正するつながりが更新されました。再選択してください。', true); return; }
+      const oldRelation = correctionEdgeShape(oldEdge);
+      const newRelation = removeOnly ? null : {
+        source_node_id: $('correction-source').value,
+        target_node_id: $('correction-target').value,
+        relation_type: $('correction-type').value,
+      };
+      if (removeOnly && !oldRelation) return;
+      if (!removeOnly && (!newRelation.source_node_id || !newRelation.target_node_id || newRelation.source_node_id === newRelation.target_node_id)) {
+        setStatus('別々の二つの論点を選んでください。', true); return;
+      }
+      try {
+        const result = await getJson('/api/live/commands', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command_type: 'correct_relation', expected_revision: model.state.graph.revision,
+            controller_id: controllerInstanceId(), occurred_at: new Date().toISOString(),
+            old_relation: oldRelation, new_relation: newRelation,
+            declared_independent: removeOnly && $('correction-independent').checked }),
+        });
+        applyLiveSnapshot(result.snapshot);
+        $('correction-independent').checked = false;
+        setStatus('進行役の訂正を記録し、論点図を更新しました。');
+      } catch (error) {
+        setStatus(`[${error.code}] ${error.message}`, true);
+        try { applyLiveSnapshot(await getJson('/api/live')); } catch (_) {}
+      }
     }
 
     function stopLiveCapture() {
@@ -1058,6 +1163,7 @@
       if (!model) return;
       reconcilePresentationLanes(null, false);
       renderMap(); renderRail(); renderFlow(); renderDebug(); renderTranscript();
+      renderRelationCorrection();
       const replay = model.replay;
       $('replay-progress').textContent = ['transcript', 'recorded_fake', 'real'].includes(replay.mode)
         ? `Transcript: ${replay.current_utterance_index} / ${replay.total_utterances} · Rev ${model.state.graph.revision}${replay.complete ? ' · complete' : ''}`
@@ -1160,6 +1266,20 @@
     $('live-commit').onclick = commitLiveUtterance;
     $('live-end').onclick = endLiveContinuous;
     $('live-retry').onclick = retryLiveAnalyzer;
+    $('correction-old').onchange = () => {
+      const index = $('correction-old').value;
+      const edge = index === '' ? null : semanticLiveEdges()[Number(index)];
+      if (edge) {
+        $('correction-source').value = edge.source_node_id;
+        $('correction-target').value = edge.target_node_id;
+        $('correction-type').value = edge.type;
+      }
+      renderRelationCorrection();
+    };
+    $('correction-source').onchange = renderRelationCorrection;
+    $('correction-target').onchange = renderRelationCorrection;
+    $('correction-remove').onclick = () => executeLiveRelationCorrection(true);
+    $('correction-apply').onclick = () => executeLiveRelationCorrection(false);
     $('evaluation-start').onclick = startEvaluation;
     $('evaluation-end').onclick = endEvaluation;
     document.querySelectorAll('[data-evaluation-marker]').forEach((button) => {

@@ -122,6 +122,10 @@ class DeploymentRuntimeTests(unittest.TestCase):
             manager.request_stop(controller_id="phone-b")
         self.assertEqual(stop_error.exception.code, "live_controller_owned")
 
+        with self.assertRaises(PrototypeError) as command_error:
+            manager.execute_command({"controller_id": "phone-b", "command_type": "correct_relation"})
+        self.assertEqual(command_error.exception.code, "live_controller_owned")
+
         manager.mark_connected(controller_id="phone-a")
         manager.mark_controller_disconnected(controller_id="phone-a")
         self.assertEqual(manager.current().runtime_state, "starting")

@@ -851,7 +851,10 @@ class LiveSessionManager:
     def execute_command(self, command: Mapping[str, Any]) -> dict[str, Any]:
         with self._lock:
             session = self._require()
-            return session.execute_command(command)
+            owner = self._claim_controller_locked(command.get("controller_id"))
+            result = session.execute_command({key: value for key, value in command.items() if key != "controller_id"})
+            return {"event": result["event"],
+                    "snapshot": self._decorate_snapshot_locked(result["snapshot"], owner)}
 
     def _require(self) -> LiveOneUtteranceSession:
         if self._session is None:
