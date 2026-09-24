@@ -15,4 +15,10 @@
 
 旧PVCから新PVCへ、298ファイルを同一digestのアプリケーションイメージを使って移した。ファイル数と全ファイルの内容チェックサムが、旧PVC・一時退避・新PVCで一致した。Raw Audioや評価本文、Secret値はPublic Gitへ入れていない。新DeploymentはReady 1/1、同一イメージdigest、restart 0、内部 `/healthz`・`/readyz` は200。公開 `/`、`/shared`、`/control`、`/session`、`/healthz`、`/readyz` は200、`/live` はWebSocket upgrade 101、`/api/live` は待機状態だった。
 
-旧 `discussion-map-pilot` Deploymentは0 replicaにし、旧PVC・Secret・Namespaceを一時的なロールバック元として保持している。旧ServiceはNodePort切り替え時に削除した。旧アプリケーションクラスターIngressは公開Ingressの管理元ではない。旧Namespaceの最終削除は、移行後の稼働確認とバックアップ保持方針を確認してから別途行う。**本移行はLive Pilot開始の承認ではない。**
+旧 `discussion-map-pilot` Deploymentは当初0 replicaとし、旧PVC・Secret・Namespaceを一時的なロールバック元として保持した。旧ServiceはNodePort切り替え時に削除した。旧アプリケーションクラスターIngressは公開Ingressの管理元ではなかった。
+
+## 旧リソースの最終整理（2026-09-24）
+
+利用者が旧評価PVCの削除を選択した後、旧Ingressを削除し、公開HTTP経路が正常であることを確認した。新PVC上の298ファイルは、移行時の非公開一時退避データとファイル内容・相対パスを含む集約SHA-256が一致した。新Deploymentが旧NamespaceのPVC・Secretを参照していないことを確認し、旧 `discussion-map-pilot` Namespaceを削除した。これにより旧Deployment、ReplicaSet、PVC、Secret、ConfigMapも削除された。旧PVCそのものは復旧できないが、評価データは新PVCと非公開一時退避に残る。
+
+削除後も新DeploymentはReady 1/1、NodePortは30100/30101のままで、公開 `/`、`/shared`、`/control`、`/session`、`/healthz`、`/readyz` は200、`/live` はWebSocket upgrade 101を確認した。別クラスター管理の公開Ingressは変更していない。**本整理はLive Pilot開始の承認ではない。**
