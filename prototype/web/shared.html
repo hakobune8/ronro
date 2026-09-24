@@ -141,6 +141,10 @@
     .focused-relation { color: #516d7b; font-size: 20px; text-align: center; }
     .focused-argument-label { color: #286d52; font-size: 18px; font-weight: 600; margin-bottom: 5px; }
     .focused-node.opposes .focused-argument-label { color: #965249; }
+    .focused-unlinked { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .focused-unlinked h2 { margin: 0 0 12px; color: var(--muted); font-size: 21px; font-weight: 650; }
+    .focused-unlinked-list { display: flex; gap: 14px; }
+    .focused-unlinked-item { flex: 1; min-width: 0; padding: 16px 18px; border: 1px solid var(--line); border-radius: 13px; background: #fff; color: #354c60; font-size: 26px; line-height: 1.35; overflow-wrap: anywhere; }
     .focused-side { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
     .focused-latest { flex: 0 0 auto; max-height: 34%; overflow: auto; padding: 20px 24px; border-radius: 16px; background: #edf3f6; }
     .focused-latest h2 { margin: 0 0 12px; font-size: 23px; }
@@ -342,7 +346,8 @@
         ${focus ? `<div class="focused-row">${card(focus,'current')}</div>` : `<div class="focused-row"><div class="focused-node current">${escapeHtml(currentTopic?.label || '議論を整理しています')}</div></div>`}
         ${children.length ? `<div class="focused-relation">┊ ここから出た話</div>${row(children)}` : ''}
         ${descendants.length ? `<div class="focused-relation">┊ その先の話</div><div class="focused-row">${descendants.map(node => card(node,'context')).join('')}</div>` : ''}
-        ${args.length ? `<div class="focused-row">${args.map(argument).join('')}</div>` : ''}</div></section>
+        ${args.length ? `<div class="focused-row">${args.map(argument).join('')}</div>` : ''}
+        ${(flow.recent_unlinked || []).length ? `<div class="focused-unlinked"><h2>最近出た話</h2><div class="focused-unlinked-list">${flow.recent_unlinked.map(node => `<div class="focused-unlinked-item${fresh.has(node.id) ? ' just-updated' : ''}">${escapeHtml(node.label)}</div>`).join('')}</div></div>` : ''}</div></section>
         <aside class="focused-side">${flow.latest_detail ? `<section class="focused-latest"><h2>新しく加わったこと</h2><p>${escapeHtml(flow.latest_detail.canonical)}</p></section>` : ''}
         <div class="persistent-rail">${sections}</div></aside>`;
     }

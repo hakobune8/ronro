@@ -69,7 +69,7 @@ class RealtimeSTTConfig:
     vad_silence_duration_ms: int = 500
     semantic_vad_eagerness: str = "auto"
     periodic_commit_seconds: float = 30.0
-    empty_vad_policy: str = "strict"
+    empty_vad_policy: str = "warn_short_no_delta"
 
     @classmethod
     def from_environment(cls) -> "RealtimeSTTConfig":
@@ -121,7 +121,7 @@ class RealtimeSTTConfig:
             or os.getenv("LIVE_STT_PERIODIC_COMMIT_SECONDS"),
             default=30.0,
         )
-        empty_vad_policy = os.getenv("LIVE_STT_EMPTY_VAD_POLICY", "strict").strip().lower()
+        empty_vad_policy = os.getenv("LIVE_STT_EMPTY_VAD_POLICY", "warn_short_no_delta").strip().lower()
         if empty_vad_policy not in {"strict", "warn_short_no_delta"}:
             empty_vad_policy = "strict"
         return cls(

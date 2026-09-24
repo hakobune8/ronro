@@ -241,6 +241,18 @@ class MinimalSemanticGraphTests(unittest.TestCase):
         self.assertEqual(view["latest_detail"]["canonical"],
                          next(n["label"] for n in result.state["graph"]["nodes"] if n["id"] == ids["r1-n5"]))
         self.assertEqual(view["edges"], [])
+        self.assertEqual(len(view["recent_unlinked"]), 2)
+        self.assertNotIn(view["focus_id"], [node["id"] for node in view["recent_unlinked"]])
+        self.assertTrue(all(node["type"] in {"idea", "option", "concern"}
+                            for node in view["recent_unlinked"]))
+        self.assertEqual(view, focused_flow(result.state["graph"], result.events,
+                                            {ids["r1-n5"]: "休日イベントを地域掲示板へ"}))
+
+    def test_connected_focus_does_not_fill_with_unrelated_nodes(self):
+        result, ids = build_case(self.cases[3], self.classes)
+        view = focused_flow(result.state["graph"], result.events)
+        self.assertTrue(view["edges"])
+        self.assertEqual(view["recent_unlinked"], [])
 
     def test_old_node_cross_topic_retrieval_is_bounded_and_deterministic(self):
         builder = AnalysisContextBuilder(node_limit=8)

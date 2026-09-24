@@ -285,11 +285,15 @@
       $('end-button').hidden = !(['active', 'starting'].includes(state) && !otherController);
       $('end-button').disabled = !(['active', 'starting'].includes(state) && !otherController);
       if (otherController || state === 'ended' || state === 'ended_with_incomplete_processing') {
-        setNotice(otherController ? '別の端末で会議を操作中です。' : '会議の論点図を確認できます。', false);
+        const gapCount = live.metrics?.possible_evidence_gap_count || 0;
+        setNotice(otherController ? '別の端末で会議を操作中です。' :
+          gapCount ? `音声認識できなかった可能性のある短い区間が${gapCount}件あります。論点図を確認してください。` :
+          '会議の論点図を確認できます。', Boolean(!otherController && gapCount));
       } else if (state === 'active' && document.visibilityState !== 'visible') {
         setNotice('Controllerがバックグラウンドになっています。前面表示に戻してください。', true);
       } else if (!live.error) {
-        setNotice('', false);
+        const gapCount = live.metrics?.possible_evidence_gap_count || 0;
+        setNotice(gapCount ? `音声認識できなかった可能性のある短い区間が${gapCount}件あります。会議は継続中です。` : '', Boolean(gapCount));
       }
     }
 
@@ -353,7 +357,9 @@
           if (event.type === 'session_ended') {
             desiredActive = false;
             stopCapture();
-            setNotice('会議を終了しました。共有画面には最後の論点図が表示されています。', false);
+            const gapCount = event.snapshot?.live_state?.metrics?.possible_evidence_gap_count || 0;
+            setNotice(gapCount ? `会議を終了しました。音声認識できなかった可能性のある短い区間が${gapCount}件あります。` :
+              '会議を終了しました。共有画面には最後の論点図が表示されています。', Boolean(gapCount));
             socket?.close();
           }
         } catch (_) {
