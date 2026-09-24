@@ -43,6 +43,10 @@ evaluation/stt/
 evaluation/runs/
 evaluation/rescored/
 
+# Local evaluation notes from real playback / facilitator rehearsal.
+docs/evaluation/live-session-*.md
+docs/evaluation/session-entry-mobile-control-review.md
+
 # Evaluation-only official-playback loopback runner output and dependencies
 evaluation/real-world/t1a-auto/runtime/
 evaluation/real-world/t1a-auto/node_modules/
