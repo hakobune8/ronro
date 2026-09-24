@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/component: runtime-config
 data:
   RUNTIME_ENVIRONMENT: pilot
-  LIVE_CONFIGURATION_VERSION: casual-session-rc1
+  LIVE_CONFIGURATION_VERSION: pilot-audio-continuity-rc1
   PROMPT_VERSION: analyzer-prompt-v10-action-time-horizon
   REAL_ANALYZER_OUTPUT_SCHEMA_VERSION: v3
   NORMALIZATION_VERSION: v2

@@ -47,7 +47,7 @@ spec:
                 name: ronro-openai
           env:
             - name: APP_VERSION
-              value: casual-session-rc1
+              value: pilot-audio-continuity-rc1
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
