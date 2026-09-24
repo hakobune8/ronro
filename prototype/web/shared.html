@@ -527,23 +527,6 @@
       return selected.slice(0,15);
     }
 
-    function provenanceBranchSizes(canvas) {
-      const outgoing = new Map();
-      for (const edge of canvas.edges) if (edge.type === 'discussion_provenance') {
-        if (!outgoing.has(edge.source_node_id)) outgoing.set(edge.source_node_id,[]);
-        outgoing.get(edge.source_node_id).push(edge.target_node_id);
-      }
-      const sizes = new Map();
-      for (const node of canvas.nodes) {
-        const seen = new Set([node.id]), queue = [node.id];
-        while (queue.length) for (const child of outgoing.get(queue.shift())||[]) {
-          if (!seen.has(child)) { seen.add(child); queue.push(child); }
-        }
-        sizes.set(node.id,seen.size);
-      }
-      return sizes;
-    }
-
     function renderSemanticCanvas(snapshot, graph, fresh) {
       const canvas = snapshot.map.semantic_canvas;
       const state = snapshot?.live_state?.runtime_state || 'active';
@@ -613,7 +596,6 @@
           return `<div class="canvas-peripheral ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${x}px;top:${y}px">${escapeHtml(node.label)}</div>`;
         }).join('');
       } else if (final) {
-        const branchSizes = provenanceBranchSizes(canvas);
         const topology = main.querySelector('.canvas-final-topology');
         topology.setAttribute('viewBox',`0 0 ${stage.clientWidth} ${stage.clientHeight}`);
         const bins = new Map();
@@ -638,7 +620,7 @@
           .filter(({x,y}) => {
             if (used.some(point => Math.abs(point.x-x)<245 && Math.abs(point.y-y)<110)) return false;
             used.push({x,y}); return true;
-          }).map(({node,x,y}) => `<div class="canvas-final-marker ${escapeHtml(node.type)} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${x}px;top:${y}px"><small>${escapeHtml(canvasRole(node))}${(branchSizes.get(node.id)||0)>1 ? ` · この周辺${branchSizes.get(node.id)}件` : ''}</small>${escapeHtml(node.label)}</div>`).join('');
+          }).map(({node,x,y}) => `<div class="canvas-final-marker ${escapeHtml(node.type)} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${x}px;top:${y}px"><small>${escapeHtml(canvasRole(node))}</small>${escapeHtml(node.label)}</div>`).join('');
       }
     }
     window.addEventListener('resize', fitDiscussionCards);

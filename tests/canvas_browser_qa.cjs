@@ -106,6 +106,8 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
       topology: document.querySelectorAll('.canvas-final-topology circle').length,
       stageWidth: document.querySelector('.canvas-stage').getBoundingClientRect().width,
       oldBottomNote: !!document.querySelector('.canvas-final-note'),
+      neighborhoodCount: [...document.querySelectorAll('.canvas-final-marker')]
+        .some(marker => /この周辺\d+件/.test(marker.textContent)),
       scrollX: document.documentElement.scrollWidth > innerWidth,
       scrollY: document.documentElement.scrollHeight > innerHeight,
     }));
@@ -120,6 +122,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
   if (results.some(item => item.errors.length || item.live.scrollX || item.live.scrollY ||
     item.final.scrollX || item.final.scrollY || item.live.primary > 5 || item.live.clippedPrimary ||
     item.live.hiddenEdgeLabels || !item.live.detailInStage || item.live.stageWidth !== item.final.stageWidth ||
-    item.final.oldBottomNote || item.live.displayLabelIsShort === false || item.live.detailIsCanonical === false ||
+    item.final.oldBottomNote || item.final.neighborhoodCount ||
+    item.live.displayLabelIsShort === false || item.live.detailIsCanonical === false ||
     !item.final.topology)) process.exit(1);
 })().catch(error => { console.error(error); process.exit(1); });
