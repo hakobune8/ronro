@@ -1,32 +1,7 @@
+# The public RONRO Ingress is owned by SSLHQ/staips-infra in the edge cluster.
+# This overlay only exposes NodePorts in the application cluster.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: discussion-map-pilot
-  annotations:
-    $patch: replace
-    cert-manager.io/cluster-issuer: letsencrypt-cloudflare
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
-spec:
-  ingressClassName: traefik
-  tls:
-    - hosts:
-        - ronro.hakobune8.com
-      secretName: ronro-tls
-  rules:
-    - host: ronro.hakobune8.com
-      http:
-        paths:
-          - path: /live
-            pathType: Prefix
-            backend:
-              service:
-                name: discussion-map-pilot
-                port:
-                  name: websocket
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: discussion-map-pilot
-                port:
-                  name: http
+  name: ronro-pilot
+$patch: delete

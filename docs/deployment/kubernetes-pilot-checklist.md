@@ -15,17 +15,17 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 
 ## Resources
 
-- [ ] Namespace `discussion-map-pilot` exists.
-- [ ] API Secret `discussion-map-openai` created out-of-band.
+- [ ] Namespace `ronro-pilot` exists.
+- [ ] API Secret `ronro-openai` created out-of-band.
 - [ ] TLS Secret provisioned for the exact Pilot hostname.
-- [ ] ConfigMap shows candidate configuration `semantic-graph-rc1` and Analyzer output schema `v3`.
-- [ ] PVC `discussion-map-pilot-evaluation` is Bound.
+- [ ] ConfigMap shows candidate configuration `semantic-graph-rc4` and Analyzer output schema `v3`.
+- [ ] PVC `ronro-pilot-evaluation` is Bound.
 - [ ] Deployment has `replicas=1` and `strategy=Recreate`.
 - [ ] Pod is Ready.
 - [ ] Liveness `/healthz` is 200.
 - [ ] Readiness `/readyz` is 200.
 - [ ] Service has HTTP and WebSocket endpoints.
-- [ ] Ingress exposes the intended host.
+- [ ] Edge-cluster Ingress in `SSLHQ/staips-infra` exposes the intended host through NodePorts 30100/30101.
 
 ## HTTPS / Safari
 
@@ -72,8 +72,8 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 
 - [ ] `git commit` SHA recorded.
 - [ ] Image tag/digest recorded.
-- [ ] Configuration version `semantic-graph-rc1` recorded.
-- [ ] Prompt `analyzer-prompt-v9-semantic-edge-balance` recorded.
+- [ ] Configuration version `semantic-graph-rc4` recorded.
+- [ ] Prompt `analyzer-prompt-v10-action-time-horizon` recorded.
 - [ ] STT `gpt-transcribe` recorded.
 - [ ] Analyzer `gpt-5.6-luna` / reasoning `medium` recorded.
 - [ ] No Pilot has started during smoke testing.

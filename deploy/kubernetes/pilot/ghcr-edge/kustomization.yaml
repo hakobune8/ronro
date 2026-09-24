@@ -1,13 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: discussion-map-pilot
+namespace: ronro-pilot
 
 resources:
   - ../../base
 
 images:
-  - name: registry.example.invalid/discussion-map-ai-facilitator
+  - name: registry.example.invalid/ronro
     newName: ghcr.io/hakobune8/ronro
     digest: sha256:133df5de30a9f17e9cc413c912c5a283bac1cb751267485e52b99a73cb10337b
 
@@ -15,3 +15,15 @@ patches:
   - path: deployment-patch.yaml
   - path: service-patch.yaml
   - path: ingress-patch.yaml
+  # Keep the edge-cluster EndpointSlice's fixed NodePort contract.
+  - target:
+      version: v1
+      kind: Service
+      name: ronro-pilot
+    patch: |-
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30100
+      - op: add
+        path: /spec/ports/1/nodePort
+        value: 30101

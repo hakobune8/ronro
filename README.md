@@ -2,7 +2,9 @@
 
 **議論の現在地を共有する。**
 
-![論路の共有画面](docs/pilot/assets/ronro-shared-view-stage-3.png)
+![現在の論点図：課題から案と決定候補へ展開した画面](docs/pilot/assets/ronro-focused-flow-stage-2.png)
+
+*現行の Focused Flow を制御された合成会議で表示した例です。実会議の記録や、AIによる関係付けの正確さを示すものではありません。*
 
 論路（ろんろ / RONRO）は、会議中の議論を「論点図」として整理し、参加者が「今、何を議論しているか」「何が決まりつつあるか」「何がまだ残っているか」を共有するためのオープンソース・プロトタイプです。
 
@@ -10,7 +12,11 @@
 
 ## 何を作っているか
 
-会議では、複数の論点を行き来したり、以前の論点へ戻ったりします。論路は、議論の流れと現在の状態を同じ共有画面へ整理します。
+会議では、複数の論点を行き来したり、以前の論点へ戻ったりします。論路は、上部の「話の流れ」と、今話している論点の近くにあるつながり・状態を同じ共有画面へ整理します。
+
+![話題が移ったときの「話の流れ」と現在の論点](docs/pilot/assets/ronro-focused-flow-topic-change.png)
+
+*こちらも制御された合成会議の画面例です。現在の話題を左端に示し、無関係な論点を無理に結びません。*
 
 - 今話していること
 - 出てきた考えや選択肢
@@ -48,13 +54,14 @@ Discussion Graph
 - `gpt-transcribe` によるRealtime transcription（用語ヒント対応）
 - Final Transcriptの正規化（Normalization v2）
 - FIFO Queueと単一Analyzer Worker
-- `gpt-5.6-luna` / `analyzer-prompt-v4` によるAnalyzer経路
-- Current Topic、決定候補、未解決事項、次の対応、話の流れの表示
+- `gpt-5.6-luna` / `analyzer-prompt-v10-action-time-horizon` によるAnalyzer経路（Pilot候補設定）
+- Focused Flowによる現在の論点と、上部の「話の流れ」の表示
+- 根拠がある場合の論点間のつながり、決定候補、未解決事項、次の対応の表示
 - Human Commandによる進行役の修正・確認
 - Session DrainとEvaluation Harness
 - 1920×1080を対象とした読み取り専用の論点図共有画面
 
-現在は **prototype / live pilot stage** です。Production運用、複数ルーム、永続的な業務データ管理を目的としたものではありません。Visual Artifact生成と会議議事録生成は、現時点の実装済み機能には含めていません。
+現在は **prototype / live pilot準備段階** です。Production運用、複数ルーム、永続的な業務データ管理を目的としたものではありません。会議後の記録を正式な成果物として提供する機能は、現時点の実装済み機能に含めていません。
 
 ## ローカルで試す
 
@@ -93,7 +100,8 @@ cp .env.example .env
 
 ## ドキュメント
 
-- [MVP要件](docs/requirements/discussion-map-ai-facilitator-mvp.md)
+- [ドキュメント案内（現行資料と履歴資料）](docs/README.md)
+- [MVP要件（改名前の名称を保持）](docs/requirements/discussion-map-ai-facilitator-mvp.md)
 - [Architecture Summary](docs/architecture/mvp-architecture-summary.md)
 - [論路のNaming Decision](docs/product/ronro-naming.md)
 - [ライブパイロットガイド](docs/pilot/ronro-live-pilot-guide.md)
@@ -102,7 +110,7 @@ cp .env.example .env
 - [Public Release Readiness](docs/release/public-release-readiness.md)
 - [Security Policy](SECURITY.md)
 
-RFCや過去の評価資料には、当時の作業名 `Discussion Map` が残っています。これは履歴の追跡性を保つためであり、現在の参加者向け名称は論路 / 論点図です。
+この公開リポジトリは `hakobune8/ronro` です。改名前のMVP要件、RFC、過去の評価資料には当時の作業名 `Discussion Map AI Facilitator` が残っています。履歴の追跡性を保つため、その記録を一括置換していません。現在の参加者向け名称は論路 / 論点図です。
 
 ## 制約とデータの扱い
 

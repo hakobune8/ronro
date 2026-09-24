@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import threading
 import unittest
 from pathlib import Path
@@ -28,6 +30,21 @@ class NoopAnalyzer:
 
 
 class DeploymentRuntimeTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("kubectl"), "kubectl is required for manifest rendering")
+    def test_edge_manifest_preserves_external_nodeports_without_duplicate_ingress(self) -> None:
+        rendered = subprocess.run(
+            ["kubectl", "kustomize", str(ROOT / "deploy/kubernetes/pilot/ghcr-edge")],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertIn("namespace: ronro-pilot", rendered)
+        self.assertIn("name: ronro-pilot", rendered)
+        self.assertIn("nodePort: 30100", rendered)
+        self.assertIn("nodePort: 30101", rendered)
+        self.assertNotIn("kind: Ingress", rendered)
+        self.assertNotIn("discussion-map-ai-facilitator", rendered)
+
     def test_http_live_snapshot_controller_contract_and_read_only_access(self) -> None:
         manager = LiveSessionManager(
             schema_dir=ROOT / "schemas",
@@ -171,13 +188,13 @@ class DeploymentRuntimeTests(unittest.TestCase):
                 headers={
                     "Content-Type": "application/json",
                     "X-Forwarded-Proto": "https",
-                    "X-Forwarded-Host": "discussion-map-pilot.example.test",
+                    "X-Forwarded-Host": "ronro-pilot.example.test",
                 },
                 method="POST",
             )
             with urlopen(request, timeout=2) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-            self.assertEqual(payload["websocket_url"], "wss://discussion-map-pilot.example.test/live")
+            self.assertEqual(payload["websocket_url"], "wss://ronro-pilot.example.test/live")
         finally:
             current = manager.current()
             if current is not None:
