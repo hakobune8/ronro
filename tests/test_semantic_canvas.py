@@ -50,6 +50,7 @@ class SemanticCanvasTests(unittest.TestCase):
         self.assertEqual(projected["latest_detail_id"], ids["r4-n5"])
         self.assertEqual(views[ids["r4-n5"]]["label"], "再配置を決定候補に")
         self.assertEqual(views[ids["r4-n5"]]["canonical"], before["nodes"][-1]["label"])
+        self.assertEqual(views[ids["r4-n5"]]["time_at"], before["nodes"][-1]["updated_at"])
         self.assertEqual(views[ids["r4-n2"]]["x"], views[ids["r4-n5"]]["x"])
         self.assertGreater(views[ids["r4-n5"]]["y"], views[ids["r4-n2"]]["y"])
         self.assertTrue(any(edge["type"] == "supports" for edge in projected["edges"]))
@@ -57,6 +58,18 @@ class SemanticCanvasTests(unittest.TestCase):
         self.assertEqual(result.state["graph"], before)
         self.assertEqual(project_semantic_canvas(before, list(reversed(result.events)),
                                                  {ids["r4-n5"]: "再配置を決定候補に"}), projected)
+
+    def test_node_time_prefers_material_update_and_missing_time_stays_absent(self) -> None:
+        graph, events = synthetic(2)
+        graph["nodes"][0]["created_at"] = "2026-09-25T01:00:00Z"
+        graph["nodes"][0]["updated_at"] = "2026-09-25T01:42:00Z"
+        events[1]["occurred_at"] = "2026-09-25T02:03:00Z"
+        views = {item["id"]: item for item in project_semantic_canvas(graph, events)["nodes"]}
+        self.assertEqual(views["n0"]["time_at"], "2026-09-25T01:42:00Z")
+        self.assertEqual(views["n1"]["time_at"], "2026-09-25T02:03:00Z")
+        graph["nodes"][0].pop("updated_at")
+        self.assertEqual(project_semantic_canvas(graph, events)["nodes"][0]["time_at"],
+                         "2026-09-25T01:00:00Z")
 
     def test_late_link_and_human_removal_never_move_existing_nodes(self) -> None:
         graph, events = synthetic(2)

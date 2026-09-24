@@ -5,6 +5,7 @@ const { execFileSync } = require('node:child_process');
 
 const python = `import copy
 import json
+from datetime import datetime,timedelta,timezone
 from pathlib import Path
 from evaluation.tooling.semantic_hypothesis_review import build_case
 from prototype.display_labels import POLICY_VERSION, VERSION as LABEL_VERSION, content_hash
@@ -20,13 +21,16 @@ for count,branched in counts:
     phases=('現状を確認','不足箇所を整理','対応案を検討','実施条件を確認','懸念を共有','次の調査を決める')
     for index in range(count):
         eid=f'event-{index:04d}'
+        occurred_at=(datetime(2026,9,25,tzinfo=timezone.utc)+timedelta(seconds=index*12)).isoformat().replace('+00:00','Z')
         subject=subjects[(index//30)%len(subjects)]
         part=index%30
         label=subject if part==0 else f'{subject}：{places[(part-1)//6]}の{phases[(part-1)%6]}'
         nodes.append({'id':f'n{index}','type':'idea','status':'active','label':label,
+                      'created_at':occurred_at,'updated_at':occurred_at,
                       'evidence_ids':[f'e{index}'],'source_event_ids':[eid]})
         events.append({'event_id':eid,'sequence':index*2+1,'event_type':'node_detected',
-                       'source_evidence_ids':[f'e{index}'],'payload':{'node_type':'idea','label':label}})
+                       'occurred_at':occurred_at,'source_evidence_ids':[f'e{index}'],
+                       'payload':{'node_type':'idea','label':label}})
         if branched and index%30:
             base=(index//30)*30
             parent=base+(index%30-1)//3
@@ -67,6 +71,27 @@ for case_name,repetitions in (('r4-medium',2),('r4-long',8)):
                                  'display_label':'倉庫の水を三避難所へ再配置する'}}
     print(json.dumps({'count':case_name,'branched':False,'state':long_state,
                       'map':map_projection(long_state,result.events,StableLayout(),long_presentation),
+                      'live_state':{'runtime_state':'active'}},ensure_ascii=False))
+spaced_state=copy.deepcopy(result.state)
+spaced_events=copy.deepcopy(result.events)
+for index,item in enumerate(spaced_state['graph']['nodes']):
+    at=f'2026-09-25T00:{(2,5,8,12,19)[index]:02d}:00Z'
+    item['created_at']=at
+    item['updated_at']=at
+    for event in spaced_events:
+        if event['event_id'] in item.get('source_event_ids',[]):
+            event['occurred_at']=at
+for case_name,repetitions in (('r4-timed',1),('r4-timed-long',8)):
+    timed_state=copy.deepcopy(spaced_state)
+    timed_node=next(item for item in timed_state['graph']['nodes'] if item['id']==focus_id)
+    if repetitions>1:
+        timed_node['label']=''.join(['三避難所の初日の飲料水不足について、既存倉庫の水を再配置する案が決定候補として挙がった。']*repetitions)
+    timed_presentation={focus_id:{'version':LABEL_VERSION,'policy':POLICY_VERSION,
+                                  'content_hash':content_hash(timed_node),
+                                  'sequence':timed_state['graph']['last_event_sequence'],
+                                  'display_label':'倉庫の水を三避難所へ再配置する'}}
+    print(json.dumps({'count':case_name,'branched':False,'state':timed_state,
+                      'map':map_projection(timed_state,spaced_events,StableLayout(),timed_presentation),
                       'live_state':{'runtime_state':'active'}},ensure_ascii=False))`;
 const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: 'utf8' })
   .trim().split('\n').map(line => JSON.parse(line));
@@ -89,6 +114,20 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
       peripheral: document.querySelectorAll('.canvas-peripheral').length,
       stageWidth: document.querySelector('.canvas-stage').getBoundingClientRect().width,
       detailInStage: !!document.querySelector('.canvas-stage > .canvas-detail'),
+      focusAccentMatchesSubtitle: (() => {
+        const focus=document.querySelector('.canvas-node.focus');
+        const subtitle=document.querySelector('.canvas-detail');
+        return !!focus && !!subtitle &&
+          getComputedStyle(focus).borderTopColor===getComputedStyle(subtitle).borderTopColor;
+      })(),
+      nodeTimeMatchesSubtitle: (() => {
+        const focusTime=document.querySelector('.canvas-node.focus .canvas-time');
+        const subtitleTime=document.querySelector('.canvas-detail-time');
+        return focusTime && subtitleTime ?
+          focusTime.textContent===subtitleTime.textContent && focusTime.dateTime===subtitleTime.dateTime :
+          !focusTime && !subtitleTime;
+      })(),
+      focusClock: document.querySelector('.canvas-node.focus .canvas-time')?.textContent || null,
       subtitleHasHeading: !!document.querySelector('.canvas-detail h2'),
       typePaletteDistinct: (() => {
         const types=['idea','option','concern','decision','open_item','action'];
@@ -147,7 +186,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
             Math.min(r.bottom,card.bottom)-Math.max(r.top,card.top)>2);
         }).length;
       })(),
-      displayLabelIsShort: expected.caseId === 'r4' ?
+      displayLabelIsShort: String(expected.caseId).startsWith('r4') ?
         document.querySelector('.canvas-node.focus .canvas-label')?.textContent === '倉庫の水を三避難所へ再配置する' : undefined,
       detailIsCanonical: String(expected.caseId).startsWith('r4') ?
         document.querySelector('.canvas-detail p')?.textContent ===
@@ -174,10 +213,22 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     if (snapshot.count === 300) await page.screenshot({ path: '/tmp/ronro-canvas-300-' + (snapshot.branched ? 'branched' : 'roots') + '-live.png' });
     if (snapshot.count === 'r4') await page.screenshot({ path: '/tmp/ronro-canvas-r4-short-live.png' });
     if (snapshot.count === 'r4-long') await page.screenshot({ path: '/tmp/ronro-canvas-r4-long-live.png' });
+    if (snapshot.count === 'r4-timed') await page.screenshot({ path: '/tmp/ronro-canvas-r4-timed-live.png' });
+    if (snapshot.count === 'r4-timed-long') await page.screenshot({ path: '/tmp/ronro-canvas-r4-timed-long-live.png' });
     snapshot.live_state.runtime_state = 'ended';
     await page.reload({ waitUntil: 'networkidle' });
     const final = await page.evaluate(() => ({
       markers: document.querySelectorAll('.canvas-final-marker').length,
+      markerClocks: document.querySelectorAll('.canvas-final-marker .canvas-time').length,
+      markerClockOverlap: [...document.querySelectorAll('.canvas-final-marker')].filter(marker => {
+        const clock=marker.querySelector('.canvas-time')?.getBoundingClientRect();
+        const label=marker.querySelector('.canvas-final-label')?.getBoundingClientRect();
+        const role=marker.querySelector('small')?.getBoundingClientRect();
+        if (!clock) return false;
+        const overlaps=other=>other && Math.min(clock.right,other.right)-Math.max(clock.left,other.left)>2 &&
+          Math.min(clock.bottom,other.bottom)-Math.max(clock.top,other.top)>2;
+        return overlaps(label) || overlaps(role);
+      }).length,
       topology: document.querySelectorAll('.canvas-final-topology circle').length,
       stageWidth: document.querySelector('.canvas-stage').getBoundingClientRect().width,
       oldBottomNote: !!document.querySelector('.canvas-final-note'),
@@ -188,6 +239,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     }));
     if (snapshot.count === 300) await page.screenshot({ path: '/tmp/ronro-canvas-300-' + (snapshot.branched ? 'branched' : 'roots') + '-final.png' });
     if (snapshot.count === 'r4') await page.screenshot({ path: '/tmp/ronro-canvas-r4-short-final.png' });
+    if (snapshot.count === 'r4-timed') await page.screenshot({ path: '/tmp/ronro-canvas-r4-timed-final.png' });
     results.push({ count: snapshot.count, branched: snapshot.branched, live, final, errors,
       near: snapshot.branched ? snapshot.map.semantic_canvas.near_ids : undefined });
     await page.close();
@@ -197,13 +249,18 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
   if (results.some(item => item.errors.length || item.live.scrollX || item.live.scrollY ||
     item.final.scrollX || item.final.scrollY || item.live.primary > 5 || item.live.clippedPrimary ||
     item.live.hiddenEdgeLabels || !item.live.detailInStage || !item.live.subtitleAtBottom ||
-    item.live.subtitleHasHeading || !item.live.typePaletteDistinct || item.live.focusCenterOffsetX > 3 ||
+    item.live.subtitleHasHeading || !item.live.typePaletteDistinct ||
+    !item.live.focusAccentMatchesSubtitle || !item.live.nodeTimeMatchesSubtitle ||
+    (String(item.count).startsWith('r4') ?
+      item.live.focusClock !== (String(item.count).startsWith('r4-timed') ? '09:19' : '09:01') || !item.final.markerClocks :
+      !item.live.focusClock || !item.final.markerClocks) ||
+    item.live.focusCenterOffsetX > 3 ||
     item.live.cardsCoveredBySubtitle ||
     (item.live.minSubtitleGap !== null && item.live.minSubtitleGap < 16) ||
     item.live.subtitleLines > 5.1 ||
-    (item.count === 'r4-long' ? !item.live.subtitleOverflowNote : !item.live.subtitleComplete) ||
+    (['r4-long','r4-timed-long'].includes(item.count) ? !item.live.subtitleOverflowNote : !item.live.subtitleComplete) ||
     item.live.stageWidth !== item.final.stageWidth ||
-    item.final.oldBottomNote || item.final.neighborhoodCount ||
+    item.final.oldBottomNote || item.final.neighborhoodCount || item.final.markerClockOverlap ||
     item.live.displayLabelIsShort === false || item.live.detailIsCanonical === false ||
     !item.final.topology)) process.exit(1);
 })().catch(error => { console.error(error); process.exit(1); });

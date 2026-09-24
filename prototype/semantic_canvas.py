@@ -157,6 +157,7 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
     """
     ordered = _event_order(events)
     by_event = {str(event.get("event_id")): int(event.get("sequence", 0)) for event in ordered}
+    event_times = {str(event.get("event_id")): event.get("occurred_at") for event in ordered}
     labels = display_labels or {}
     all_nodes = {str(node["id"]): node for node in graph.get("nodes", []) if node.get("type") != "topic"}
     creation = {nid: min((by_event[event_id] for event_id in node.get("source_event_ids", ()) if event_id in by_event),
@@ -216,11 +217,16 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
     views = []
     for node_id in ordered_nodes:
         node = all_nodes[node_id]
+        source_events = [event_id for event_id in node.get("source_event_ids", ()) if event_id in by_event]
+        latest_source = max(source_events, key=lambda event_id: by_event[event_id]) if source_events else None
+        time_at = node.get("updated_at") or (event_times.get(latest_source) if latest_source else None)
+        time_at = time_at or node.get("created_at")
         root_state = ("linked" if node_id in incoming else
                       "independent" if node_id in declared_independent else "unconfirmed")
         views.append({"id": node_id, "x": positions[node_id]["x"], "y": positions[node_id]["y"],
                       "type": node["type"], "status": node["status"],
                       "label": labels.get(node_id) or node["label"], "canonical": node["label"],
+                      "time_at": time_at,
                       "root_state": root_state, "created_sequence": creation[node_id],
                       "activity_sequence": activity[node_id]})
     focus_id = _focus(graph, ordered, all_nodes, activity)
