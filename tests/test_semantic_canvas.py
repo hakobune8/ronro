@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from evaluation.tooling.semantic_hypothesis_review import build_case
+from prototype.layout import StableLayout, map_projection
 from prototype.semantic_canvas import project_semantic_canvas
 
 
@@ -55,22 +56,23 @@ class SemanticCanvasTests(unittest.TestCase):
 
     def test_late_link_and_human_removal_never_move_existing_nodes(self) -> None:
         graph, events = synthetic(2)
-        first = project_semantic_canvas(graph, events)
+        placement_state = {}
+        first = project_semantic_canvas(graph, events, placement_state=placement_state)
         positions = {node["id"]: (node["x"], node["y"]) for node in first["nodes"]}
         late = {"event_id": "late", "sequence": 3, "event_type": "relation_detected",
-                "source_evidence_ids": ["e-later"],
+                "source_evidence_ids": ["e1"],
                 "payload": {"source_node_id": "n0", "target_node_id": "n1",
                             "relation_type": "discussion_provenance"}}
         graph["edges"] = [{"id": "edge-late", "type": "discussion_provenance",
                            "source_node_id": "n0", "target_node_id": "n1", "source_event_ids": ["late"]}]
-        linked = project_semantic_canvas(graph, [*events, late])
+        linked = project_semantic_canvas(graph, [*events, late], placement_state=placement_state)
         self.assertEqual({node["id"]: (node["x"], node["y"]) for node in linked["nodes"]}, positions)
         self.assertEqual(linked["edges"][0]["target_node_id"], "n1")
         graph["edges"] = []
         correction = {"event_id": "correction", "sequence": 4, "event_type": "correct_relation",
                       "payload": {"old_relation": late["payload"], "new_relation": None,
                                   "declared_independent": True}}
-        corrected = project_semantic_canvas(graph, [*events, late, correction])
+        corrected = project_semantic_canvas(graph, [*events, late, correction], placement_state=placement_state)
         self.assertEqual({node["id"]: (node["x"], node["y"]) for node in corrected["nodes"]}, positions)
         self.assertEqual(corrected["edges"], [])
         self.assertIn("n1", corrected["root_ids"])
@@ -91,6 +93,22 @@ class SemanticCanvasTests(unittest.TestCase):
         self.assertEqual(projected["focus_id"], "n0")
         self.assertEqual(projected["latest_detail_id"], "n1")
         self.assertEqual(projected["edges"], [])
+
+    def test_runtime_projection_preserves_position_after_late_same_evidence_link(self) -> None:
+        graph, events = synthetic(2)
+        layout = StableLayout()
+        before = map_projection({"graph": graph}, events, layout)["semantic_canvas"]
+        before_positions = {node["id"]: (node["x"], node["y"]) for node in before["nodes"]}
+        late = {"event_id": "late-same-evidence", "sequence": 3,
+                "event_type": "relation_detected", "source_evidence_ids": ["e1"],
+                "payload": {"source_node_id": "n0", "target_node_id": "n1",
+                            "relation_type": "discussion_provenance"}}
+        graph["edges"] = [{"id": "late-edge", "type": "discussion_provenance",
+                           "source_node_id": "n0", "target_node_id": "n1", "source_event_ids": [late["event_id"]]}]
+        after = map_projection({"graph": graph}, [*events, late], layout)["semantic_canvas"]
+        self.assertEqual({node["id"]: (node["x"], node["y"]) for node in after["nodes"]}, before_positions)
+        self.assertEqual(len(after["edges"]), 1)
+        self.assertEqual(after["focus_id"], "n1")
 
     def test_scale_and_spatial_identity_through_300_nodes(self) -> None:
         prior = {}

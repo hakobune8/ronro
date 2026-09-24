@@ -24,11 +24,13 @@ class StableLayout:
 
     def __init__(self) -> None:
         self._placements: dict[str, dict[str, Any]] = {}
+        self._canvas_placements: dict[str, dict[str, Any]] = {}
         from .shared_projection import SharedProjection
         self.shared_projection = SharedProjection()
 
     def reset(self) -> None:
         self._placements.clear()
+        self._canvas_placements.clear()
         self.shared_projection.reset()
 
     def project(
@@ -335,7 +337,7 @@ def map_projection(
         "presentation": copy.deepcopy(presentation or {}),
         "display_labels": display_labels,
         "semantic_focus": focused_flow(graph, event_list, semantic_labels),
-        "semantic_canvas": project_semantic_canvas(graph, event_list, semantic_labels),
+        "semantic_canvas": project_semantic_canvas(graph, event_list, semantic_labels, layout._canvas_placements),
         "recent_flow": recent_topic_flow(event_list, graph),
         "recent_discussion_flow": recent_discussion_flow(graph, event_list, semantic_labels),
         "counts": counts,

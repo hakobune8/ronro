@@ -114,17 +114,23 @@ def _focus(graph: Mapping[str, Any], events: list[Mapping[str, Any]],
 
 
 def _neighborhood(focus_id: str | None, nodes: Mapping[str, Any], edges: list[dict[str, Any]],
-                  activity: Mapping[str, int], limit: int = 5) -> list[str]:
+                  activity: Mapping[str, int], positions: Mapping[str, Mapping[str, Any]],
+                  limit: int = 5) -> list[str]:
     if focus_id is None:
         return []
+    def close(node_id: str) -> bool:
+        dx = positions[node_id]["x"] - positions[focus_id]["x"]
+        dy = positions[node_id]["y"] - positions[focus_id]["y"]
+        return dx * dx + dy * dy <= 700 * 700
+
     rank: dict[str, int] = {}
     for edge in edges:
         source, target = edge["source_node_id"], edge["target_node_id"]
         if source not in nodes or target not in nodes:
             continue
-        if target == focus_id:
+        if target == focus_id and close(source):
             rank[source] = min(rank.get(source, 9), 0 if edge["type"] == "discussion_provenance" else 2)
-        elif source == focus_id:
+        elif source == focus_id and close(target):
             rank[target] = min(rank.get(target, 9), 1 if edge["type"] == "discussion_provenance" else 2)
     selected = [focus_id]
     selected.extend(sorted(rank, key=lambda nid: (rank[nid], -activity[nid], nid))[:limit - 1])
@@ -135,13 +141,20 @@ def _neighborhood(focus_id: str | None, nodes: Mapping[str, Any], edges: list[di
                 second_hop.add(edge["target_node_id"])
             if edge["target_node_id"] in selected and edge["source_node_id"] in nodes:
                 second_hop.add(edge["source_node_id"])
-        selected.extend(sorted(second_hop - set(selected), key=lambda nid: (-activity[nid], nid))[:limit - len(selected)])
+        selected.extend(sorted((nid for nid in second_hop - set(selected) if close(nid)),
+                               key=lambda nid: (-activity[nid], nid))[:limit - len(selected)])
     return selected
 
 
 def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[str, Any]],
-                            display_labels: Mapping[str, str] | None = None) -> dict[str, Any]:
-    """Same accepted Graph+Events yield the same Live and Final world layout."""
+                            display_labels: Mapping[str, str] | None = None,
+                            placement_state: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Project one world for Live and Final, retaining optional Presentation placements.
+
+    ``placement_state`` belongs to a session's Projection, never to Canonical
+    Nodes. A later Relation can therefore change connectors without relocating
+    a Node that participants have already seen.
+    """
     ordered = _event_order(events)
     by_event = {str(event.get("event_id")): int(event.get("sequence", 0)) for event in ordered}
     labels = display_labels or {}
@@ -159,6 +172,14 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
     occupied: set[tuple[int, int]] = set()
     root_count = 0
     for node_id in ordered_nodes:
+        if placement_state is not None and node_id in placement_state:
+            position = placement_state[node_id]
+            cell = tuple(position["cell"])
+            positions[node_id] = {**position, "cell": cell}
+            occupied.add(cell)
+            if position.get("placement") != "linked":
+                root_count += 1
+            continue
         node = all_nodes[node_id]
         anchor = _creation_anchor(node, ordered, creation[node_id], set(positions))
         if anchor:
@@ -184,6 +205,8 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
         occupied.add(cell)
         positions[node_id] = {"cell": cell, "x": cell[0] * CELL_X, "y": cell[1] * CELL_Y,
                               "placement": kind, "placement_anchor_id": anchor[0] if anchor else None}
+        if placement_state is not None:
+            placement_state[node_id] = dict(positions[node_id])
 
     edges = [{"id": edge["id"], "source_node_id": edge["source_node_id"],
               "target_node_id": edge["target_node_id"], "type": edge["type"]}
@@ -201,7 +224,7 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
                       "root_state": root_state, "created_sequence": creation[node_id],
                       "activity_sequence": activity[node_id]})
     focus_id = _focus(graph, ordered, all_nodes, activity)
-    primary = _neighborhood(focus_id, all_nodes, edges, activity)
+    primary = _neighborhood(focus_id, all_nodes, edges, activity, positions)
     latest_id = max(all_nodes, key=lambda nid: (activity[nid], nid)) if all_nodes else None
     if primary:
         xs = [positions[nid]["x"] for nid in primary]
@@ -209,8 +232,8 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
         # Keep focus close to center; do not zoom out to fill with remote Nodes.
         focus_x, focus_y = positions[focus_id]["x"], positions[focus_id]["y"]
         span = max(max(xs) - min(xs), (max(ys) - min(ys)) * 1.45)
-        live_camera = {"x": focus_x + (sum(xs) / len(xs) - focus_x) * 0.25,
-                       "y": focus_y + (sum(ys) / len(ys) - focus_y) * 0.25,
+        live_camera = {"x": focus_x + (sum(xs) / len(xs) - focus_x) * 0.5,
+                       "y": focus_y + (sum(ys) / len(ys) - focus_y) * 0.5,
                        "scale": max(0.74, min(1.0, 1000 / max(span + 320, 1))),
                        "focus_id": focus_id}
     else:
@@ -220,7 +243,7 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
         xs = [item["x"] for item in views]
         ys = [item["y"] for item in views]
         final_camera = {"x": (min(xs) + max(xs)) / 2, "y": (min(ys) + max(ys)) / 2,
-                        "scale": max(0.08, min(0.85, 1270 / max(max(xs) - min(xs) + 440,
+                        "scale": max(0.01, min(0.85, 1270 / max(max(xs) - min(xs) + 440,
                                                                   (max(ys) - min(ys) + 280) * 1.35)))}
     else:
         final_camera = {"x": 0, "y": 0, "scale": 1.0}

@@ -164,6 +164,85 @@
     .focused-side .persistent-item { font-size: 26px; line-height: 1.35; }
     .focused-side .side-empty { font-size: 20px; }
     .focused-side .action-details { font-size: 18px; color: #53697d; }
+    /* Semantic Canvas: one world for Live and Final, with only the camera changing. */
+    .canvas-active.shared-shell { grid-template-rows: 62px minmax(0,1fr); padding: 0 28px 22px; }
+    .canvas-active .shared-header { justify-content: flex-start; gap: 15px; border-bottom: 1px solid #dce6ee; }
+    .canvas-active .shared-status { order: 0; padding: 4px 2px; font-size: 22px; }
+    .canvas-session-title { display: none; color: #365169; font-size: 21px; font-weight: 650; }
+    .canvas-active .canvas-session-title { display: inline; }
+    .canvas-active .shared-main.canvas-main, html.capture-1920 .canvas-active .shared-main.canvas-main {
+      display: grid; grid-template-columns: minmax(0,1fr) minmax(350px,420px); gap: 18px;
+      padding: 18px 0 0; min-height: 0;
+    }
+    .canvas-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; border-radius: 20px;
+      background: radial-gradient(circle at 50% 45%,#ffffff 0%,#f8fbfe 66%,#f1f6fa 100%);
+      border: 1px solid #e2eaf1;
+    }
+    .canvas-world { position: absolute; top: 0; left: 0; width: 0; height: 0; transform-origin: 0 0;
+      transition: transform .65s cubic-bezier(.2,.7,.25,1); will-change: transform; }
+    .canvas-edges { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+    .canvas-edge.provenance { stroke: #86a9c6; stroke-width: 2.5; }
+    .canvas-edge.supports { stroke: #45946f; stroke-width: 2.2; stroke-dasharray: 8 5; }
+    .canvas-edge.opposes { stroke: #bc766b; stroke-width: 2.2; stroke-dasharray: 7 5; }
+    .canvas-edge-label { fill: #536f85; font-size: 15px; font-weight: 650; paint-order: stroke;
+      stroke: #fff; stroke-width: 5px; stroke-linejoin: round; }
+    .canvas-edge-label.supports { fill: #287454; }
+    .canvas-edge-label.opposes { fill: #a75d52; }
+    .canvas-main.final .canvas-edge { vector-effect: non-scaling-stroke; opacity: .28; }
+    .canvas-node { position: absolute; transform: translate(-50%,-50%); width: 270px; min-height: 98px;
+      padding: 13px 17px; border: 2px solid #b9cfdd; border-radius: 14px; background: #fff;
+      box-shadow: 0 4px 12px rgba(31,65,95,.055); color: #1e3040; pointer-events: none; }
+    .canvas-node .canvas-role { display: block; margin-bottom: 5px; color: #49657b; font-size: 18px; font-weight: 750; }
+    .canvas-node .canvas-label { display: block; font-size: 28px; line-height: 1.3; font-weight: 670; overflow-wrap: anywhere; }
+    .canvas-node.focus { width: 340px; min-height: 115px; border: 4px solid #2d78bb;
+      box-shadow: 0 6px 24px rgba(31,105,175,.17); z-index: 3; }
+    .canvas-node.focus .canvas-label { font-size: 36px; font-weight: 760; }
+    .canvas-node.mid { opacity: .38; width: 235px; border-width: 1px; box-shadow: none; }
+    .canvas-node.mid .canvas-label { font-size: 22px; }
+    .canvas-node.decision { border-color: #bf9a62; background: #fffcf7; }
+    .canvas-node.decision.confirmed { border-style: double; border-width: 4px; }
+    .canvas-node.open_item { border-color: #c69e76; background: #fffdf9; }
+    .canvas-node.action { border-color: #9e8ac8; background: #fcfaff; }
+    .canvas-node.concern { border-color: #cfaa75; background: #fffdf8; }
+    .canvas-node.unconfirmed.mid { border-style: dashed; }
+    .canvas-node.focus.decision, .canvas-node.focus.open_item, .canvas-node.focus.action {
+      border-color: #2d78bb; box-shadow: 0 0 0 3px #d8e8f6,0 6px 24px rgba(31,105,175,.17);
+    }
+    .canvas-periphery { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .canvas-peripheral { position: absolute; transform: translate(-50%,-50%); max-width: 175px;
+      padding: 9px 12px; border: 1px solid #cbdce7; border-radius: 13px; background: #f4f9fc;
+      color: #60798c; font-size: 20px; line-height: 1.3; font-weight: 650; opacity: .52;
+      overflow-wrap: anywhere; }
+    .canvas-peripheral.unconfirmed { border-style: dashed; opacity: .4; }
+    .canvas-main.final { grid-template-columns: minmax(0,1fr) !important; }
+    .canvas-final-markers { position: absolute; inset: 0; pointer-events: none; }
+    .canvas-final-topology { position: absolute; inset: 0; pointer-events: none; }
+    .canvas-final-topology circle { fill: #a7bfd0; opacity: .48; }
+    .canvas-final-topology circle.decision { fill: #ba915b; opacity: .75; }
+    .canvas-final-topology circle.action { fill: #9980be; opacity: .75; }
+    .canvas-final-topology circle.open_item { fill: #bb956e; opacity: .75; }
+    .canvas-final-marker { position: absolute; transform: translate(-50%,-50%); width: 240px; padding: 12px 15px;
+      border: 1px solid #b8cdda; border-radius: 13px; background: rgba(255,255,255,.95);
+      color: #263d50; font-size: 21px; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere;
+      box-shadow: 0 3px 10px rgba(31,65,95,.05); }
+    .canvas-final-marker.decision { border-color: #bf9a62; background: #fffcf7; }
+    .canvas-final-marker.action { border-color: #9e8ac8; background: #fcfaff; }
+    .canvas-final-marker.open_item { border-color: #c69e76; background: #fffdf9; }
+    .canvas-final-marker.unconfirmed { border-style: dashed; }
+    .canvas-final-marker small { display: block; margin-bottom: 5px; color: #587086; font-size: 16px; }
+    .canvas-detail { min-width: 0; min-height: 0; align-self: start; margin-top: 17%; padding: 25px 26px;
+      border: 1px solid #dce6ec; border-radius: 18px; background: #fff;
+      box-shadow: 0 8px 25px rgba(35,67,90,.09); }
+    .canvas-detail h2 { margin: 0 0 15px; color: #336889; font-size: 21px; font-weight: 750; }
+    .canvas-detail p { margin: 0; max-height: 590px; overflow: hidden; font-size: 25px; line-height: 1.48;
+      font-weight: 600; overflow-wrap: anywhere; }
+    .canvas-detail .detail-overflow { display: none; margin-top: 13px; color: #53697d; font-size: 16px; }
+    .canvas-detail.is-overflowing .detail-overflow { display: block; }
+    .canvas-detail.just-updated { box-shadow: 0 0 0 3px #b8d8f0,0 8px 25px rgba(35,67,90,.09); }
+    .canvas-final-note { position: absolute; left: 24px; bottom: 20px; color: #50697c; font-size: 19px; }
+    .canvas-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+      color: #526b7d; font-size: 28px; font-weight: 600; }
+    @media (prefers-reduced-motion: reduce) { .canvas-world { transition: none; } }
     .passive { padding: 50px; font-size: 28px; }
   </style>
 </head>
@@ -175,6 +254,7 @@
         <div class="brand-goal" id="session-goal">議論の現在地を共有する</div>
       </div>
       <div id="shared-status" class="shared-status">● 待機中</div>
+      <div id="canvas-session-title" class="canvas-session-title"></div>
     </header>
     <div class="flow-band">
       <div class="flow-title">話の流れ</div>
@@ -223,12 +303,16 @@
     // Focused Flow is the candidate default; the prior six-card projection
     // remains available as a comparison/fallback, not as the primary meeting view.
     const semanticFocused = params.get('view') !== 'grid';
+    const semanticCanvas = params.get('view') !== 'grid' && params.get('view') !== 'focused';
     if (params.get('viewport') === '1920x1080') document.documentElement.classList.add('capture-1920');
     const $ = (id) => document.getElementById(id);
     const HIGHLIGHT_MS = 4500;
     let previousNodeSignatures = null;
     let previousSessionId = null;
     let previousFocusId = null;
+    let previousCanvasCamera = null;
+    let previousCanvasKey = null;
+    let previousCanvasDetailId = null;
     const highlightedUntil = new Map();
 
     function escapeHtml(value) {
@@ -244,6 +328,9 @@
         highlightedUntil.clear();
         previousSessionId = sessionId;
         previousFocusId = null;
+        previousCanvasCamera = null;
+        previousCanvasKey = null;
+        previousCanvasDetailId = null;
       }
       const signatures = new Map((graph.nodes || []).map(node => [node.id,
         JSON.stringify([node.label, node.status, node.source_event_ids || [], representations[node.id]?.text || null])]));
@@ -384,6 +471,174 @@
         <aside class="focused-side">${latestAddsDetail ? `<section class="focused-latest"><h2>新しく加わったこと</h2><p>${escapeHtml(latest.canonical)}</p></section>` : ''}
         <div class="persistent-rail">${sections}</div></aside>`;
     }
+
+    function canvasRole(node) {
+      if (node.type === 'decision') return node.status === 'confirmed' ? '確定事項' : '決定候補';
+      return {idea:'視点',option:'案・検討中',concern:'懸念',open_item:'未解決事項',action:'次の対応'}[node.type] || '論点';
+    }
+
+    function canvasTransform(camera, stage) {
+      return `translate(${stage.clientWidth / 2}px,${stage.clientHeight / 2}px) scale(${camera.scale}) translate(${-camera.x}px,${-camera.y}px)`;
+    }
+
+    function canvasEdgeMarkup(edge, source, target, detailed) {
+      const dx = target.x - source.x, dy = target.y - source.y;
+      const horizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
+      const sx = source.x + (horizontal ? Math.sign(dx) * 145 : 0);
+      const sy = source.y + (horizontal ? 0 : Math.sign(dy) * 62);
+      const tx = target.x - (horizontal ? Math.sign(dx) * 145 : 0);
+      const ty = target.y - (horizontal ? 0 : Math.sign(dy) * 62);
+      const type = edge.type;
+      const label = type === 'supports' ? '支え' : type === 'opposes' ? '懸念' : '議論を受けて';
+      const line = `<line class="canvas-edge ${type === 'discussion_provenance' ? 'provenance' : type}" x1="${sx}" y1="${sy}" x2="${tx}" y2="${ty}"/>`;
+      return line + (detailed ? `<text class="canvas-edge-label ${type === 'discussion_provenance' ? '' : type}" x="${(sx+tx)/2}" y="${(sy+ty)/2-7}" text-anchor="middle">${label}</text>` : '');
+    }
+
+    function finalOverviewIds(canvas) {
+      const byId = new Map(canvas.nodes.map(node => [node.id,node]));
+      const outgoing = new Map();
+      const degree = new Map();
+      for (const edge of canvas.edges) {
+        degree.set(edge.source_node_id,(degree.get(edge.source_node_id)||0)+1);
+        degree.set(edge.target_node_id,(degree.get(edge.target_node_id)||0)+1);
+        if (edge.type === 'discussion_provenance') {
+          if (!outgoing.has(edge.source_node_id)) outgoing.set(edge.source_node_id,[]);
+          outgoing.get(edge.source_node_id).push(edge.target_node_id);
+        }
+      }
+      const roots = canvas.nodes.filter(node => node.root_state !== 'linked')
+        .sort((a,b) => (degree.get(b.id)||0)-(degree.get(a.id)||0) || a.created_sequence-b.created_sequence || a.id.localeCompare(b.id))
+        .slice(0,6).map(node => node.id);
+      const selected = [...roots], queue = [...roots];
+      while (queue.length && selected.length < 12) {
+        const parent = queue.shift();
+        for (const child of outgoing.get(parent)||[]) {
+          if (!selected.includes(child) && byId.has(child)) { selected.push(child); queue.push(child); }
+          if (selected.length >= 12) break;
+        }
+      }
+      for (const node of canvas.nodes.filter(node => ['decision','open_item','action'].includes(node.type))) {
+        if (!selected.includes(node.id)) selected.push(node.id);
+        if (selected.length >= 15) break;
+      }
+      return selected.slice(0,15);
+    }
+
+    function provenanceBranchSizes(canvas) {
+      const outgoing = new Map();
+      for (const edge of canvas.edges) if (edge.type === 'discussion_provenance') {
+        if (!outgoing.has(edge.source_node_id)) outgoing.set(edge.source_node_id,[]);
+        outgoing.get(edge.source_node_id).push(edge.target_node_id);
+      }
+      const sizes = new Map();
+      for (const node of canvas.nodes) {
+        const seen = new Set([node.id]), queue = [node.id];
+        while (queue.length) for (const child of outgoing.get(queue.shift())||[]) {
+          if (!seen.has(child)) { seen.add(child); queue.push(child); }
+        }
+        sizes.set(node.id,seen.size);
+      }
+      return sizes;
+    }
+
+    function renderSemanticCanvas(snapshot, graph, fresh) {
+      const canvas = snapshot.map.semantic_canvas;
+      const state = snapshot?.live_state?.runtime_state || 'active';
+      const final = state === 'ended';
+      const camera = final ? canvas.final_camera : canvas.live_camera;
+      const byId = new Map(canvas.nodes.map(node => [node.id,node]));
+      const near = new Set(canvas.near_ids);
+      const focus = byId.get(canvas.focus_id);
+      const visible = final ? finalOverviewIds(canvas).map(id => byId.get(id)).filter(Boolean)
+        : canvas.near_ids.map(id => byId.get(id)).filter(Boolean);
+      const visibleIds = new Set(visible.map(node => node.id));
+      const edges = canvas.edges.filter(edge => final || (visibleIds.has(edge.source_node_id) && visibleIds.has(edge.target_node_id)))
+        .map(edge => canvasEdgeMarkup(edge,byId.get(edge.source_node_id),byId.get(edge.target_node_id),
+          !final && near.has(edge.source_node_id) && near.has(edge.target_node_id))).join('');
+      const nodeMarkup = (final ? [] : visible).map(node => {
+        const isFocus = !final && node.id === canvas.focus_id;
+        const soft = final || !near.has(node.id);
+        const stateClass = node.type === 'decision' && node.status === 'confirmed' ? ' confirmed' : '';
+        return `<div class="canvas-node ${escapeHtml(node.type)}${stateClass} ${isFocus ? 'focus' : soft ? 'mid' : ''} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${node.x}px;top:${node.y}px" data-node-id="${escapeHtml(node.id)}"><span class="canvas-role">${escapeHtml(canvasRole(node))}</span><span class="canvas-label">${escapeHtml(node.label)}</span></div>`;
+      }).join('');
+      const latest = byId.get(canvas.latest_detail_id);
+      const detail = !final && latest ? `<aside class="canvas-detail${fresh.has(latest.id) ? ' just-updated' : ''}"><h2>いま加わった内容</h2><p>${escapeHtml(latest.canonical)}</p><div class="detail-overflow">長文の続きは会議後の記録に保持されています</div></aside>` : '';
+      const note = state === 'ended_with_incomplete_processing' ? '処理が完了していません。内容の確認が必要です。'
+        : final ? '議論の全体像 · 詳細は会議後の記録に保持' : '';
+      const markup = `<section class="canvas-stage" aria-label="議論の論点図"><div class="canvas-world"><svg class="canvas-edges" aria-hidden="true">${edges}</svg>${nodeMarkup}</div><div class="canvas-periphery"></div><svg class="canvas-final-topology" aria-hidden="true"></svg><div class="canvas-final-markers"></div>${canvas.nodes.length ? '' : '<div class="canvas-empty">議論を整理しています</div>'}${note ? `<div class="canvas-final-note">${note}</div>` : ''}</section>${detail}`;
+      const main = $('shared-main');
+      const key = JSON.stringify([canvas.session_id,canvas.revision,state,canvas.focus_id,
+        canvas.latest_detail_id,snapshot.map.display_labels]);
+      if (key === previousCanvasKey) return;
+      previousCanvasKey = key;
+      main.classList.add('canvas-main');
+      main.classList.toggle('final',final);
+      main.classList.remove('focused-main','focused-sparse','no-rail');
+      main.innerHTML = markup;
+      const stage = main.querySelector('.canvas-stage');
+      const world = main.querySelector('.canvas-world');
+      if (!stage || !world) return;
+      const oldCamera = previousCanvasCamera;
+      world.style.transition = 'none';
+      world.style.transform = canvasTransform(oldCamera || camera,stage);
+      // Layout and camera target are deterministic; interpolation is visual only.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        world.style.transition = '';
+        world.style.transform = canvasTransform(camera,stage);
+      }));
+      previousCanvasCamera = camera;
+      previousCanvasDetailId = latest?.id || null;
+      const detailText = main.querySelector('.canvas-detail p');
+      if (detailText && detailText.scrollHeight > detailText.clientHeight + 2) {
+        detailText.closest('.canvas-detail').classList.add('is-overflowing');
+      }
+      if (!final && focus) {
+        const outside = canvas.nodes.filter(node => !visibleIds.has(node.id) &&
+          node.root_state !== 'linked' && node.id !== canvas.focus_id)
+          .sort((a,b) => Math.hypot(a.x-camera.x,a.y-camera.y)-Math.hypot(b.x-camera.x,b.y-camera.y))
+          .slice(0,5);
+        const periphery = main.querySelector('.canvas-periphery');
+        const peripheralSlots = [[.12,.18],[.84,.19],[.12,.75],[.84,.75],[.50,.10]];
+        const usedSlots = new Set();
+        periphery.innerHTML = outside.map(node => {
+          const dx = (node.x-camera.x)*camera.scale, dy = (node.y-camera.y)*camera.scale;
+          const preferred = Math.abs(dy)>Math.abs(dx) ? (dy>0 ? 2 : 4) : (dx>0 ? 1 : 0);
+          let slot = preferred;
+          while (usedSlots.has(slot)) slot=(slot+1)%peripheralSlots.length;
+          usedSlots.add(slot);
+          const [slotX,slotY] = peripheralSlots[slot];
+          const x = stage.clientWidth*slotX, y = stage.clientHeight*slotY;
+          return `<div class="canvas-peripheral ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${x}px;top:${y}px">${escapeHtml(node.label)}</div>`;
+        }).join('');
+      } else if (final) {
+        const branchSizes = provenanceBranchSizes(canvas);
+        const topology = main.querySelector('.canvas-final-topology');
+        topology.setAttribute('viewBox',`0 0 ${stage.clientWidth} ${stage.clientHeight}`);
+        const bins = new Map();
+        for (const node of canvas.nodes) {
+          const x = stage.clientWidth/2 + (node.x-camera.x)*camera.scale;
+          const y = stage.clientHeight/2 + (node.y-camera.y)*camera.scale;
+          if (x<10 || x>stage.clientWidth-10 || y<10 || y>stage.clientHeight-10) continue;
+          const bx=Math.floor(x/24), by=Math.floor(y/24), key=`${bx}:${by}`;
+          const current=bins.get(key);
+          if (current) { current.count++; if (['decision','action','open_item'].includes(node.type)) current.type=node.type; }
+          else bins.set(key,{x,y,count:1,type:node.type});
+        }
+        topology.innerHTML = [...bins.values()].map(item => `<circle class="${escapeHtml(item.type)}" cx="${item.x}" cy="${item.y}" r="${Math.min(12,4+Math.sqrt(item.count)*2)}"/>`).join('');
+        const markers = main.querySelector('.canvas-final-markers');
+        const used = [];
+        const candidates = visible.map(node => {
+          const sx = stage.clientWidth/2 + (node.x-camera.x)*camera.scale;
+          const sy = stage.clientHeight/2 + (node.y-camera.y)*camera.scale;
+          return {node,x:sx,y:sy};
+        });
+        markers.innerHTML = candidates.filter(({x,y}) => x>130 && x<stage.clientWidth-130 && y>80 && y<stage.clientHeight-95)
+          .filter(({x,y}) => {
+            if (used.some(point => Math.abs(point.x-x)<245 && Math.abs(point.y-y)<110)) return false;
+            used.push({x,y}); return true;
+          }).map(({node,x,y}) => `<div class="canvas-final-marker ${escapeHtml(node.type)} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${x}px;top:${y}px"><small>${escapeHtml(canvasRole(node))}${(branchSizes.get(node.id)||0)>1 ? ` · この周辺${branchSizes.get(node.id)}件` : ''}</small>${escapeHtml(node.label)}</div>`).join('');
+      }
+    }
     window.addEventListener('resize', fitDiscussionCards);
     document.fonts.ready.then(fitDiscussionCards);
 
@@ -394,6 +649,7 @@
       const ready = Boolean(graph && shared);
       const idle = !ready || state === 'idle';
       document.querySelector('.shared-shell').classList.toggle('discussion-active', !idle);
+      document.querySelector('.shared-shell').classList.toggle('canvas-active', !idle && semanticCanvas && Boolean(snapshot?.map?.semantic_canvas));
       const status = statusFor(snapshot, isDemo);
       $('shared-status').textContent = state === 'starting' ? '● 準備しています' : status.text;
       $('shared-status').className = `shared-status ${status.className}`;
@@ -402,6 +658,8 @@
         previousNodeSignatures = null;
         highlightedUntil.clear();
         previousFocusId = null;
+        previousCanvasCamera = null;
+        previousCanvasKey = null;
         main.classList.add('no-rail');
         main.classList.remove('focused-main', 'focused-sparse');
         main.innerHTML = '<section class="passive"><h1>会議の開始を待っています</h1><p>スマートフォンで <a href="/session">会議をはじめる</a></p></section>';
@@ -413,6 +671,14 @@
       const nodes = new Map(graph.nodes.map(n => [n.id, n]));
       const representations = snapshot.map.display_labels || {};
       const fresh = updatedNodeIds(graph, snapshot?.state?.session?.id || snapshot?.state?.graph?.session_id || 'demo', representations);
+      if (semanticCanvas && snapshot.map.semantic_canvas) {
+        const title = snapshot?.state?.session?.title || '';
+        $('canvas-session-title').textContent = title && !/Live Audio Continuous Session/i.test(title) ? `｜ ${title}` : '';
+        document.querySelector('.flow-band').hidden = true;
+        document.querySelector('.shared-shell').classList.remove('has-flow','has-discussion');
+        renderSemanticCanvas(snapshot,graph,fresh);
+        return;
+      }
       const displayText = node => representations[node?.id]?.text || node?.label || '';
       const actionDetails = node => {
         if (node?.type !== 'action') return '';
