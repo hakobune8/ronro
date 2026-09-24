@@ -326,9 +326,110 @@ class ProviderItemTests(unittest.IsolatedAsyncioTestCase):
         await self.client.append_audio(pcm(30))
         await self.client.commit()
         await self.event('input_audio_buffer.committed', item_id='a')
+        await self.event('input_audio_buffer.speech_started', item_id='b', audio_start_ms=30000)
         await self.client.append_audio(pcm(30))
         self.assertTrue(self.client.should_commit_bounded_fallback(has_audio_buffer=True, meaningful_audio=True))
         self.assertEqual(self.client.turns.pending_seconds, 30)
+
+    async def test_background_audio_after_vad_final_does_not_commit_or_block_stop(self):
+        await self.client.append_audio(pcm(1))
+        await self.event('input_audio_buffer.speech_started', item_id='speech', audio_start_ms=0)
+        await self.event('input_audio_buffer.speech_stopped', item_id='speech', audio_end_ms=1000)
+        self.assertTrue(self.client.has_pending_vad_completion())
+        self.assertFalse(self.client.should_commit_at_session_end(
+            has_audio_buffer=True, meaningful_audio=True))
+        await self.event('input_audio_buffer.committed', item_id='speech')
+        final = await self.event('conversation.item.input_audio_transcription.completed',
+                                 item_id='speech', transcript='短い発話')
+        self.assertEqual(final['type'], 'final_transcript')
+        self.client.turns.acknowledge('speech')
+        # Low-level non-silent BGM passes the old local peak >8 guard.
+        await self.client.append_audio((b'\x10\x00') * (31 * 24000))
+        self.assertGreaterEqual(self.client.turns.meaningful_pending_seconds, 30)
+        self.assertFalse(self.client.should_commit_bounded_fallback(
+            has_audio_buffer=True, meaningful_audio=True))
+        self.assertFalse(self.client.should_commit_at_session_end(
+            has_audio_buffer=True, meaningful_audio=True))
+        self.assertFalse(self.client.has_pending_vad_completion())
+
+        # A genuinely new Provider speech turn still enables the bound.
+        await self.event('input_audio_buffer.speech_started', item_id='next', audio_start_ms=31000)
+        self.assertTrue(self.client.should_commit_bounded_fallback(
+            has_audio_buffer=True, meaningful_audio=True))
+        self.assertTrue(self.client.should_commit_at_session_end(
+            has_audio_buffer=True, meaningful_audio=True))
+        self.assertTrue(self.client.has_pending_vad_completion())
+
+    async def test_background_audio_before_first_vad_turn_does_not_auto_commit(self):
+        await self.client.append_audio((b'\x10\x00') * (31 * 24000))
+        self.assertGreaterEqual(self.client.turns.meaningful_pending_seconds, 30)
+        self.assertFalse(self.client.should_commit_bounded_fallback(
+            has_audio_buffer=True, meaningful_audio=True))
+        self.assertFalse(self.client.has_pending_vad_completion())
+
+    async def test_live_session_waits_through_bgm_after_final_then_drains(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+        from prototype.live_session import LiveSessionManager
+        from prototype.live_transport import LiveWebSocketGateway
+        from prototype.live_audio import encode_audio_frame
+
+        class Analyzer:
+            provider_name = model = prompt_version = 'test'
+            last_trace = None
+            def analyze(self, *args): return []
+
+        class Browser:
+            request = SimpleNamespace(path='/live?controller_id=bgm-test')
+            def __init__(self):
+                self.incoming, self.sent = asyncio.Queue(), []
+            async def recv(self): return await self.incoming.get()
+            async def send(self, message): self.sent.append(json.loads(message))
+            async def close(self): pass
+
+        self.client.connect = AsyncMock()
+        manager = LiveSessionManager(schema_dir=Path(__file__).resolve().parents[1] / 'schemas',
+                                     analyzer_factory=Analyzer)
+        manager.start_mode('continuous', controller_id='bgm-test')
+        browser = Browser()
+        try:
+            with patch('prototype.live_transport.OpenAIRealtimeTranscriptionClient', lambda cfg: self.client):
+                task = asyncio.create_task(LiveWebSocketGateway(manager, stt_config=self.client.config)(browser))
+                await browser.incoming.put(encode_audio_frame(AudioChunk(0, 0.0, pcm(1))))
+                for _ in range(100):
+                    if any(event['type'] == 'audio_chunk_accepted' for event in browser.sent):
+                        break
+                    await asyncio.sleep(.01)
+                self.assertTrue(any(event['type'] == 'audio_chunk_accepted' for event in browser.sent))
+                for event in (
+                    dict(type='input_audio_buffer.speech_started', item_id='speech', audio_start_ms=0),
+                    dict(type='input_audio_buffer.speech_stopped', item_id='speech', audio_end_ms=1000),
+                    dict(type='input_audio_buffer.committed', item_id='speech', previous_item_id=None),
+                    dict(type='conversation.item.input_audio_transcription.completed',
+                         item_id='speech', transcript='短い発話'),
+                ):
+                    await self.client._connection.events.put(json.dumps(event))
+                for _ in range(100):
+                    if any(event['type'] == 'final_transcript' for event in browser.sent):
+                        break
+                    await asyncio.sleep(.01)
+                self.assertTrue(any(event['type'] == 'final_transcript' for event in browser.sent))
+                await browser.incoming.put(encode_audio_frame(
+                    AudioChunk(1, 1.0, (b'\x10\x00') * (31 * 24000))))
+                for _ in range(100):
+                    if manager.current().audio_chunk_sequence == 1:
+                        break
+                    await asyncio.sleep(.01)
+                self.assertEqual(manager.current().audio_chunk_sequence, 1)
+                await asyncio.sleep(.25)
+                self.assertEqual(manager.current().runtime_state, 'active')
+                self.assertFalse(any(event['type'] == 'stt_committing' for event in browser.sent))
+                await browser.incoming.put(json.dumps({'type': 'stop'}))
+                await asyncio.wait_for(task, 5)
+            self.assertEqual(manager.snapshot()['live_state']['runtime_state'], 'ended')
+            self.assertEqual(len(self.client.turns.intents), 0)
+        finally:
+            manager.current().close()
 
     async def test_none_mode_end_requires_explicit_commit(self):
         from dataclasses import replace

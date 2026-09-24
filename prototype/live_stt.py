@@ -431,7 +431,12 @@ class OpenAIRealtimeTranscriptionClient:
         return self.config.finalization_mode in {"server_vad", "semantic_vad", "server_vad_bounded"}
 
     def has_pending_vad_completion(self) -> bool:
-        return self.turns.pending() or self.turns.meaningful(self.turns.cursor, self.turns.samples)
+        # PCM energy is not a Provider speech turn: room noise or BGM can
+        # remain above the local >8-sample guard after VAD has stopped.
+        return self.turns.pending() or self._pending_vad_completions > 0 or (
+            self._vad_speech_active
+            and self.turns.meaningful(self.turns.cursor, self.turns.samples)
+        )
 
     def should_commit_bounded_fallback(
         self,
@@ -448,6 +453,11 @@ class OpenAIRealtimeTranscriptionClient:
         sufficient.
         """
 
+        # With Provider VAD enabled, only bound a turn the Provider still
+        # considers active. Otherwise background audio after a completed turn
+        # ages into an explicit commit against an empty Provider buffer.
+        if self.vad_enabled and not self._vad_speech_active:
+            return False
         if self.turns.frames:
             return (not self.turns.intents and
                     self.turns.meaningful(self.turns.cursor, self.turns.samples))
@@ -472,6 +482,10 @@ class OpenAIRealtimeTranscriptionClient:
         commit can produce an empty provider completion.
         """
 
+        if self.vad_enabled and self._vad_boundary_seen and not self._vad_speech_active:
+            # A completed VAD turn followed by BGM is not a pending speech
+            # region. Preserve the existing no-VAD-boundary stop fallback.
+            return False
         if self.turns.frames:
             return (not self.turns.intents and self.turns.samples > self.turns.cursor
                     and (not self.vad_enabled or
