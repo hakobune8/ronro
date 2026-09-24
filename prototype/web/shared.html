@@ -230,16 +230,17 @@
     .canvas-final-marker.open_item { border-color: #c69e76; background: #fffdf9; }
     .canvas-final-marker.unconfirmed { border-style: dashed; }
     .canvas-final-marker small { display: block; margin-bottom: 5px; color: #587086; font-size: 16px; }
-    .canvas-detail { position: absolute; z-index: 5; top: 50%; right: 28px;
-      transform: translateY(-50%); width: min(420px,32%); max-height: calc(100% - 100px);
-      padding: 25px 26px; border: 1px solid #dce6ec; border-radius: 18px; background: rgba(255,255,255,.97);
-      box-shadow: 0 8px 25px rgba(35,67,90,.09); pointer-events: none; }
-    .canvas-detail h2 { margin: 0 0 15px; color: #336889; font-size: 21px; font-weight: 750; }
-    .canvas-detail p { margin: 0; max-height: min(590px,60vh); overflow: hidden; font-size: 25px; line-height: 1.48;
-      font-weight: 600; overflow-wrap: anywhere; }
-    .canvas-detail .detail-overflow { display: none; margin-top: 13px; color: #53697d; font-size: 16px; }
+    /* Canonical detail is a subtitle, not another graph card or an inspector. */
+    .canvas-detail { position: absolute; z-index: 5; left: 50%; bottom: 25px;
+      transform: translateX(-50%); width: min(1360px,calc(100% - 160px));
+      padding: 15px 38px 18px; border-radius: 8px; background: rgba(25,47,65,.9);
+      box-shadow: 0 6px 20px rgba(24,47,67,.13); color: #fff; text-align: center; pointer-events: none; }
+    .canvas-detail h2 { margin: 0 0 7px; color: #c6e1f2; font-size: 17px; font-weight: 750; }
+    .canvas-detail p { margin: 0; max-height: min(210px,22vh); overflow: hidden; font-size: 29px; line-height: 1.38;
+      font-weight: 650; overflow-wrap: anywhere; text-wrap: balance; }
+    .canvas-detail .detail-overflow { display: none; margin-top: 7px; color: #c6e1f2; font-size: 16px; }
     .canvas-detail.is-overflowing .detail-overflow { display: block; }
-    .canvas-detail.just-updated { box-shadow: 0 0 0 3px #b8d8f0,0 8px 25px rgba(35,67,90,.09); }
+    .canvas-detail.just-updated { box-shadow: 0 0 0 2px #9bcce8,0 6px 20px rgba(24,47,67,.13); }
     .canvas-final-note { position: absolute; right: 24px; bottom: 20px; color: #9a4d3b; font-size: 19px; }
     .canvas-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
       color: #526b7d; font-size: 28px; font-weight: 600; }
@@ -480,8 +481,8 @@
     }
 
     function canvasTransform(camera, stage, hasDetail) {
-      const anchorX = stage.clientWidth * (hasDetail ? .42 : .5);
-      return `translate(${anchorX}px,${stage.clientHeight / 2}px) scale(${camera.scale}) translate(${-camera.x}px,${-camera.y}px)`;
+      const anchorY = stage.clientHeight * (hasDetail ? .49 : .5);
+      return `translate(${stage.clientWidth / 2}px,${anchorY}px) scale(${camera.scale}) translate(${-camera.x}px,${-camera.y}px)`;
     }
 
     function canvasEdgeMarkup(edge, source, target, detailed) {
@@ -547,7 +548,7 @@
         const stateClass = node.type === 'decision' && node.status === 'confirmed' ? ' confirmed' : '';
         return `<div class="canvas-node ${escapeHtml(node.type)}${stateClass} ${isFocus ? 'focus' : soft ? 'mid' : ''} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${node.x}px;top:${node.y}px" data-node-id="${escapeHtml(node.id)}"><span class="canvas-role">${escapeHtml(canvasRole(node))}</span><span class="canvas-label">${escapeHtml(node.label)}</span></div>`;
       }).join('');
-      const detail = !final && focus ? `<aside class="canvas-detail${fresh.has(focus.id) ? ' just-updated' : ''}"><h2>いまの論点 · 詳細</h2><p>${escapeHtml(focus.canonical)}</p><div class="detail-overflow">全文は記録に保持しています</div></aside>` : '';
+      const detail = !final && focus ? `<aside class="canvas-detail${fresh.has(focus.id) ? ' just-updated' : ''}"><h2>いまの論点</h2><p>${escapeHtml(focus.canonical)}</p><div class="detail-overflow">全文は会議後の記録に保持しています</div></aside>` : '';
       const note = state === 'ended_with_incomplete_processing' ? '処理が完了していません。内容の確認が必要です。'
         : '';
       const markup = `<section class="canvas-stage" aria-label="議論の論点図"><div class="canvas-world"><svg class="canvas-edges" aria-hidden="true">${edges}</svg>${nodeMarkup}</div><div class="canvas-periphery"></div><svg class="canvas-final-topology" aria-hidden="true"></svg><div class="canvas-final-markers"></div>${canvas.nodes.length ? '' : '<div class="canvas-empty">議論を整理しています</div>'}${note ? `<div class="canvas-final-note">${note}</div>` : ''}${detail}</section>`;

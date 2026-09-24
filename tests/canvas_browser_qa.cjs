@@ -77,6 +77,21 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
       peripheral: document.querySelectorAll('.canvas-peripheral').length,
       stageWidth: document.querySelector('.canvas-stage').getBoundingClientRect().width,
       detailInStage: !!document.querySelector('.canvas-stage > .canvas-detail'),
+      subtitleAtBottom: (() => {
+        const stage=document.querySelector('.canvas-stage').getBoundingClientRect();
+        const subtitle=document.querySelector('.canvas-detail')?.getBoundingClientRect();
+        return !!subtitle && Math.abs((stage.left+stage.right)/2-(subtitle.left+subtitle.right)/2)<2 &&
+          stage.bottom-subtitle.bottom>=18 && stage.bottom-subtitle.bottom<=32;
+      })(),
+      cardsCoveredBySubtitle: (() => {
+        const subtitle=document.querySelector('.canvas-detail')?.getBoundingClientRect();
+        if (!subtitle) return 0;
+        return [...document.querySelectorAll('.canvas-node')].filter(node => {
+          const card=node.getBoundingClientRect();
+          return Math.min(subtitle.right,card.right)-Math.max(subtitle.left,card.left)>4 &&
+            Math.min(subtitle.bottom,card.bottom)-Math.max(subtitle.top,card.top)>4;
+        }).length;
+      })(),
       hiddenEdgeLabels: (() => {
         const cards=[...document.querySelectorAll('.canvas-node')].map(node=>node.getBoundingClientRect());
         return [...document.querySelectorAll('.canvas-edge-label')].filter(label => {
@@ -121,7 +136,8 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
   console.log(JSON.stringify(results));
   if (results.some(item => item.errors.length || item.live.scrollX || item.live.scrollY ||
     item.final.scrollX || item.final.scrollY || item.live.primary > 5 || item.live.clippedPrimary ||
-    item.live.hiddenEdgeLabels || !item.live.detailInStage || item.live.stageWidth !== item.final.stageWidth ||
+    item.live.hiddenEdgeLabels || !item.live.detailInStage || !item.live.subtitleAtBottom ||
+    item.live.cardsCoveredBySubtitle || item.live.stageWidth !== item.final.stageWidth ||
     item.final.oldBottomNote || item.final.neighborhoodCount ||
     item.live.displayLabelIsShort === false || item.live.detailIsCanonical === false ||
     !item.final.topology)) process.exit(1);
