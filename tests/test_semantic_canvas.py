@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from evaluation.tooling.semantic_hypothesis_review import build_case
+from prototype.display_labels import POLICY_VERSION, VERSION as LABEL_VERSION, content_hash
 from prototype.layout import StableLayout, map_projection
 from prototype.semantic_canvas import project_semantic_canvas
 
@@ -17,14 +18,16 @@ def synthetic(count: int) -> tuple[dict, list[dict]]:
     sid = "canvas-scale"
     nodes = []
     events = []
+    subjects = ("避難所の給水", "物資の配分", "道路の復旧", "河川の点検", "地域間の連携")
     for index in range(count):
         event_id = f"event-{index:03d}"
+        label = f"{subjects[index % len(subjects)]}について検討 {index + 1}"
         nodes.append({"id": f"n{index}", "type": "idea", "status": "active",
-                      "label": f"議論項目 {index}", "evidence_ids": [f"e{index}"],
+                      "label": label, "evidence_ids": [f"e{index}"],
                       "source_event_ids": [event_id]})
         events.append({"event_id": event_id, "sequence": index + 1,
                        "event_type": "node_detected", "source_evidence_ids": [f"e{index}"],
-                       "payload": {"node_type": "idea", "label": f"議論項目 {index}"}})
+                       "payload": {"node_type": "idea", "label": label}})
     return {"session_id": sid, "revision": count, "nodes": nodes, "edges": [],
             "current_topic": {"primary_topic_id": None}}, events
 
@@ -109,6 +112,23 @@ class SemanticCanvasTests(unittest.TestCase):
         self.assertEqual({node["id"]: (node["x"], node["y"]) for node in after["nodes"]}, before_positions)
         self.assertEqual(len(after["edges"]), 1)
         self.assertEqual(after["focus_id"], "n1")
+
+    def test_display_title_is_short_but_focus_keeps_canonical_detail(self) -> None:
+        result, ids = build_case(self.cases[3], self.classifications)
+        graph = result.state["graph"]
+        focus_id = ids["r4-n5"]
+        canonical_node = next(node for node in graph["nodes"] if node["id"] == focus_id)
+        short = "倉庫の水を三避難所へ再配置する"
+        presentation = {focus_id: {"version": LABEL_VERSION, "policy": POLICY_VERSION,
+                                   "content_hash": content_hash(canonical_node),
+                                   "sequence": graph["last_event_sequence"],
+                                   "display_label": short}}
+        canvas = map_projection(result.state, result.events, StableLayout(), presentation)["semantic_canvas"]
+        focus = next(node for node in canvas["nodes"] if node["id"] == focus_id)
+        self.assertEqual(canvas["focus_id"], focus_id)
+        self.assertEqual(focus["label"], short)
+        self.assertEqual(focus["canonical"], canonical_node["label"])
+        self.assertNotEqual(focus["label"], focus["canonical"])
 
     def test_scale_and_spatial_identity_through_300_nodes(self) -> None:
         prior = {}

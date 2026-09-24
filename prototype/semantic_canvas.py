@@ -13,10 +13,10 @@ from typing import Any, Mapping, Sequence
 
 VERSION = "semantic-canvas-v1"
 SEMANTIC = {"discussion_provenance", "supports", "opposes"}
-CELL_X = 330
-CELL_Y = 185
-ROOT_GAP_X = 1600
-ROOT_GAP_Y = 1050
+CELL_X = 440
+CELL_Y = 285
+ROOT_GAP_X = 1900
+ROOT_GAP_Y = 1450
 
 
 def _event_order(events: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -121,7 +121,7 @@ def _neighborhood(focus_id: str | None, nodes: Mapping[str, Any], edges: list[di
     def close(node_id: str) -> bool:
         dx = positions[node_id]["x"] - positions[focus_id]["x"]
         dy = positions[node_id]["y"] - positions[focus_id]["y"]
-        return dx * dx + dy * dy <= 700 * 700
+        return dx * dx + dy * dy <= 1000 * 1000
 
     rank: dict[str, int] = {}
     for edge in edges:

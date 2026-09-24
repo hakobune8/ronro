@@ -171,7 +171,7 @@
     .canvas-session-title { display: none; color: #365169; font-size: 21px; font-weight: 650; }
     .canvas-active .canvas-session-title { display: inline; }
     .canvas-active .shared-main.canvas-main, html.capture-1920 .canvas-active .shared-main.canvas-main {
-      display: grid; grid-template-columns: minmax(0,1fr) minmax(350px,420px); gap: 18px;
+      display: grid; grid-template-columns: minmax(0,1fr);
       padding: 18px 0 0; min-height: 0;
     }
     .canvas-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; border-radius: 20px;
@@ -193,7 +193,8 @@
       padding: 13px 17px; border: 2px solid #b9cfdd; border-radius: 14px; background: #fff;
       box-shadow: 0 4px 12px rgba(31,65,95,.055); color: #1e3040; pointer-events: none; }
     .canvas-node .canvas-role { display: block; margin-bottom: 5px; color: #49657b; font-size: 18px; font-weight: 750; }
-    .canvas-node .canvas-label { display: block; font-size: 28px; line-height: 1.3; font-weight: 670; overflow-wrap: anywhere; }
+    .canvas-node .canvas-label { display: block; font-size: 28px; line-height: 1.3; font-weight: 670;
+      overflow-wrap: anywhere; text-wrap: balance; }
     .canvas-node.focus { width: 340px; min-height: 115px; border: 4px solid #2d78bb;
       box-shadow: 0 6px 24px rgba(31,105,175,.17); z-index: 3; }
     .canvas-node.focus .canvas-label { font-size: 36px; font-weight: 760; }
@@ -214,7 +215,6 @@
       color: #60798c; font-size: 20px; line-height: 1.3; font-weight: 650; opacity: .52;
       overflow-wrap: anywhere; }
     .canvas-peripheral.unconfirmed { border-style: dashed; opacity: .4; }
-    .canvas-main.final { grid-template-columns: minmax(0,1fr) !important; }
     .canvas-final-markers { position: absolute; inset: 0; pointer-events: none; }
     .canvas-final-topology { position: absolute; inset: 0; pointer-events: none; }
     .canvas-final-topology circle { fill: #a7bfd0; opacity: .48; }
@@ -230,16 +230,17 @@
     .canvas-final-marker.open_item { border-color: #c69e76; background: #fffdf9; }
     .canvas-final-marker.unconfirmed { border-style: dashed; }
     .canvas-final-marker small { display: block; margin-bottom: 5px; color: #587086; font-size: 16px; }
-    .canvas-detail { min-width: 0; min-height: 0; align-self: start; margin-top: 17%; padding: 25px 26px;
-      border: 1px solid #dce6ec; border-radius: 18px; background: #fff;
-      box-shadow: 0 8px 25px rgba(35,67,90,.09); }
+    .canvas-detail { position: absolute; z-index: 5; top: 50%; right: 28px;
+      transform: translateY(-50%); width: min(420px,32%); max-height: calc(100% - 100px);
+      padding: 25px 26px; border: 1px solid #dce6ec; border-radius: 18px; background: rgba(255,255,255,.97);
+      box-shadow: 0 8px 25px rgba(35,67,90,.09); pointer-events: none; }
     .canvas-detail h2 { margin: 0 0 15px; color: #336889; font-size: 21px; font-weight: 750; }
-    .canvas-detail p { margin: 0; max-height: 590px; overflow: hidden; font-size: 25px; line-height: 1.48;
+    .canvas-detail p { margin: 0; max-height: min(590px,60vh); overflow: hidden; font-size: 25px; line-height: 1.48;
       font-weight: 600; overflow-wrap: anywhere; }
     .canvas-detail .detail-overflow { display: none; margin-top: 13px; color: #53697d; font-size: 16px; }
     .canvas-detail.is-overflowing .detail-overflow { display: block; }
     .canvas-detail.just-updated { box-shadow: 0 0 0 3px #b8d8f0,0 8px 25px rgba(35,67,90,.09); }
-    .canvas-final-note { position: absolute; left: 24px; bottom: 20px; color: #50697c; font-size: 19px; }
+    .canvas-final-note { position: absolute; right: 24px; bottom: 20px; color: #9a4d3b; font-size: 19px; }
     .canvas-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
       color: #526b7d; font-size: 28px; font-weight: 600; }
     @media (prefers-reduced-motion: reduce) { .canvas-world { transition: none; } }
@@ -349,9 +350,10 @@
     }
 
     function statusFor(snapshot, isDemo) {
-      if (isDemo) return { text: '● 更新しました', className: 'updated' };
       const live = snapshot?.live_state || {};
       const state = live.runtime_state || 'idle';
+      if (isDemo && state === 'ended') return { text: '● 会議を終了しました', className: 'updated' };
+      if (isDemo) return { text: '● 更新しました', className: 'updated' };
       if (live.error || live.queue?.delayed_state === 'critical') return { text: '● 遅れています', className: 'delayed' };
       if (state === 'finalizing') return { text: '● 仕上げています', className: 'busy' };
       if (['capturing', 'active', 'connected'].includes(state)) {
@@ -477,8 +479,9 @@
       return {idea:'視点',option:'案・検討中',concern:'懸念',open_item:'未解決事項',action:'次の対応'}[node.type] || '論点';
     }
 
-    function canvasTransform(camera, stage) {
-      return `translate(${stage.clientWidth / 2}px,${stage.clientHeight / 2}px) scale(${camera.scale}) translate(${-camera.x}px,${-camera.y}px)`;
+    function canvasTransform(camera, stage, hasDetail) {
+      const anchorX = stage.clientWidth * (hasDetail ? .42 : .5);
+      return `translate(${anchorX}px,${stage.clientHeight / 2}px) scale(${camera.scale}) translate(${-camera.x}px,${-camera.y}px)`;
     }
 
     function canvasEdgeMarkup(edge, source, target, detailed) {
@@ -561,11 +564,10 @@
         const stateClass = node.type === 'decision' && node.status === 'confirmed' ? ' confirmed' : '';
         return `<div class="canvas-node ${escapeHtml(node.type)}${stateClass} ${isFocus ? 'focus' : soft ? 'mid' : ''} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${node.x}px;top:${node.y}px" data-node-id="${escapeHtml(node.id)}"><span class="canvas-role">${escapeHtml(canvasRole(node))}</span><span class="canvas-label">${escapeHtml(node.label)}</span></div>`;
       }).join('');
-      const latest = byId.get(canvas.latest_detail_id);
-      const detail = !final && latest ? `<aside class="canvas-detail${fresh.has(latest.id) ? ' just-updated' : ''}"><h2>いま加わった内容</h2><p>${escapeHtml(latest.canonical)}</p><div class="detail-overflow">長文の続きは会議後の記録に保持されています</div></aside>` : '';
+      const detail = !final && focus ? `<aside class="canvas-detail${fresh.has(focus.id) ? ' just-updated' : ''}"><h2>いまの論点 · 詳細</h2><p>${escapeHtml(focus.canonical)}</p><div class="detail-overflow">全文は記録に保持しています</div></aside>` : '';
       const note = state === 'ended_with_incomplete_processing' ? '処理が完了していません。内容の確認が必要です。'
-        : final ? '議論の全体像 · 詳細は会議後の記録に保持' : '';
-      const markup = `<section class="canvas-stage" aria-label="議論の論点図"><div class="canvas-world"><svg class="canvas-edges" aria-hidden="true">${edges}</svg>${nodeMarkup}</div><div class="canvas-periphery"></div><svg class="canvas-final-topology" aria-hidden="true"></svg><div class="canvas-final-markers"></div>${canvas.nodes.length ? '' : '<div class="canvas-empty">議論を整理しています</div>'}${note ? `<div class="canvas-final-note">${note}</div>` : ''}</section>${detail}`;
+        : '';
+      const markup = `<section class="canvas-stage" aria-label="議論の論点図"><div class="canvas-world"><svg class="canvas-edges" aria-hidden="true">${edges}</svg>${nodeMarkup}</div><div class="canvas-periphery"></div><svg class="canvas-final-topology" aria-hidden="true"></svg><div class="canvas-final-markers"></div>${canvas.nodes.length ? '' : '<div class="canvas-empty">議論を整理しています</div>'}${note ? `<div class="canvas-final-note">${note}</div>` : ''}${detail}</section>`;
       const main = $('shared-main');
       const key = JSON.stringify([canvas.session_id,canvas.revision,state,canvas.focus_id,
         canvas.latest_detail_id,snapshot.map.display_labels]);
@@ -580,14 +582,14 @@
       if (!stage || !world) return;
       const oldCamera = previousCanvasCamera;
       world.style.transition = 'none';
-      world.style.transform = canvasTransform(oldCamera || camera,stage);
+      world.style.transform = canvasTransform(oldCamera || camera,stage,Boolean(detail));
       // Layout and camera target are deterministic; interpolation is visual only.
       requestAnimationFrame(() => requestAnimationFrame(() => {
         world.style.transition = '';
-        world.style.transform = canvasTransform(camera,stage);
+        world.style.transform = canvasTransform(camera,stage,Boolean(detail));
       }));
       previousCanvasCamera = camera;
-      previousCanvasDetailId = latest?.id || null;
+      previousCanvasDetailId = focus?.id || null;
       const detailText = main.querySelector('.canvas-detail p');
       if (detailText && detailText.scrollHeight > detailText.clientHeight + 2) {
         detailText.closest('.canvas-detail').classList.add('is-overflowing');
