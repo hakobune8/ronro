@@ -20,6 +20,7 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 - [ ] TLS Secret provisioned for the exact Pilot hostname.
 - [ ] ConfigMap shows candidate configuration `semantic-graph-rc4` and Analyzer output schema `v3`.
 - [ ] PVC `ronro-pilot-evaluation` is Bound.
+- [ ] PVC `ronro-pilot-audio` (10Gi nominal, separate from evaluation) is Bound; underlying node has free space.
 - [ ] Deployment has `replicas=1` and `strategy=Recreate`.
 - [ ] Pod is Ready.
 - [ ] Liveness `/healthz` is 200.
@@ -44,7 +45,10 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 - [ ] Shared display is ready.
 - [ ] Room and external microphone are ready.
 - [ ] Consent text is shown.
-- [ ] Raw Audio default is not persisted.
+- [ ] Before each pilot meeting, facilitator explains recording purpose, seven-day retention and evaluator-only access; all participants explicitly consent.
+- [ ] `/session` and `/control` reject a new continuous session without that attestation.
+- [ ] Pilot PCM is private (0600 file / 0700 directory), absent from HTTP and Git; retention cleanup and gap markers are checked.
+- [ ] If recording fails, meeting continues and facilitator sees an incomplete-recording warning.
 
 ## Kubernetes three-case smoke
 

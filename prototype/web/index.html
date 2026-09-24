@@ -238,6 +238,10 @@
         <button id="live-end" class="danger" disabled>End Session</button>
         <button id="live-retry" disabled>Retry Analyzer</button>
         <span class="subtle">明示的Start後のみMicrophoneを使用します。ContinuousはCommit UtteranceでFinal化します。</span>
+        <label id="live-pilot-audio-consent" hidden class="subtle" style="display:none">
+          <input id="live-all-participants-consented" type="checkbox">
+          パイロット録音（評価担当者のみ・7日間保存）を説明し、参加者全員の明示的な同意を確認した
+        </label>
       </div>
       <div class="live-state-grid">
         <div class="live-state"><strong>Microphone</strong><span id="live-mic-state">inactive</span></div>
@@ -277,7 +281,7 @@
       <div class="evaluation-controls">
         <label>Participants<input id="evaluation-participants" type="number" min="1" max="20" value="2"></label>
         <label>Discussion theme<input id="evaluation-theme" type="text" value="Discussion Map AI Facilitatorを社内会議で使う場合、必要な機能"></label>
-        <label><span>Raw audio consent</span><input id="evaluation-audio-consent" type="checkbox"></label>
+        <label><span>評価メモ用の録音同意（録音開始とは別）</span><input id="evaluation-audio-consent" type="checkbox"></label>
         <button id="evaluation-start" class="primary">Start Evaluation</button>
         <button id="evaluation-end" class="danger" disabled>End Evaluation</button>
         <span id="evaluation-state" class="live-status-badge">idle</span>
@@ -492,6 +496,9 @@
     function updateLivePanel(snapshot) {
       const state = snapshot?.live_state || {};
       const runtime = state.runtime_state || 'disconnected';
+      if (['ended', 'ended_with_incomplete_processing', 'failed'].includes(runtime)) {
+        $('live-all-participants-consented').checked = false;
+      }
       const badge = $('live-runtime-badge');
       badge.textContent = runtime;
       badge.className = `live-status-badge ${['capturing', 'connected'].includes(runtime) ? 'active' : ['stopping', 'connecting'].includes(runtime) ? 'busy' : state.error ? 'error' : ''}`;
@@ -510,12 +517,15 @@
       const continuous = state.mode === 'continuous' || liveMode === 'continuous';
       $('live-start').disabled = active;
       $('live-start-continuous').disabled = active;
+      $('live-pilot-audio-consent').hidden = !state.pilot_audio?.enabled;
+      $('live-pilot-audio-consent').style.display = state.pilot_audio?.enabled ? 'inline-flex' : 'none';
       $('live-stop').disabled = continuous ? true : !['connected', 'capturing'].includes(runtime);
       $('live-commit').disabled = !continuous || runtime !== 'active' || !liveSocket || liveSocket.readyState !== WebSocket.OPEN;
       $('live-end').disabled = !continuous || !['active', 'finalizing'].includes(runtime);
       $('live-retry').disabled = continuous || !state.final_transcript || state.analyzer_status === 'analyzing';
       const possibleGapCount = state.metrics?.possible_evidence_gap_count || 0;
       if (state.error) setStatus(`[${state.error.code}] ${state.error.message}`, true);
+      else if (state.pilot_audio?.error) setStatus('会議は継続中ですが録音に欠落があります。評価担当者に知らせてください。', true);
       else if (possibleGapCount) setStatus(`音声認識できなかった可能性のある短い区間が${possibleGapCount}件あります。会議は継続できます。`, true);
       else if (state.e2e_latency_ms !== null && state.e2e_latency_ms !== undefined) {
         setStatus(`Live complete · audio_end → map_rendered ${state.e2e_latency_ms} ms`);
@@ -664,6 +674,10 @@
 
     async function startLiveSession(mode = 'one_utterance') {
       if (liveSocket) return;
+      if (mode === 'continuous' && !$('live-pilot-audio-consent').hidden && !$('live-all-participants-consented').checked) {
+        setStatus('参加者全員の録音同意を確認してから開始してください。', true);
+        return;
+      }
       try {
         liveMode = mode;
         liveEventLines = [];
@@ -672,7 +686,7 @@
         const started = await getJson('/api/live/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode, controller_id: controllerInstanceId() }),
+          body: JSON.stringify({ mode, controller_id: controllerInstanceId(), all_participants_consented: mode === 'continuous' && $('live-all-participants-consented').checked }),
         });
         applyLiveSnapshot(started);
         liveSocket = new WebSocket(started.websocket_url);

@@ -157,7 +157,34 @@ The PVC `ronro-pilot-evaluation` requests 1Gi with `ReadWriteOnce`. It is used f
 /data/evaluation/live/reports/
 ```
 
-Raw audio is not persisted by default. If an Evaluation session has explicit consent for raw audio, it may be stored as an Evaluation artifact under the existing application policy; consent is not granted by the manifest.
+Pilot recording is a separate, temporary data path. The pilot manifest
+creates a 10Gi `ronro-pilot-audio` PVC mounted at `/data/pilot-audio` and sets
+`PILOT_RAW_AUDIO_ENABLED=true`. The running image must include the recording
+implementation before this manifest is applied. The server refuses a new
+continuous session unless the facilitator attests that **all participants**
+were informed and explicitly consented. The browser checkbox alone is not a
+substitute for the facilitator's actual consent process.
+
+Accepted PCM16LE mono frames (24 kHz) are written privately under
+`/data/pilot-audio/recordings/live-<id>/audio.pcm` (file mode 0600, directory
+0700). Metadata gives format, consent attestation, dates, byte count, and
+capture-interruption markers but no transcript, audio, or device ID. A gap
+marker has unknown duration: the PCM file must not be treated as continuous
+across that point. No HTTP download path is provided. Limit
+PVC/Kubernetes administrative access to evaluation personnel; the filesystem
+mode does not by itself enforce organizational access control. Do not copy
+recordings into Git, CI artifacts, public logs, or the normal evaluation PVC.
+
+Recordings expire seven days after session end; cleanup runs at startup, before
+new sessions, and every five minutes while the service is running. If the service is down
+at expiration, deletion occurs on next startup. Files from a crash before
+normal close are also eligible after seven days. Verify PVC capacity and
+available free space before rollout: 24 kHz 16-bit mono is about 173 MB/hour,
+so 10Gi holds roughly 58 hours before reserve and other overhead. A 128MiB
+reserve stops recording before the volume is full. Recording failure is
+flagged to the facilitator without ending the meeting; that recording must
+not be called complete. Standard production must set
+`PILOT_RAW_AUDIO_ENABLED=false` and omit the audio PVC.
 
 ## Deployment strategy and resources
 

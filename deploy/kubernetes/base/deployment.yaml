@@ -80,11 +80,16 @@ spec:
           volumeMounts:
             - name: evaluation
               mountPath: /data/evaluation
+            - name: pilot-audio
+              mountPath: /data/pilot-audio
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: evaluation
           persistentVolumeClaim:
             claimName: ronro-pilot-evaluation
+        - name: pilot-audio
+          persistentVolumeClaim:
+            claimName: ronro-pilot-audio
         - name: tmp
           emptyDir: {}

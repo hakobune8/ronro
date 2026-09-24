@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 from prototype.shared_projection import SharedProjection, select_shared
-from prototype.layout import recent_topic_flow
+from prototype.layout import recent_topic_flow, recent_discussion_flow
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -81,6 +81,27 @@ class SharedProjectionTests(unittest.TestCase):
         self.assertEqual(len(flow),4)
         self.assertEqual(flow[0]['topic_id'],flow[-1]['topic_id'])
 
+    def test_within_topic_discussion_flow_updates_without_inventing_topic(self):
+        graph = {
+            'current_topic': {'primary_topic_id': 'topic-1'},
+            'nodes': [
+                {'id': 'topic-1', 'type': 'topic', 'status': 'active', 'label': '会議の進め方'},
+                {'id': 'n1', 'type': 'idea', 'status': 'active', 'label': '開始時刻を確認', 'source_event_ids': ['e1']},
+                {'id': 'n2', 'type': 'concern', 'status': 'active', 'label': '参加者への連絡', 'source_event_ids': ['e2']},
+                {'id': 'n3', 'type': 'option', 'status': 'active', 'label': '通知方法を変える', 'source_event_ids': ['e3']},
+                {'id': 'n4', 'type': 'idea', 'status': 'active', 'label': '新しい話題の入口', 'source_event_ids': ['e4']},
+            ],
+            'edges': [{'type': 'contains', 'source_node_id': 'topic-1', 'target_node_id': node_id}
+                      for node_id in ('n1', 'n2', 'n3')],
+        }
+        events = [{'event_id': f'e{i}', 'sequence': i, 'event_type': 'node_detected', 'payload': {}}
+                  for i in (1, 2, 3, 4)]
+        flow = recent_discussion_flow(graph, events, {'n3': '通知の方法を変える'})
+        self.assertEqual([item['node_id'] for item in flow], ['n4', 'n3', 'n2'])
+        self.assertEqual(flow[1]['label'], '通知の方法を変える')
+        self.assertEqual(flow, recent_discussion_flow(graph, events, {'n3': '通知の方法を変える'}))
+        self.assertEqual(recent_topic_flow(events, graph), [])
+
     @unittest.skipUnless(shutil.which('node'), 'Node.js needed for DOM logic smoke')
     def test_shared_dom_logic_without_browser_rendering(self):
         source=(ROOT/'prototype/web/shared.html').read_text()
@@ -98,6 +119,12 @@ const rail={candidate:{node_ids:['a'],overflow:2},confirmed:{node_ids:['a'],over
 const snapshot={state:{graph},map:{shared:{slots:['a',null,null,null,null,null],overflow:3,rail},recent_flow:[{topic_id:'t1',label:'交通'},{topic_id:'t2',label:'住民参加'},{topic_id:'t1',label:'交通'}]},live_state:{runtime_state:'active'}};
 renderShared(snapshot);
 assert(!element('shared-main').innerHTML.includes('just-updated'));
+snapshot.map.recent_discussion_flow=[{node_id:'a',label:'今の論点'}];renderShared(snapshot);
+assert(element('discussion-flow-list').innerHTML.includes('今の論点'));
+assert(element('flow-list').innerHTML.includes('交通'));
+snapshot.live_state.websocket_state='disconnected';renderShared(snapshot);
+assert(element('shared-status').textContent.includes('再接続'));
+snapshot.live_state.websocket_state='connected';renderShared(snapshot);
 assert(element('shared-main').innerHTML.includes('確定事項'));
 assert(element('shared-main').innerHTML.includes('決定候補'));
 assert(element('shared-main').innerHTML.includes('ほか3件'));
@@ -178,6 +205,19 @@ renderShared(snapshot);
 assert(!element('.flow-band').hidden); // One Topic still describes the macro location.
 assert(element('shared-main').innerHTML.includes('focused-map'));
 assert(element('flow-list').innerHTML.startsWith('<span class="flow-item current">交通</span>'));
+graph.nodes.push({id:'point',type:'idea',label:'現在の論点',status:'active'},
+                 {id:'prior',type:'idea',label:'直前の論点',status:'active'});
+snapshot.map.semantic_focus={nodes:[{id:'point',position:'focus',label:'現在の論点'}],focus_id:'point',
+  latest_detail:{id:'point',canonical:'現在の論点'},argument_edges:[]};
+snapshot.map.recent_discussion_flow=[{node_id:'point',label:'現在の論点'},
+  {node_id:'prior',label:'直前の論点'}];
+renderShared(snapshot);
+assert(element('discussion-flow-list').innerHTML.includes('直前の論点'));
+assert(!element('discussion-flow-list').innerHTML.includes('現在の論点'));
+assert(!element('shared-main').innerHTML.includes('新しく加わったこと'));
+assert(element('shared-main').innerHTML.includes('現在の論点'));
+snapshot.map.semantic_focus={nodes:[],focus_id:null,latest_detail:null,argument_edges:[]};
+snapshot.map.recent_discussion_flow=[];
 snapshot.map.recent_flow.push({topic_id:'t2',label:'住民参加'},{topic_id:'t1',label:'交通'});
 renderShared(snapshot);
 assert.equal((element('flow-list').innerHTML.match(/flow-item current/g)||[]).length,1);

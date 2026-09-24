@@ -78,7 +78,11 @@
 
     <section class="privacy">
       <strong>音声について</strong><br>
-      会議中はマイクを使用し、発話を音声認識して論点図を更新します。録音データは既定で永続保存しません。Controllerは前面表示し、画面をLockしないでください。
+      会議中はマイクを使用し、発話を音声認識して論点図を更新します。パイロット録音が有効な場合、同意を得た音声を評価担当者のみが確認できる場所に7日間保存します。Controllerは前面表示し、画面をLockしないでください。
+      <label id="pilot-audio-consent" hidden style="display:block;margin-top:12px;font-size:16px;color:var(--ink)">
+        <input id="all-participants-consented" type="checkbox" style="width:20px;height:20px;vertical-align:middle">
+        参加者全員に録音の目的・7日間の保存・評価担当者限定の利用を説明し、全員の明示的な同意を確認した
+      </label>
     </section>
 
     <footer class="footer">普段どおりに話してください。論点図は議論とともに更新されます。</footer>
@@ -198,6 +202,11 @@
       if (!stream) {
         stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       }
+      // A reconnect continues the same Session. Rebase the browser framing
+      // from the server's accepted sequence instead of restarting at zero.
+      const live = latestSnapshot?.live_state || {};
+      chunkSequence = Math.max(0, Number(live.audio_chunk_sequence ?? -1) + 1);
+      sentSamples = Math.max(0, Math.round(Number(live.audio_end_seconds || 0) * TARGET_RATE));
       const track = stream.getAudioTracks()[0];
       if (track && socket?.readyState === WebSocket.OPEN) {
         const settings = track.getSettings ? track.getSettings() : {};
@@ -233,6 +242,9 @@
       latestSnapshot = snapshot;
       const live = snapshot?.live_state || {};
       const state = live.runtime_state || 'idle';
+      if (['ended', 'ended_with_incomplete_processing', 'failed'].includes(state)) {
+        $('all-participants-consented').checked = false;
+      }
       const controller = live.controller || {};
       const otherController = controller.status === 'owned_by_other';
       const connected = live.websocket_state === 'connected';
@@ -284,15 +296,22 @@
       $('reconnect-button').hidden = !(state === 'active' && !connected && !otherController);
       $('end-button').hidden = !(['active', 'starting'].includes(state) && !otherController);
       $('end-button').disabled = !(['active', 'starting'].includes(state) && !otherController);
+      const gapCount = live.metrics?.possible_evidence_gap_count || 0;
+      const audioPolicy = live.pilot_audio || {};
+      const consentLabel = $('pilot-audio-consent');
+      consentLabel.hidden = !audioPolicy.enabled;
+      consentLabel.style.display = audioPolicy.enabled ? 'block' : 'none';
+      if (audioPolicy.error) {
+        setNotice('会議は継続中ですが、録音に欠落があります。評価担当者に知らせてください。', true);
+        return;
+      }
       if (otherController || state === 'ended' || state === 'ended_with_incomplete_processing') {
-        const gapCount = live.metrics?.possible_evidence_gap_count || 0;
         setNotice(otherController ? '別の端末で会議を操作中です。' :
           gapCount ? `音声認識できなかった可能性のある短い区間が${gapCount}件あります。論点図を確認してください。` :
           '会議の論点図を確認できます。', Boolean(!otherController && gapCount));
       } else if (state === 'active' && document.visibilityState !== 'visible') {
         setNotice('Controllerがバックグラウンドになっています。前面表示に戻してください。', true);
       } else if (!live.error) {
-        const gapCount = live.metrics?.possible_evidence_gap_count || 0;
         setNotice(gapCount ? `音声認識できなかった可能性のある短い区間が${gapCount}件あります。会議は継続中です。` : '', Boolean(gapCount));
       }
     }
@@ -339,13 +358,9 @@
           desiredActive = false;
           await stopCapture();
           setNotice(error.message, true);
-          try {
-            await jsonRequest('/api/live/stop', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ controller_id: getControllerId() }),
-            });
-          } catch (_) {}
+          // Microphone permission/device failures must not end the meeting.
+          // Keep the Session and Graph available for an explicit retry.
+          if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'capture_failure' }));
           socket?.close();
         }
       };
@@ -354,6 +369,9 @@
           const event = JSON.parse(message.data);
           if (event.snapshot) render(event.snapshot);
           if (event.type === 'error') setNotice(event.message || '音声接続でエラーが発生しました。', true);
+          if (event.type === 'capture_interrupted') {
+            setNotice('音声接続を再開しています。この間の発話は記録できていない可能性があります。', true);
+          }
           if (event.type === 'session_ended') {
             desiredActive = false;
             stopCapture();
@@ -367,8 +385,8 @@
         }
       };
       socket.onerror = () => setNotice('音声接続を確認しています。', true);
-      socket.onclose = () => {
-        stopCapture();
+      socket.onclose = async () => {
+        await stopCapture();
         socket = null;
         if (desiredActive) scheduleReconnect();
         refresh();
@@ -377,6 +395,10 @@
 
     async function startSession() {
       if (latestSnapshot?.live_state?.controller?.status === 'owned_by_other') return;
+      if (latestSnapshot?.live_state?.pilot_audio?.enabled && !$('all-participants-consented').checked) {
+        setNotice('参加者全員の同意を確認してから開始してください。', true);
+        return;
+      }
       desiredActive = true;
       setNotice('マイクの使用許可を確認しています。', false);
       try {
@@ -385,7 +407,7 @@
         const started = await jsonRequest('/api/live/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: 'continuous', controller_id: getControllerId() }),
+          body: JSON.stringify({ mode: 'continuous', controller_id: getControllerId(), all_participants_consented: $('all-participants-consented').checked }),
         });
         render(started);
         connectSocket(started.websocket_url);

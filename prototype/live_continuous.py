@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import logging
 import threading
 import time
 from pathlib import Path
@@ -27,6 +28,9 @@ from .replay import ReplayRunner
 from .schema import SchemaValidator
 from .stt import RawSTTSegment
 from .stt_normalization_v2 import normalize_segments_v2
+
+
+_logger = logging.getLogger(__name__)
 
 
 def utc_now() -> str:
@@ -117,6 +121,7 @@ class LiveContinuousSession:
         self._empty_final_count = 0
         self._possible_evidence_gap_count = 0
         self._possible_evidence_gap_seconds = 0.0
+        self._capture_interruptions: list[dict[str, Any]] = []
         self._transport_failure_count = 0
         self._forced_incomplete = False
         self._drain_result: dict[str, Any] | None = None
@@ -369,6 +374,45 @@ class LiveContinuousSession:
             self._possible_evidence_gap_count += 1
             self._possible_evidence_gap_seconds += duration_seconds
 
+    def record_capture_interruption(self, code: str, *, unresolved_items: int = 0) -> None:
+        """Keep the meeting open, but never silently discard an uncertain audio region."""
+
+        with self._lock:
+            if self.runtime_state not in {"active", "starting"}:
+                return
+            pending_seconds = self.audio_buffer_duration_seconds() if self._current_audio_bytes else 0.0
+            # Even with no locally buffered signal, speech during the
+            # disconnect is unknowable. A zero measured duration is not
+            # evidence that the gap was silent.
+            has_gap = bool(self.runtime_state == "active" or self._current_audio_has_meaningful_signal or unresolved_items)
+            self._capture_interruptions.append({
+                "code": code,
+                "at": utc_now(),
+                "last_frame_sequence": self.audio_chunk_sequence,
+                "pending_audio_seconds": round(pending_seconds, 3),
+                "unresolved_items": unresolved_items,
+                "possible_evidence_gap": has_gap,
+                "gap_duration_unknown": True,
+            })
+            _logger.warning("live_capture_interruption code=%s last_frame_sequence=%s pending_audio_seconds=%.3f unresolved_items=%s possible_evidence_gap=%s",
+                            code, self.audio_chunk_sequence, pending_seconds, unresolved_items, has_gap)
+            self._stt_failure_count += 1
+            self._transport_failure_count += 1
+            if has_gap:
+                self._possible_evidence_gap_count += 1
+                self._possible_evidence_gap_seconds += pending_seconds
+            # A new Provider connection cannot inherit this connection's
+            # uncommitted PCM or item ledger. Keep the gap auditable instead.
+            self._current_audio_bytes.clear()
+            self._pending_audio_frames.clear()
+            self._current_audio_start_seconds = self.audio_end_seconds or 0.0
+            self._current_audio_start_sequence = None
+            self._current_audio_end_sequence = None
+            self._current_audio_has_meaningful_signal = False
+            self.partial_transcript = ""
+            self.transport_connected = False
+            self.stt_state = "disconnected"
+
     def process_final_transcript(
         self,
         *,
@@ -575,6 +619,7 @@ class LiveContinuousSession:
                 "empty_final_count": self._empty_final_count,
                 "possible_evidence_gap_count": self._possible_evidence_gap_count,
                 "possible_evidence_gap_seconds": round(self._possible_evidence_gap_seconds, 3),
+                "capture_interruption_count": len(self._capture_interruptions),
                 "analyzer_calls": len([item for item in queue["items"] if item["analyzer_start_at"]]),
                 "analyzer_failures": queue["failed"],
                 "queue_max_depth": queue["max_depth"],
@@ -632,6 +677,8 @@ class LiveContinuousSession:
                     "render_status": "Updating" if coalescing["render_pending"] else "Updated",
                     "map_updated": coalescing["rendered_revision"] == graph["revision"],
                     "audio_chunk_sequence": self.audio_chunk_sequence,
+                    "audio_end_seconds": self.audio_end_seconds,
+                    "capture_interruptions": copy.deepcopy(self._capture_interruptions),
                     "audio_buffer_duration_seconds": round(self.audio_buffer_duration_seconds(), 6),
                     "meaningful_audio_buffer": self._current_audio_has_meaningful_signal,
                     "audio_diagnostics": copy.deepcopy(self._audio_diagnostics),
