@@ -20,7 +20,7 @@ WORKDIR /app
 COPY requirements-dev.txt ./requirements-dev.txt
 RUN pip install --no-cache-dir --disable-pip-version-check -r requirements-dev.txt \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
-    && mkdir -p /data/evaluation/live/sessions /data/evaluation/live/reports /tmp \
+    && mkdir -p /data/evaluation/live/sessions /data/evaluation/live/reports /data/pilot-audio/recordings /tmp \
     && chown -R appuser:appuser /data /tmp
 
 COPY prototype ./prototype

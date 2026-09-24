@@ -48,6 +48,8 @@ class LiveWebSocketGateway:
         transport_failed = False
         try:
             snapshot = self.manager.mark_connected(controller_id=controller_id)
+            audio_offset_seconds = float(snapshot.get("live_state", {}).get("audio_end_seconds") or 0.0)
+            frame_offset = int(snapshot.get("live_state", {}).get("audio_chunk_sequence", -1)) + 1
             await connection.send(_json({"type": "runtime_snapshot", "snapshot": snapshot}))
             provider = OpenAIRealtimeTranscriptionClient(self.stt_config)
             await provider.connect()
@@ -58,23 +60,34 @@ class LiveWebSocketGateway:
             if getattr(session, "mode", "one_utterance") == "continuous":
                 snapshot = self.manager.activate()
                 await connection.send(_json({"type": "live_active", "snapshot": snapshot}))
-                await self._capture_continuous(connection, provider, controller_id=controller_id)
+                await self._capture_continuous(connection, provider, controller_id=controller_id,
+                                               audio_offset_seconds=audio_offset_seconds,
+                                               frame_offset=frame_offset)
             else:
                 await self._capture(connection, provider)
         except RealtimeSTTFailure as exc:
-            transport_failed = True
-            snapshot = self.manager.fail(exc.code, exc.message)
+            transport_failed = getattr(session, "mode", None) != "continuous" or session.runtime_state == "finalizing"
+            snapshot = (self.manager.fail(exc.code, exc.message) if transport_failed else
+                        self.manager.record_capture_interruption(exc.code))
             await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message, "snapshot": snapshot})
+            if not transport_failed:
+                await connection.close()
         except PrototypeError as exc:
             await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message})
         except (AudioFrameError, ValueError, TypeError) as exc:
-            transport_failed = True
-            snapshot = self.manager.fail("audio_transport_error", str(exc))
+            transport_failed = getattr(session, "mode", None) != "continuous" or session.runtime_state == "finalizing"
+            snapshot = (self.manager.fail("audio_transport_error", str(exc)) if transport_failed else
+                        self.manager.record_capture_interruption("audio_transport_error"))
             await self._safe_send(connection, {"type": "error", "code": "audio_transport_error", "message": str(exc), "snapshot": snapshot})
+            if not transport_failed:
+                await connection.close()
         except Exception as exc:  # Transport errors must not touch the Graph.
-            transport_failed = True
-            snapshot = self.manager.fail("live_transport_error", str(exc))
+            transport_failed = getattr(session, "mode", None) != "continuous" or session.runtime_state == "finalizing"
+            snapshot = (self.manager.fail("live_transport_error", str(exc)) if transport_failed else
+                        self.manager.record_capture_interruption("live_transport_error"))
             await self._safe_send(connection, {"type": "error", "code": "live_transport_error", "message": str(exc), "snapshot": snapshot})
+            if not transport_failed:
+                await connection.close()
         finally:
             try:
                 if provider is not None:
@@ -168,6 +181,8 @@ class LiveWebSocketGateway:
         provider: OpenAIRealtimeTranscriptionClient,
         *,
         controller_id: str | None,
+        audio_offset_seconds: float = 0.0,
+        frame_offset: int = 0,
     ) -> None:
         """Run audio input and provider events concurrently until Drain."""
 
@@ -183,6 +198,10 @@ class LiveWebSocketGateway:
                     await provider_events.put(await provider.receive_event())
             except RealtimeSTTFailure as exc:
                 await provider_events.put({"type": "stt_error", "code": exc.code, "message": exc.message})
+            except Exception as exc:
+                _logger.warning("provider_reader_interrupted %s", type(exc).__name__)
+                await provider_events.put({"type": "stt_error", "code": "provider_reader_error",
+                                           "message": "Realtime transcription connection interrupted"})
             finally:
                 reader_done.set()
 
@@ -195,11 +214,14 @@ class LiveWebSocketGateway:
                     if current.stt_state == 'error':
                         await self._drain_and_send(connection)
                         return
-                    current.retire_committed_audio(turns.cursor / 24000)
+                    if current.stt_state == 'disconnected':
+                        await connection.close()
+                        return
+                    current.retire_committed_audio(audio_offset_seconds + turns.cursor / 24000)
                     commit_pending = bool(turns.intents)
                     if turns.expired(self.stt_config.timeout_seconds):
-                        self.manager.fail('provider_item_timeout', 'An audio item did not resolve before its deadline')
-                        await self._drain_and_send(connection)
+                        await self._interrupt_capture(connection, 'provider_item_timeout',
+                                                      unresolved_items=len(turns.intents))
                         return
                     if stop_seen and current.stt_state != 'error':
                         await self._request_continuous_commit(provider, connection, boundary_reason='session_end')
@@ -302,6 +324,9 @@ class LiveWebSocketGateway:
                             track = control.get("track", {})
                             snapshot = self.manager.record_audio_diagnostics(track if isinstance(track, dict) else {})
                             await self._safe_send(connection, {"type": "audio_diagnostics_recorded", "snapshot": snapshot})
+                        elif control_type == "capture_failure":
+                            await self._interrupt_capture(connection, "browser_capture_failure")
+                            return
                         elif control_type == "commit" and not stop_seen and not commit_pending:
                             commit_pending = await self._request_continuous_commit(
                                 provider, connection, boundary_reason="explicit_commit"
@@ -317,10 +342,11 @@ class LiveWebSocketGateway:
                             if not commit_pending and not self._provider_has_pending_vad_completion(provider):
                                 self.manager.mark_stt_finalization_complete()
                         elif control_type not in {"commit", "stop"}:
-                            await self._safe_send(connection, {"type": "error", "code": "unexpected_control_message", "message": "Supported controls are audio_diagnostics, commit and stop"})
+                            await self._safe_send(connection, {"type": "error", "code": "unexpected_control_message", "message": "Supported controls are audio_diagnostics, capture_failure, commit and stop"})
 
                 if provider_task in done:
-                    event = provider_task.result()
+                    event = self._with_audio_offset(provider_task.result(), audio_offset_seconds,
+                                                    frame_offset=frame_offset)
                     event_type = event.get("type")
                     diagnostic("application_handle", session=self.manager.current(), provider=provider, item_id=event.get("item_id"), event_id=event.get("event_id"), event_type=event_type, commit_pending=commit_pending, pending_boundary_reason=pending_boundary_reason, item_context=event.get('_turn'))
                     if event_type == "partial_transcript":
@@ -403,24 +429,9 @@ class LiveWebSocketGateway:
                                 "turn": event.get("_turn"),
                                 "transport": event.get("_transport"),
                             }))
-                            self.manager.fail(code, str(event.get("message", "Provider error")))
-                            await self._safe_send(
-                                connection,
-                                {
-                                    "type": "error",
-                                    "code": event.get("code"),
-                                    "message": event.get("message"),
-                                    "provider_item_id": event.get("item_id"),
-                                    "provider_event_id": event.get("event_id"),
-                                    "provider_transcript_id": event.get("transcript_id"),
-                                    "provider_commit_id": event.get("commit_id"),
-                                    "transport_diagnostics": event.get("_transport"),
-                                    "snapshot": self.manager.snapshot(),
-                                },
-                            )
-                            stop_seen = True
-                            commit_pending = False
-                            pending_boundary_reason = None
+                            await self._interrupt_capture(connection, code,
+                                unresolved_items=len(turns.intents) if turns is not None else 0)
+                            return
 
                 await self._send_coalesced_render(connection)
         finally:
@@ -485,9 +496,43 @@ class LiveWebSocketGateway:
             )
             return True
         except RealtimeSTTFailure as exc:
-            self.manager.fail(exc.code, exc.message)
+            if getattr(session, "mode", None) == "continuous" and session.runtime_state == "active":
+                self.manager.record_capture_interruption(exc.code)
+            else:
+                self.manager.fail(exc.code, exc.message)
             await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message, "snapshot": self.manager.snapshot()})
             return False
+
+    async def _interrupt_capture(self, connection: ServerConnection, code: str,
+                                 *, unresolved_items: int = 0) -> None:
+        if self.manager.current().runtime_state == "finalizing":
+            self.manager.fail(code, "Audio could not be finalized at session end")
+            await self._drain_and_send(connection)
+            return
+        snapshot = self.manager.record_capture_interruption(code, unresolved_items=unresolved_items)
+        _logger.warning("capture_interrupted %s", _json({
+            "code": code, "unresolved_items": unresolved_items,
+            "last_frame_sequence": snapshot["live_state"]["audio_chunk_sequence"],
+            "pending_audio_seconds": snapshot["live_state"]["capture_interruptions"][-1]["pending_audio_seconds"],
+        }))
+        await self._safe_send(connection, {"type": "capture_interrupted", "code": code, "snapshot": snapshot})
+        await connection.close()
+
+    @staticmethod
+    def _with_audio_offset(event: dict[str, Any], offset_seconds: float,
+                           *, frame_offset: int = 0) -> dict[str, Any]:
+        """Translate one Provider connection's local item range to Session time."""
+        turn = event.get("_turn")
+        if not isinstance(turn, dict) or (not offset_seconds and not frame_offset):
+            return event
+        shifted = dict(turn)
+        for key in ("audio_start", "audio_end"):
+            if shifted.get(key) is not None:
+                shifted[key] = round(float(shifted[key]) + offset_seconds, 6)
+        for key in ("frame_start", "frame_end"):
+            if shifted.get(key) is not None:
+                shifted[key] = int(shifted[key]) + frame_offset
+        return {**event, "_turn": shifted}
 
     @staticmethod
     def _is_recoverable_short_vad_empty(event: dict[str, Any], *, config: RealtimeSTTConfig) -> bool:

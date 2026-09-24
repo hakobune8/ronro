@@ -35,4 +35,6 @@ data:
 
   EVALUATION_ROOT: /data/evaluation/live/sessions
   EVALUATION_REPORT_ROOT: /data/evaluation/live/reports
+  PILOT_RAW_AUDIO_ENABLED: "true"
+  PILOT_AUDIO_ROOT: /data/pilot-audio/recordings
   LIVE_WEBSOCKET_PATH: /live

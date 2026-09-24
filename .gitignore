@@ -28,6 +28,7 @@ secret*.yaml
 # initial public package until provenance/re-distribution review is complete.
 evaluation/live/preflight/
 evaluation/live/sessions/
+evaluation/live/recordings/
 evaluation/live/*real*.json
 evaluation/30min/
 evaluation/real-analyzer/

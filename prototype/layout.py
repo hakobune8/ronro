@@ -279,6 +279,33 @@ def recent_topic_flow(
     return flow[-limit:]
 
 
+def recent_discussion_flow(
+    graph: dict[str, Any], events: Iterable[dict[str, Any]],
+    display_labels: dict[str, str] | None = None, limit: int = 3,
+) -> list[dict[str, Any]]:
+    """Recent within-Topic points; chronology, never an inferred semantic edge."""
+
+    labels = display_labels or {}
+    sequence = {event["event_id"]: event["sequence"] for event in events}
+    current_topic_id = graph.get("current_topic", {}).get("primary_topic_id")
+    topic_members = {edge["target_node_id"] for edge in graph.get("edges", [])
+                     if edge["type"] in {"contains", "has_option"}
+                     and edge["source_node_id"] == current_topic_id}
+    any_topic_members = {edge["target_node_id"] for edge in graph.get("edges", [])
+                         if edge["type"] in {"contains", "has_option"}}
+    candidates = []
+    for node in graph.get("nodes", []):
+        if node["type"] not in {"idea", "option", "concern"} or node["status"] in {"archived", "parked"}:
+            continue
+        if current_topic_id and node["id"] not in topic_members and node["id"] in any_topic_members:
+            continue
+        last_sequence = max((sequence.get(event_id, 0) for event_id in node.get("source_event_ids", [])), default=0)
+        if last_sequence:
+            candidates.append({"node_id": node["id"], "label": labels.get(node["id"]) or node["label"],
+                               "sequence": last_sequence})
+    return sorted(candidates, key=lambda item: (-item["sequence"], item["node_id"]))[:limit]
+
+
 def map_projection(
     state: dict[str, Any],
     events: Iterable[dict[str, Any]],
@@ -308,6 +335,7 @@ def map_projection(
         "display_labels": display_labels,
         "semantic_focus": focused_flow(graph, event_list, semantic_labels),
         "recent_flow": recent_topic_flow(event_list, graph),
+        "recent_discussion_flow": recent_discussion_flow(graph, event_list, semantic_labels),
         "counts": counts,
         "observation": None,
         **({"shared": layout.shared_projection.project(state, event_list)} if "evidence" in state and "utterances" in state else {}),

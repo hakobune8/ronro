@@ -5,6 +5,7 @@ resources:
   - namespace.yaml
   - configmap.yaml
   - pvc.yaml
+  - pilot-audio-pvc.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml

@@ -211,6 +211,37 @@ class FakeGapThenSpeechProvider(FakeShortVADGapProvider):
                                    "text": "次の論点について話します"})
 
 
+class FakeLongVADGapProvider(FakeShortVADGapProvider):
+    async def append_audio(self, pcm16le: bytes):
+        await self.events.put({
+            "type": "stt_error", "code": "empty_final_transcript",
+            "item_id": "long-vad-item", "message": "Provider completed a turn without transcript text",
+            "_turn": {"range_known": True, "audio_start": 0.0, "audio_end": 4.2,
+                      "boundary_reason": "server_vad", "local_commit_sequence": None,
+                      "delta_count": 0},
+        })
+
+
+class FakeReconnectProvider(FakeRealtimeProvider):
+    connections = 0
+
+    def __init__(self, config):
+        super().__init__(config)
+        type(self).connections += 1
+        self.connection_number = type(self).connections
+
+    async def append_audio(self, pcm16le: bytes):
+        if self.connection_number == 1:
+            await self.events.put({"type": "stt_error", "code": "provider_reader_error",
+                                   "message": "transient provider interruption"})
+        else:
+            await self.events.put({"type": "final_transcript", "item_id": "resumed-item",
+                                   "text": "次の論点について話します"})
+
+    async def commit(self):
+        self.commits += 1
+
+
 def make_session(
     analyzer: ContinuousAnalyzer | None = None,
     *,
@@ -257,6 +288,81 @@ def wait_settled(session: LiveContinuousSession, count: int, timeout: float = 5.
 
 
 class LiveContinuousSessionTests(unittest.TestCase):
+    def test_reconnected_provider_item_ranges_are_session_relative(self) -> None:
+        raw = {'type': 'final_transcript', '_turn': {'range_known': True,
+               'audio_start': 0.2, 'audio_end': 0.8, 'frame_start': 2, 'frame_end': 7}}
+        shifted = LiveWebSocketGateway._with_audio_offset(raw, 14.0, frame_offset=140)
+        self.assertEqual((shifted['_turn']['audio_start'], shifted['_turn']['audio_end']), (14.2, 14.8))
+        self.assertEqual((shifted['_turn']['frame_start'], shifted['_turn']['frame_end']), (142, 147))
+        self.assertEqual(raw['_turn']['audio_start'], 0.2)
+
+    def test_long_empty_vad_interrupts_capture_without_ending_meeting(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas", analyzer_factory=lambda: ContinuousAnalyzer())
+        manager.start_mode("continuous")
+        connection = FakeConnection()
+        connection.incoming.put_nowait(encode_audio_frame(AudioChunk(0, 0.0, b"\x10\x00" * 240)))
+        config = RealtimeSTTConfig(endpoint="wss://example.invalid/realtime", api_key="test-only",
+                                   model="gpt-transcribe", language="ja", prompt="test", keywords=(),
+                                   timeout_seconds=1.0, finalization_mode="server_vad_bounded",
+                                   empty_vad_policy="warn_short_no_delta")
+
+        async def run():
+            gateway = LiveWebSocketGateway(manager, stt_config=config)
+            with patch("prototype.live_transport.OpenAIRealtimeTranscriptionClient", FakeLongVADGapProvider):
+                await asyncio.wait_for(gateway(connection), timeout=2)
+
+        asyncio.run(run())
+        state = manager.current().snapshot()["live_state"]
+        self.assertEqual(state["runtime_state"], "active")
+        self.assertEqual(state["metrics"]["possible_evidence_gap_count"], 1)
+        self.assertEqual(state["capture_interruptions"][0]["code"], "empty_final_transcript")
+        self.assertTrue(any(event.get("type") == "capture_interrupted" for event in connection.sent))
+        manager.current().close()
+
+    def test_facilitator_can_end_after_recoverable_disconnect(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas", analyzer_factory=lambda: ContinuousAnalyzer())
+        manager.start_mode("continuous")
+        manager.mark_connected()
+        manager.activate()
+        manager.record_capture_interruption("provider_reader_error")
+        ended = manager.request_stop()
+        self.assertEqual(ended["live_state"]["runtime_state"], "ended")
+        self.assertEqual(ended["live_state"]["metrics"]["possible_evidence_gap_count"], 1)
+        manager.current().close()
+
+    def test_provider_failure_keeps_session_and_reconnects_with_next_frame(self) -> None:
+        FakeReconnectProvider.connections = 0
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas", analyzer_factory=lambda: ContinuousAnalyzer())
+        manager.start_mode("continuous")
+        config = RealtimeSTTConfig(endpoint="wss://example.invalid/realtime", api_key="test-only",
+                                   model="gpt-transcribe", language="ja", prompt="test", keywords=(),
+                                   timeout_seconds=1.0, finalization_mode="server_vad_bounded")
+
+        async def run() -> tuple[FakeConnection, FakeConnection]:
+            first = FakeConnection()
+            first.incoming.put_nowait(encode_audio_frame(AudioChunk(0, 0.0, b"\x10\x00" * 240)))
+            second = FakeConnection()
+            second.incoming.put_nowait(encode_audio_frame(AudioChunk(1, 0.01, b"\x10\x00" * 240)))
+            gateway = LiveWebSocketGateway(manager, stt_config=config)
+            with patch("prototype.live_transport.OpenAIRealtimeTranscriptionClient", FakeReconnectProvider):
+                await asyncio.wait_for(gateway(first), timeout=2)
+                interrupted = manager.snapshot()["live_state"]
+                self.assertEqual(interrupted["runtime_state"], "active")
+                self.assertEqual(interrupted["metrics"]["capture_interruption_count"], 1)
+                self.assertEqual(interrupted["audio_chunk_sequence"], 0)
+                self.assertAlmostEqual(interrupted["audio_end_seconds"], 0.01)
+                self.assertEqual(interrupted["metrics"]["possible_evidence_gap_count"], 1)
+                await asyncio.wait_for(gateway(second), timeout=2)
+            return first, second
+
+        first, second = asyncio.run(run())
+        state = manager.current().snapshot()["live_state"]
+        self.assertTrue(any(event.get("type") == "capture_interrupted" for event in first.sent))
+        self.assertEqual(state["runtime_state"], "ended")
+        self.assertEqual(state["final_utterance_count"], 1)
+        self.assertEqual(state["audio_chunk_sequence"], 1)
+        self.assertEqual(state["metrics"]["capture_interruption_count"], 1)
+        manager.current().close()
     def test_short_vad_empty_policy_is_explicit_and_item_scoped(self) -> None:
         base = RealtimeSTTConfig(
             endpoint="wss://example.invalid/realtime", api_key="test-only",
