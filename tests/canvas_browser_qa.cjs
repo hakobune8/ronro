@@ -89,6 +89,28 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
       peripheral: document.querySelectorAll('.canvas-peripheral').length,
       stageWidth: document.querySelector('.canvas-stage').getBoundingClientRect().width,
       detailInStage: !!document.querySelector('.canvas-stage > .canvas-detail'),
+      subtitleHasHeading: !!document.querySelector('.canvas-detail h2'),
+      typePaletteDistinct: (() => {
+        const types=['idea','option','concern','decision','open_item','action'];
+        const nodeColors=[], finalColors=[];
+        for (const type of types) {
+          const card=document.createElement('div');
+          card.className=`canvas-node ${type}`;
+          card.innerHTML='<span class="canvas-role">種別</span>';
+          document.body.append(card);
+          nodeColors.push([getComputedStyle(card).borderTopColor,
+            getComputedStyle(card).backgroundColor,
+            getComputedStyle(card.querySelector('.canvas-role')).backgroundColor].join('|'));
+          card.remove();
+          const marker=document.createElement('div');
+          marker.className=`canvas-final-marker ${type}`;
+          document.body.append(marker);
+          finalColors.push([getComputedStyle(marker).borderTopColor,
+            getComputedStyle(marker).backgroundColor].join('|'));
+          marker.remove();
+        }
+        return new Set(nodeColors).size===types.length && new Set(finalColors).size===types.length;
+      })(),
       focusCenterOffsetX: (() => {
         const focus=document.querySelector('.canvas-node.focus')?.getBoundingClientRect();
         const stage=document.querySelector('.canvas-stage').getBoundingClientRect();
@@ -175,7 +197,8 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
   if (results.some(item => item.errors.length || item.live.scrollX || item.live.scrollY ||
     item.final.scrollX || item.final.scrollY || item.live.primary > 5 || item.live.clippedPrimary ||
     item.live.hiddenEdgeLabels || !item.live.detailInStage || !item.live.subtitleAtBottom ||
-    item.live.focusCenterOffsetX > 3 || item.live.cardsCoveredBySubtitle ||
+    item.live.subtitleHasHeading || !item.live.typePaletteDistinct || item.live.focusCenterOffsetX > 3 ||
+    item.live.cardsCoveredBySubtitle ||
     (item.live.minSubtitleGap !== null && item.live.minSubtitleGap < 16) ||
     item.live.subtitleLines > 5.1 ||
     (item.count === 'r4-long' ? !item.live.subtitleOverflowNote : !item.live.subtitleComplete) ||

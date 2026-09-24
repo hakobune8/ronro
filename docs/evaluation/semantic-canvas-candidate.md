@@ -11,6 +11,7 @@ Status: **development hypothesis, not deployed or Human-accepted**.
 - Session-local placement state prevents a late Relation or Human correction from moving a point already displayed. Connectors and Root classification can change without relocation.
 - The Live camera centers the focal Node horizontally. Its vertical target keeps the focal Node in the central viewing region while preserving room for provenance parents above and the five-line subtitle below; exact geometric centering would clip the parent in the R4 chain at readable scale.
 - Live and ended states keep the same 16:9 Canvas extent. Wider spatial placement reserves a readable gap for relation labels; the generic lower-left Final note was removed. The only remaining Final note is a processing-incomplete warning.
+- The Canonical subtitle has no redundant 「いまの論点」 heading; focus is already identified by the Canvas highlight. Node roles use distinct border/tint/label-badge colors for Idea, Option, Concern, Decision, Open Item, and Action in both Live and Final, while the role words and Decision lifecycle styling remain visible so color is not the only cue.
 
 ## Verification
 

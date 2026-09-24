@@ -189,10 +189,19 @@
     .canvas-edge-label.supports { fill: #287454; }
     .canvas-edge-label.opposes { fill: #a75d52; }
     .canvas-main.final .canvas-edge { vector-effect: non-scaling-stroke; opacity: .28; }
+    .canvas-node.idea, .canvas-final-marker.idea { --type-accent: #166c84; --type-border: #5d9bb0; --type-tint: #eef8fb; }
+    .canvas-node.option, .canvas-final-marker.option { --type-accent: #287545; --type-border: #70aa82; --type-tint: #eff9f1; }
+    .canvas-node.concern, .canvas-final-marker.concern { --type-accent: #a94933; --type-border: #cf8c78; --type-tint: #fff3ef; }
+    .canvas-node.decision, .canvas-final-marker.decision { --type-accent: #8d5b0b; --type-border: #c49b55; --type-tint: #fff8e8; }
+    .canvas-node.open_item, .canvas-final-marker.open_item { --type-accent: #6d4d9f; --type-border: #a78bc7; --type-tint: #f8f3ff; }
+    .canvas-node.action, .canvas-final-marker.action { --type-accent: #3158a5; --type-border: #819ad2; --type-tint: #f2f6ff; }
     .canvas-node { position: absolute; transform: translate(-50%,-50%); width: 270px; min-height: 98px;
-      padding: 13px 17px; border: 2px solid #b9cfdd; border-radius: 14px; background: #fff;
+      padding: 13px 17px; border: 2px solid var(--type-border,#b9cfdd); border-radius: 14px;
+      background: var(--type-tint,#fff);
       box-shadow: 0 4px 12px rgba(31,65,95,.055); color: #1e3040; pointer-events: none; }
-    .canvas-node .canvas-role { display: block; margin-bottom: 5px; color: #49657b; font-size: 18px; font-weight: 750; }
+    .canvas-node .canvas-role { display: inline-block; margin-bottom: 7px; padding: 2px 9px;
+      border-radius: 5px; background: var(--type-accent,#49657b); color: #fff;
+      font-size: 18px; font-weight: 750; }
     .canvas-node .canvas-label { display: block; font-size: 28px; line-height: 1.3; font-weight: 670;
       overflow-wrap: anywhere; text-wrap: balance; }
     .canvas-node.focus { width: 340px; min-height: 115px; border: 4px solid #2d78bb;
@@ -200,11 +209,7 @@
     .canvas-node.focus .canvas-label { font-size: 36px; font-weight: 760; }
     .canvas-node.mid { opacity: .38; width: 235px; border-width: 1px; box-shadow: none; }
     .canvas-node.mid .canvas-label { font-size: 22px; }
-    .canvas-node.decision { border-color: #bf9a62; background: #fffcf7; }
     .canvas-node.decision.confirmed { border-style: double; border-width: 4px; }
-    .canvas-node.open_item { border-color: #c69e76; background: #fffdf9; }
-    .canvas-node.action { border-color: #9e8ac8; background: #fcfaff; }
-    .canvas-node.concern { border-color: #cfaa75; background: #fffdf8; }
     .canvas-node.unconfirmed.mid { border-style: dashed; }
     .canvas-node.focus.decision, .canvas-node.focus.open_item, .canvas-node.focus.action {
       border-color: #2d78bb; box-shadow: 0 0 0 3px #d8e8f6,0 6px 24px rgba(31,105,175,.17);
@@ -218,24 +223,24 @@
     .canvas-final-markers { position: absolute; inset: 0; pointer-events: none; }
     .canvas-final-topology { position: absolute; inset: 0; pointer-events: none; }
     .canvas-final-topology circle { fill: #a7bfd0; opacity: .48; }
-    .canvas-final-topology circle.decision { fill: #ba915b; opacity: .75; }
-    .canvas-final-topology circle.action { fill: #9980be; opacity: .75; }
-    .canvas-final-topology circle.open_item { fill: #bb956e; opacity: .75; }
+    .canvas-final-topology circle.idea { fill: #5d9bb0; }
+    .canvas-final-topology circle.option { fill: #70aa82; }
+    .canvas-final-topology circle.concern { fill: #cf8c78; }
+    .canvas-final-topology circle.decision { fill: #c49b55; opacity: .75; }
+    .canvas-final-topology circle.action { fill: #819ad2; opacity: .75; }
+    .canvas-final-topology circle.open_item { fill: #a78bc7; opacity: .75; }
     .canvas-final-marker { position: absolute; transform: translate(-50%,-50%); width: 240px; padding: 12px 15px;
-      border: 1px solid #b8cdda; border-radius: 13px; background: rgba(255,255,255,.95);
+      border: 2px solid var(--type-border,#b8cdda); border-radius: 13px; background: var(--type-tint,#fff);
       color: #263d50; font-size: 21px; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere;
       box-shadow: 0 3px 10px rgba(31,65,95,.05); }
-    .canvas-final-marker.decision { border-color: #bf9a62; background: #fffcf7; }
-    .canvas-final-marker.action { border-color: #9e8ac8; background: #fcfaff; }
-    .canvas-final-marker.open_item { border-color: #c69e76; background: #fffdf9; }
     .canvas-final-marker.unconfirmed { border-style: dashed; }
-    .canvas-final-marker small { display: block; margin-bottom: 5px; color: #587086; font-size: 16px; }
+    .canvas-final-marker small { display: inline-block; margin-bottom: 7px; padding: 2px 7px;
+      border-radius: 4px; background: var(--type-accent,#587086); color: #fff; font-size: 16px; }
     /* Canonical detail is a subtitle, not another graph card or an inspector. */
     .canvas-detail { position: absolute; z-index: 5; left: 50%; bottom: 14px;
       transform: translateX(-50%); width: min(1600px,calc(100% - 140px));
       padding: 15px 38px 18px; border-radius: 8px; background: rgba(25,47,65,.9);
       box-shadow: 0 6px 20px rgba(24,47,67,.13); color: #fff; text-align: center; pointer-events: none; }
-    .canvas-detail h2 { margin: 0 0 7px; color: #c6e1f2; font-size: 17px; font-weight: 750; }
     .canvas-detail p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5;
       margin: 0; overflow: hidden; font-size: 29px; line-height: 1.38;
       font-weight: 650; overflow-wrap: anywhere; text-wrap: balance; }
@@ -549,7 +554,7 @@
         const stateClass = node.type === 'decision' && node.status === 'confirmed' ? ' confirmed' : '';
         return `<div class="canvas-node ${escapeHtml(node.type)}${stateClass} ${isFocus ? 'focus' : soft ? 'mid' : ''} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${node.x}px;top:${node.y}px" data-node-id="${escapeHtml(node.id)}"><span class="canvas-role">${escapeHtml(canvasRole(node))}</span><span class="canvas-label">${escapeHtml(node.label)}</span></div>`;
       }).join('');
-      const detail = !final && focus ? `<aside class="canvas-detail${fresh.has(focus.id) ? ' just-updated' : ''}"><h2>いまの論点</h2><p>${escapeHtml(focus.canonical)}</p><div class="detail-overflow">続きあり</div></aside>` : '';
+      const detail = !final && focus ? `<aside class="canvas-detail${fresh.has(focus.id) ? ' just-updated' : ''}"><p>${escapeHtml(focus.canonical)}</p><div class="detail-overflow">続きあり</div></aside>` : '';
       const note = state === 'ended_with_incomplete_processing' ? '処理が完了していません。内容の確認が必要です。'
         : '';
       const markup = `<section class="canvas-stage" aria-label="議論の論点図"><div class="canvas-world"><svg class="canvas-edges" aria-hidden="true">${edges}</svg>${nodeMarkup}</div><div class="canvas-periphery"></div><svg class="canvas-final-topology" aria-hidden="true"></svg><div class="canvas-final-markers"></div>${canvas.nodes.length ? '' : '<div class="canvas-empty">議論を整理しています</div>'}${note ? `<div class="canvas-final-note">${note}</div>` : ''}${detail}</section>`;
