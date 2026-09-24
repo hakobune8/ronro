@@ -72,3 +72,29 @@ transport error. The candidate fix assigns a connection generation to each
 WebSocket, ignores stale teardown/error events, and treats normal close as a
 recoverable disconnect. This must be revalidated on the replacement digest;
 the first deployed digest alone is not a complete reconnect acceptance.
+
+## Replacement-digest deployment smoke
+
+The reconnect-safe candidate was published from Git SHA `043f5cc` by the
+container workflow and deployed by immutable digest
+`sha256:7e123bc9834a6022e3f05f00e6d88dd284fabdb1543cace18f774da5b702168f`.
+The single Pod was Ready with zero restarts; `/`, `/shared`, `/control`,
+`/session`, `/healthz`, and `/readyz` returned 200.
+
+Only locally synthesized Japanese meeting-like speech was used. Consent was
+required before session creation. In the uninterrupted run, all 273 audio
+frames were accepted, one Final was produced, Queue pending/processing/failed
+were zero, runtime ended, and Graph/Render revisions matched. The private
+recording contained exactly 1,310,400 PCM bytes for those frames, had mode
+`0600`, retained seven-day expiry metadata, and was not exposed by tested
+HTTP paths.
+
+A separate same-session reconnect run accepted 65 frames before disconnect
+and 208 after reconnect. It ended with one Final, zero Queue failures, and
+matching Graph/Render revisions. Exactly one browser-disconnect interruption
+was recorded; the previous spurious old-connection/transport-error markers
+did not recur. The recording again held all 1,310,400 transmitted PCM bytes.
+The actual disconnect still marks a possible STT Evidence gap for the pending
+turn; complete STT Evidence across transport interruption is **not** claimed.
+This smoke does not substitute for a consented, human-operated Pilot rehearsal
+or prove multi-Topic flow in a real meeting.
