@@ -47,7 +47,7 @@ spec:
                 name: ronro-openai
           env:
             - name: APP_VERSION
-              value: semantic-graph-rc4
+              value: casual-session-rc1
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
