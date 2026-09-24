@@ -63,7 +63,7 @@ def focused_flow(
     if focus_id is None:
         return {"version": "focused-flow-hypothesis-1", "focus_id": None,
                 "latest_detail": None, "nodes": [], "edges": [],
-                "backbone_edges": [], "argument_edges": [], "movement": []}
+                "backbone_edges": [], "argument_edges": [], "recent_unlinked": [], "movement": []}
 
     candidates: dict[str, int] = {}
     for edge in graph["edges"]:
@@ -100,6 +100,20 @@ def focused_flow(
              for node_id in [focus_id, *neighbor_ids]]
     edges = [dict(edge) for edge in graph["edges"] if edge["type"] in SEMANTIC
              and edge["source_node_id"] in selected and edge["target_node_id"] in selected]
+    # A sparse semantic graph must not look like a one-point meeting. Show
+    # recent discussion separately, without inventing semantic connections.
+    current_topic_id = graph.get("current_topic", {}).get("primary_topic_id")
+    topic_members = {edge["target_node_id"] for edge in graph["edges"]
+                     if edge["type"] in {"contains", "has_option"}
+                     and edge["source_node_id"] == current_topic_id}
+    recent_unlinked = []
+    if not edges:
+        discussion_ids = {node_id for node_id, node in nodes.items()
+                          if node["type"] in {"idea", "option", "concern"}}
+        recent_ids = (discussion_ids & topic_members) if topic_members else discussion_ids
+        recent_ids -= selected
+        recent_unlinked = [_node_view(nodes[node_id], labels) for node_id in
+                           sorted(recent_ids, key=lambda node_id: (-rank(node_id)[0], node_id))[:2]]
     movement = [{"sequence": e["sequence"], "event_type": e["event_type"]}
                 for e in ordered if e["event_type"] in {"topic_focus_changed", "set_current_topic"}]
     return {"version": "focused-flow-hypothesis-1", "focus_id": focus_id,
@@ -107,6 +121,7 @@ def focused_flow(
             "nodes": views, "edges": edges,
             "backbone_edges": [edge for edge in edges if edge["type"] == "discussion_provenance"],
             "argument_edges": [edge for edge in edges if edge["type"] in {"supports", "opposes"}],
+            "recent_unlinked": recent_unlinked,
             "movement": movement}
 
 

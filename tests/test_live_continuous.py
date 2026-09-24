@@ -197,6 +197,20 @@ class FakeShortVADGapProvider(FakeVADProvider):
         return False
 
 
+class FakeGapThenSpeechProvider(FakeShortVADGapProvider):
+    def __init__(self, config):
+        super().__init__(config)
+        self.appends = 0
+
+    async def append_audio(self, pcm16le: bytes):
+        self.appends += 1
+        if self.appends == 1:
+            await super().append_audio(pcm16le)
+        else:
+            await self.events.put({"type": "final_transcript", "item_id": "later-speech",
+                                   "text": "次の論点について話します"})
+
+
 def make_session(
     analyzer: ContinuousAnalyzer | None = None,
     *,
@@ -248,6 +262,7 @@ class LiveContinuousSessionTests(unittest.TestCase):
             endpoint="wss://example.invalid/realtime", api_key="test-only",
             model="gpt-transcribe", language="ja", prompt="test", keywords=(),
             timeout_seconds=1.0, finalization_mode="server_vad_bounded",
+            empty_vad_policy="strict",
         )
         event = {
             "type": "stt_error", "code": "empty_final_transcript",
@@ -304,6 +319,33 @@ class LiveContinuousSessionTests(unittest.TestCase):
         self.assertEqual(state["metrics"]["possible_evidence_gap_count"], 1)
         self.assertEqual(state["metrics"]["stt_failures"], 0)
         self.assertTrue(any(x.get("type") == "stt_gap_warning" for x in connection.sent))
+        manager.current().close()
+
+    def test_short_vad_gap_does_not_stop_later_speech(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas", analyzer_factory=lambda: ContinuousAnalyzer())
+        manager.start_mode("continuous")
+        connection = FakeConnection()
+        connection.incoming.put_nowait(encode_audio_frame(AudioChunk(0, 0.0, b"\x10\x00" * 240)))
+        connection.incoming.put_nowait(encode_audio_frame(AudioChunk(1, 0.01, b"\x10\x00" * 240)))
+        config = RealtimeSTTConfig(
+            endpoint="wss://example.invalid/realtime", api_key="test-only",
+            model="gpt-transcribe", language="ja", prompt="test", keywords=(),
+            timeout_seconds=1.0, finalization_mode="server_vad_bounded",
+        )
+
+        async def run_gateway():
+            gateway = LiveWebSocketGateway(manager, stt_config=config)
+            with patch("prototype.live_transport.OpenAIRealtimeTranscriptionClient", FakeGapThenSpeechProvider):
+                await asyncio.wait_for(gateway(connection), timeout=2.0)
+
+        asyncio.run(run_gateway())
+        state = manager.current().snapshot()["live_state"]
+        self.assertEqual(state["runtime_state"], "ended")
+        self.assertEqual(state["final_utterance_count"], 1)
+        self.assertEqual(state["metrics"]["possible_evidence_gap_count"], 1)
+        self.assertEqual(state["metrics"]["stt_failures"], 0)
+        self.assertTrue(any(x.get("type") == "stt_gap_warning" for x in connection.sent))
+        self.assertTrue(any(x.get("type") == "final_transcript" for x in connection.sent))
         manager.current().close()
 
     def tearDown(self) -> None:

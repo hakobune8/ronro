@@ -514,8 +514,10 @@
       $('live-commit').disabled = !continuous || runtime !== 'active' || !liveSocket || liveSocket.readyState !== WebSocket.OPEN;
       $('live-end').disabled = !continuous || !['active', 'finalizing'].includes(runtime);
       $('live-retry').disabled = continuous || !state.final_transcript || state.analyzer_status === 'analyzing';
+      const possibleGapCount = state.metrics?.possible_evidence_gap_count || 0;
       if (state.error) setStatus(`[${state.error.code}] ${state.error.message}`, true);
-      if (state.e2e_latency_ms !== null && state.e2e_latency_ms !== undefined) {
+      else if (possibleGapCount) setStatus(`音声認識できなかった可能性のある短い区間が${possibleGapCount}件あります。会議は継続できます。`, true);
+      else if (state.e2e_latency_ms !== null && state.e2e_latency_ms !== undefined) {
         setStatus(`Live complete · audio_end → map_rendered ${state.e2e_latency_ms} ms`);
       }
     }
@@ -706,7 +708,8 @@
             if (event.type === 'live_complete') stopLiveCapture();
             if (event.type === 'session_ended') {
               stopLiveCapture();
-              setStatus('Live Session ended · final projection rendered');
+              const gaps = event.snapshot?.live_state?.metrics?.possible_evidence_gap_count || 0;
+              setStatus(gaps ? `会議を終了しました。音声認識できなかった可能性のある短い区間が${gaps}件あります。` : 'Live Session ended · final projection rendered', Boolean(gaps));
               if (liveSocket) liveSocket.close();
             }
           } catch (error) { setStatus(`Live event parse error: ${error.message}`, true); }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 
 from prototype.live_stt import (
     DEFAULT_KEYWORDS,
@@ -63,6 +64,14 @@ class LiveSTTAdapterTests(unittest.TestCase):
     def test_session_update_keeps_default_baseline_explicit_commit(self) -> None:
         self.assertEqual(self.config.finalization_mode, "none")
         self.assertIsNone(build_turn_detection(self.config))
+
+    def test_short_vad_gap_continuation_is_default_but_strict_is_available(self) -> None:
+        self.assertEqual(self.config.empty_vad_policy, "warn_short_no_delta")
+        self.assertEqual(replace(self.config, empty_vad_policy="strict").empty_vad_policy, "strict")
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(RealtimeSTTConfig.from_environment().empty_vad_policy, "warn_short_no_delta")
+        with patch.dict("os.environ", {"LIVE_STT_EMPTY_VAD_POLICY": "strict"}):
+            self.assertEqual(RealtimeSTTConfig.from_environment().empty_vad_policy, "strict")
 
     def test_default_realtime_context_is_generic_and_not_demo_seeded(self) -> None:
         self.assertIn("忠実に文字起こし", DEFAULT_STT_PROMPT)

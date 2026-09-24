@@ -137,16 +137,16 @@ preparation without requiring a commit. This accounting is part of the candidate
 image; it is not an environment override.
 Keep the `none` mode available for non-Pilot usage and experiments.
 
-`LIVE_STT_EMPTY_VAD_POLICY` defaults to `strict`. The opt-in
-`warn_short_no_delta` value is for T2 evaluation continuity only: a known
+`LIVE_STT_EMPTY_VAD_POLICY` defaults to `warn_short_no_delta`. The `strict`
+setting remains available. A known
 automatic Server VAD item of at most 3 seconds with no transcription deltas
 and no explicit commit can be reported as `possible_untranscribed_audio`
-without ending capture. This is **not** proof of silence or a Pilot-baseline
-change. The runtime counts possible Evidence gaps; an evaluation using this
-mode cannot assert Evidence loss zero when that count is nonzero. Longer,
+without ending capture. This is **not** proof of silence. The facilitator's
+session view shows the accumulated warning; the runtime counts possible
+Evidence gaps and cannot assert Evidence loss zero when that count is nonzero. Longer,
 unknown-range, partially recognized, and explicit-commit empty completions
-remain fatal. Do not enable this policy for Pilot without a separate safety
-review.
+remain fatal. Pilot readiness still requires a separate safety review of
+the possible gaps and the facilitator's response.
 
 ## Storage
 
