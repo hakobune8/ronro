@@ -231,12 +231,13 @@
     .canvas-final-marker.unconfirmed { border-style: dashed; }
     .canvas-final-marker small { display: block; margin-bottom: 5px; color: #587086; font-size: 16px; }
     /* Canonical detail is a subtitle, not another graph card or an inspector. */
-    .canvas-detail { position: absolute; z-index: 5; left: 50%; bottom: 25px;
-      transform: translateX(-50%); width: min(1360px,calc(100% - 160px));
+    .canvas-detail { position: absolute; z-index: 5; left: 50%; bottom: 14px;
+      transform: translateX(-50%); width: min(1600px,calc(100% - 140px));
       padding: 15px 38px 18px; border-radius: 8px; background: rgba(25,47,65,.9);
       box-shadow: 0 6px 20px rgba(24,47,67,.13); color: #fff; text-align: center; pointer-events: none; }
     .canvas-detail h2 { margin: 0 0 7px; color: #c6e1f2; font-size: 17px; font-weight: 750; }
-    .canvas-detail p { margin: 0; max-height: min(210px,22vh); overflow: hidden; font-size: 29px; line-height: 1.38;
+    .canvas-detail p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5;
+      margin: 0; overflow: hidden; font-size: 29px; line-height: 1.38;
       font-weight: 650; overflow-wrap: anywhere; text-wrap: balance; }
     .canvas-detail .detail-overflow { display: none; margin-top: 7px; color: #c6e1f2; font-size: 16px; }
     .canvas-detail.is-overflowing .detail-overflow { display: block; }
@@ -481,7 +482,7 @@
     }
 
     function canvasTransform(camera, stage, hasDetail) {
-      const anchorY = stage.clientHeight * (hasDetail ? .49 : .5);
+      const anchorY = stage.clientHeight * (hasDetail ? .45 : .5);
       return `translate(${stage.clientWidth / 2}px,${anchorY}px) scale(${camera.scale}) translate(${-camera.x}px,${-camera.y}px)`;
     }
 
@@ -548,7 +549,7 @@
         const stateClass = node.type === 'decision' && node.status === 'confirmed' ? ' confirmed' : '';
         return `<div class="canvas-node ${escapeHtml(node.type)}${stateClass} ${isFocus ? 'focus' : soft ? 'mid' : ''} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${node.x}px;top:${node.y}px" data-node-id="${escapeHtml(node.id)}"><span class="canvas-role">${escapeHtml(canvasRole(node))}</span><span class="canvas-label">${escapeHtml(node.label)}</span></div>`;
       }).join('');
-      const detail = !final && focus ? `<aside class="canvas-detail${fresh.has(focus.id) ? ' just-updated' : ''}"><h2>いまの論点</h2><p>${escapeHtml(focus.canonical)}</p><div class="detail-overflow">全文は会議後の記録に保持しています</div></aside>` : '';
+      const detail = !final && focus ? `<aside class="canvas-detail${fresh.has(focus.id) ? ' just-updated' : ''}"><h2>いまの論点</h2><p>${escapeHtml(focus.canonical)}</p><div class="detail-overflow">続きあり</div></aside>` : '';
       const note = state === 'ended_with_incomplete_processing' ? '処理が完了していません。内容の確認が必要です。'
         : '';
       const markup = `<section class="canvas-stage" aria-label="議論の論点図"><div class="canvas-world"><svg class="canvas-edges" aria-hidden="true">${edges}</svg>${nodeMarkup}</div><div class="canvas-periphery"></div><svg class="canvas-final-topology" aria-hidden="true"></svg><div class="canvas-final-markers"></div>${canvas.nodes.length ? '' : '<div class="canvas-empty">議論を整理しています</div>'}${note ? `<div class="canvas-final-note">${note}</div>` : ''}${detail}</section>`;
