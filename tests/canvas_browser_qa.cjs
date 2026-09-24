@@ -89,6 +89,11 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
       peripheral: document.querySelectorAll('.canvas-peripheral').length,
       stageWidth: document.querySelector('.canvas-stage').getBoundingClientRect().width,
       detailInStage: !!document.querySelector('.canvas-stage > .canvas-detail'),
+      focusCenterOffsetX: (() => {
+        const focus=document.querySelector('.canvas-node.focus')?.getBoundingClientRect();
+        const stage=document.querySelector('.canvas-stage').getBoundingClientRect();
+        return focus ? Math.abs((focus.left+focus.right-stage.left-stage.right)/2) : 0;
+      })(),
       subtitleAtBottom: (() => {
         const stage=document.querySelector('.canvas-stage').getBoundingClientRect();
         const subtitle=document.querySelector('.canvas-detail')?.getBoundingClientRect();
@@ -170,7 +175,8 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
   if (results.some(item => item.errors.length || item.live.scrollX || item.live.scrollY ||
     item.final.scrollX || item.final.scrollY || item.live.primary > 5 || item.live.clippedPrimary ||
     item.live.hiddenEdgeLabels || !item.live.detailInStage || !item.live.subtitleAtBottom ||
-    item.live.cardsCoveredBySubtitle || (item.live.minSubtitleGap !== null && item.live.minSubtitleGap < 16) ||
+    item.live.focusCenterOffsetX > 3 || item.live.cardsCoveredBySubtitle ||
+    (item.live.minSubtitleGap !== null && item.live.minSubtitleGap < 16) ||
     item.live.subtitleLines > 5.1 ||
     (item.count === 'r4-long' ? !item.live.subtitleOverflowNote : !item.live.subtitleComplete) ||
     item.live.stageWidth !== item.final.stageWidth ||

@@ -229,10 +229,11 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
     if primary:
         xs = [positions[nid]["x"] for nid in primary]
         ys = [positions[nid]["y"] for nid in primary]
-        # Keep focus close to center; do not zoom out to fill with remote Nodes.
+        # Keep focus horizontally centered. Vertically, reserve room for a
+        # provenance parent above and the bounded Canonical subtitle below.
         focus_x, focus_y = positions[focus_id]["x"], positions[focus_id]["y"]
         span = max(max(xs) - min(xs), (max(ys) - min(ys)) * 1.45)
-        live_camera = {"x": focus_x + (sum(xs) / len(xs) - focus_x) * 0.5,
+        live_camera = {"x": focus_x,
                        "y": focus_y + (sum(ys) / len(ys) - focus_y) * 0.5,
                        "scale": max(0.74, min(1.0, 1000 / max(span + 320, 1))),
                        "focus_id": focus_id}

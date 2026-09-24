@@ -46,6 +46,7 @@ class SemanticCanvasTests(unittest.TestCase):
         projected = project_semantic_canvas(before, result.events, {ids["r4-n5"]: "再配置を決定候補に"})
         views = {node["id"]: node for node in projected["nodes"]}
         self.assertEqual(projected["focus_id"], ids["r4-n5"])
+        self.assertEqual(projected["live_camera"]["x"], views[ids["r4-n5"]]["x"])
         self.assertEqual(projected["latest_detail_id"], ids["r4-n5"])
         self.assertEqual(views[ids["r4-n5"]]["label"], "再配置を決定候補に")
         self.assertEqual(views[ids["r4-n5"]]["canonical"], before["nodes"][-1]["label"])
