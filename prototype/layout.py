@@ -6,6 +6,7 @@ import copy
 from typing import Any, Iterable
 from .display_labels import display_projection
 from .semantic_projection import focused_flow
+from .semantic_canvas import project_semantic_canvas
 
 
 MAIN_LANE_GAP = 320
@@ -334,6 +335,7 @@ def map_projection(
         "presentation": copy.deepcopy(presentation or {}),
         "display_labels": display_labels,
         "semantic_focus": focused_flow(graph, event_list, semantic_labels),
+        "semantic_canvas": project_semantic_canvas(graph, event_list, semantic_labels),
         "recent_flow": recent_topic_flow(event_list, graph),
         "recent_discussion_flow": recent_discussion_flow(graph, event_list, semantic_labels),
         "counts": counts,
