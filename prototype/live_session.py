@@ -523,6 +523,7 @@ class LiveSessionManager:
         self._shutting_down = False
         self._controller_id: str | None = None
         self._controller_connected = False
+        self._active_connection_id: str | None = None
         self._controller_last_seen_at: str | None = None
         schema_path = Path(schema_dir)
         self._evaluation_root = Path(evaluation_root) if evaluation_root is not None else schema_path.parent / "evaluation" / "live" / "sessions"
@@ -674,6 +675,7 @@ class LiveSessionManager:
             self._stop_requested = False
             self._controller_id = owner
             self._controller_connected = False
+            self._active_connection_id = None
             self._controller_last_seen_at = utc_now()
             self._pilot_recorder = recorder
             self._pilot_recording_state = "recording" if recorder is not None else "off"
@@ -826,21 +828,29 @@ class LiveSessionManager:
             self._stop_requested = False
             return requested
 
-    def mark_connected(self, *, controller_id: Any | None = None) -> dict[str, Any]:
+    def mark_connected(self, *, controller_id: Any | None = None,
+                       connection_id: str | None = None) -> dict[str, Any]:
         with self._lock:
             session = self._require()
             owner = self._claim_controller_locked(controller_id)
             session.mark_connected()
+            self._active_connection_id = connection_id or uuid.uuid4().hex
             self._controller_connected = True
             self._controller_last_seen_at = utc_now()
             return self._decorate_snapshot_locked(session.snapshot(), owner)
 
-    def mark_controller_disconnected(self, *, controller_id: Any | None = None) -> dict[str, Any]:
+    def is_current_capture(self, connection_id: str) -> bool:
+        with self._lock:
+            return self._active_connection_id == connection_id
+
+    def mark_controller_disconnected(self, *, controller_id: Any | None = None,
+                                     connection_id: str | None = None) -> dict[str, Any]:
         with self._lock:
             owner = normalize_controller_id(controller_id)
-            if self._controller_id != owner:
+            if self._controller_id != owner or (connection_id is not None and connection_id != self._active_connection_id):
                 return self._decorate_snapshot_locked(self.snapshot(), controller_id)
             self._controller_connected = False
+            self._active_connection_id = None
             self._controller_last_seen_at = utc_now()
             session = self._session
             if isinstance(session, LiveContinuousSession):
@@ -931,8 +941,11 @@ class LiveSessionManager:
             session.mark_provider_failure(code, message)
             return self._decorate_snapshot_locked(session.snapshot())
 
-    def record_capture_interruption(self, code: str, *, unresolved_items: int = 0) -> dict[str, Any]:
+    def record_capture_interruption(self, code: str, *, unresolved_items: int = 0,
+                                    connection_id: str | None = None) -> dict[str, Any]:
         with self._lock:
+            if connection_id is not None and connection_id != self._active_connection_id:
+                return self.snapshot()
             session = self._require()
             if not isinstance(session, LiveContinuousSession):
                 return self.fail(code, "Capture interrupted")

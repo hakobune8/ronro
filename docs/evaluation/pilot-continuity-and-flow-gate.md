@@ -59,3 +59,16 @@ running digest: BGM/quiet intervals; a deliberately interrupted connection;
 recovery with preserved Graph and correct frame/time continuity; an intentional
 topic change and return; no duplicated prominent labels; and explicit End
 draining with possible Evidence gaps clearly reported.
+
+## Deployment smoke finding: stale WebSocket teardown
+
+The first synthetic-audio deployment smoke confirmed consent enforcement,
+private PCM storage, a non-empty Final, clean Drain, and matching Graph/Render
+revisions. A follow-up same-Session reconnect smoke then exposed an extra
+interruption marker: an older WebSocket could finish teardown after a newer
+connection had already begun, and the old teardown could mark the shared
+controller disconnected. Normal client close was also classified as a generic
+transport error. The candidate fix assigns a connection generation to each
+WebSocket, ignores stale teardown/error events, and treats normal close as a
+recoverable disconnect. This must be revalidated on the replacement digest;
+the first deployed digest alone is not a complete reconnect acceptance.
