@@ -7,6 +7,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from websockets.exceptions import ConnectionClosedOK
 
 from prototype.analyzer import CandidateEvent
 from prototype.errors import PrototypeError
@@ -175,6 +176,11 @@ class WarningConnection(FakeConnection):
             await self.incoming.put(json.dumps({"type": "stop"}))
 
 
+class ClosedBrowserConnection(FakeConnection):
+    async def recv(self):
+        raise ConnectionClosedOK(None, None)
+
+
 class FakeShortVADGapProvider(FakeVADProvider):
     def __init__(self, config):
         super().__init__(config)
@@ -288,6 +294,45 @@ def wait_settled(session: LiveContinuousSession, count: int, timeout: float = 5.
 
 
 class LiveContinuousSessionTests(unittest.TestCase):
+    def test_clean_browser_close_is_recoverable_not_transport_error(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas", analyzer_factory=lambda: ContinuousAnalyzer())
+        manager.start_mode("continuous")
+        connection = ClosedBrowserConnection()
+        config = RealtimeSTTConfig(endpoint="wss://example.invalid/realtime", api_key="test-only",
+                                   model="gpt-transcribe", language="ja", prompt="test", keywords=(),
+                                   timeout_seconds=1.0)
+
+        async def run_gateway():
+            gateway = LiveWebSocketGateway(manager, stt_config=config)
+            with patch("prototype.live_transport.OpenAIRealtimeTranscriptionClient", FakeRealtimeProvider):
+                await asyncio.wait_for(gateway(connection), timeout=2.0)
+
+        asyncio.run(run_gateway())
+        state = manager.snapshot()["live_state"]
+        self.assertEqual(manager.current().runtime_state, "active")
+        self.assertEqual([entry["code"] for entry in state["capture_interruptions"]],
+                         ["browser_websocket_disconnected"])
+        manager.current().close()
+
+    def test_stale_websocket_cannot_disconnect_or_interrupt_new_capture(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas", analyzer_factory=lambda: ContinuousAnalyzer())
+        manager.start_mode("continuous", controller_id="same-controller")
+        manager.mark_connected(controller_id="same-controller", connection_id="old-ws")
+        manager.activate()
+        manager.mark_connected(controller_id="same-controller", connection_id="new-ws")
+        manager.activate()
+        manager.mark_controller_disconnected(controller_id="same-controller", connection_id="old-ws")
+        manager.record_capture_interruption("old_provider_error", connection_id="old-ws")
+        state = manager.snapshot()["live_state"]
+        self.assertTrue(state["controller"]["connected"])
+        self.assertEqual(state["websocket_state"], "connected")
+        self.assertEqual(state["capture_interruptions"], [])
+        manager.mark_controller_disconnected(controller_id="same-controller", connection_id="new-ws")
+        state = manager.snapshot()["live_state"]
+        self.assertFalse(state["controller"]["connected"])
+        self.assertEqual(len(state["capture_interruptions"]), 1)
+        manager.current().close()
+
     def test_reconnected_provider_item_ranges_are_session_relative(self) -> None:
         raw = {'type': 'final_transcript', '_turn': {'range_known': True,
                'audio_start': 0.2, 'audio_end': 0.8, 'frame_start': 2, 'frame_end': 7}}

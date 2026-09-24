@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import threading
+import uuid
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -17,10 +18,13 @@ from .live_stt import OpenAIRealtimeTranscriptionClient, RealtimeSTTConfig, Real
 
 try:
     from websockets.asyncio.server import Server, ServerConnection, serve
+    from websockets.exceptions import ConnectionClosed
 except ImportError:  # pragma: no cover - dependency is declared in requirements-dev.txt
     Server = Any  # type: ignore[assignment,misc]
     ServerConnection = Any  # type: ignore[assignment,misc]
     serve = None  # type: ignore[assignment]
+    class ConnectionClosed(Exception):  # type: ignore[no-redef]
+        pass
 
 
 def _json(value: Any) -> str:
@@ -45,9 +49,10 @@ class LiveWebSocketGateway:
             return
         provider: OpenAIRealtimeTranscriptionClient | None = None
         controller_id = self._controller_id_from_connection(connection)
+        connection_id = uuid.uuid4().hex
         transport_failed = False
         try:
-            snapshot = self.manager.mark_connected(controller_id=controller_id)
+            snapshot = self.manager.mark_connected(controller_id=controller_id, connection_id=connection_id)
             audio_offset_seconds = float(snapshot.get("live_state", {}).get("audio_end_seconds") or 0.0)
             frame_offset = int(snapshot.get("live_state", {}).get("audio_chunk_sequence", -1)) + 1
             await connection.send(_json({"type": "runtime_snapshot", "snapshot": snapshot}))
@@ -61,30 +66,35 @@ class LiveWebSocketGateway:
                 snapshot = self.manager.activate()
                 await connection.send(_json({"type": "live_active", "snapshot": snapshot}))
                 await self._capture_continuous(connection, provider, controller_id=controller_id,
+                                               connection_id=connection_id,
                                                audio_offset_seconds=audio_offset_seconds,
                                                frame_offset=frame_offset)
             else:
                 await self._capture(connection, provider)
         except RealtimeSTTFailure as exc:
             transport_failed = getattr(session, "mode", None) != "continuous" or session.runtime_state == "finalizing"
-            snapshot = (self.manager.fail(exc.code, exc.message) if transport_failed else
-                        self.manager.record_capture_interruption(exc.code))
+            snapshot = (self.manager.fail(exc.code, exc.message) if transport_failed and self.manager.is_current_capture(connection_id) else
+                        self.manager.record_capture_interruption(exc.code, connection_id=connection_id))
             await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message, "snapshot": snapshot})
             if not transport_failed:
                 await connection.close()
         except PrototypeError as exc:
             await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message})
+        except ConnectionClosed:
+            # A browser reconnect closes the previous WebSocket normally.
+            # Its generation is retired in finally, not treated as a provider error.
+            pass
         except (AudioFrameError, ValueError, TypeError) as exc:
             transport_failed = getattr(session, "mode", None) != "continuous" or session.runtime_state == "finalizing"
-            snapshot = (self.manager.fail("audio_transport_error", str(exc)) if transport_failed else
-                        self.manager.record_capture_interruption("audio_transport_error"))
+            snapshot = (self.manager.fail("audio_transport_error", str(exc)) if transport_failed and self.manager.is_current_capture(connection_id) else
+                        self.manager.record_capture_interruption("audio_transport_error", connection_id=connection_id))
             await self._safe_send(connection, {"type": "error", "code": "audio_transport_error", "message": str(exc), "snapshot": snapshot})
             if not transport_failed:
                 await connection.close()
         except Exception as exc:  # Transport errors must not touch the Graph.
             transport_failed = getattr(session, "mode", None) != "continuous" or session.runtime_state == "finalizing"
-            snapshot = (self.manager.fail("live_transport_error", str(exc)) if transport_failed else
-                        self.manager.record_capture_interruption("live_transport_error"))
+            snapshot = (self.manager.fail("live_transport_error", str(exc)) if transport_failed and self.manager.is_current_capture(connection_id) else
+                        self.manager.record_capture_interruption("live_transport_error", connection_id=connection_id))
             await self._safe_send(connection, {"type": "error", "code": "live_transport_error", "message": str(exc), "snapshot": snapshot})
             if not transport_failed:
                 await connection.close()
@@ -96,7 +106,7 @@ class LiveWebSocketGateway:
                 pass
             session = self.manager.current()
             if session is not None and getattr(session, "mode", "one_utterance") == "continuous":
-                if transport_failed and session.runtime_state in {"active", "starting", "finalizing"}:
+                if transport_failed and self.manager.is_current_capture(connection_id) and session.runtime_state in {"active", "starting", "finalizing"}:
                     try:
                         await asyncio.to_thread(self.manager.drain, allow_without_stt=True)
                     except Exception:
@@ -104,7 +114,7 @@ class LiveWebSocketGateway:
                 elif session.runtime_state in {"active", "starting", "finalizing"}:
                     # A browser/controller disconnect is recoverable. Keep
                     # the in-memory Session and Graph for the same controller.
-                    self.manager.mark_controller_disconnected(controller_id=controller_id)
+                    self.manager.mark_controller_disconnected(controller_id=controller_id, connection_id=connection_id)
                 await self._safe_send(connection, {"type": "runtime_snapshot", "snapshot": session.snapshot()})
             elif session is not None and session.runtime_state not in {"disconnected"}:
                 session.runtime_state = "disconnected"
@@ -181,6 +191,7 @@ class LiveWebSocketGateway:
         provider: OpenAIRealtimeTranscriptionClient,
         *,
         controller_id: str | None,
+        connection_id: str | None = None,
         audio_offset_seconds: float = 0.0,
         frame_offset: int = 0,
     ) -> None:
@@ -208,6 +219,9 @@ class LiveWebSocketGateway:
         reader_task = asyncio.create_task(read_provider())
         try:
             while True:
+                if connection_id is not None and not self.manager.is_current_capture(connection_id):
+                    await connection.close()
+                    return
                 turns = getattr(provider, 'turns', None)
                 if turns is not None:
                     current = self.manager.current()
@@ -221,10 +235,11 @@ class LiveWebSocketGateway:
                     commit_pending = bool(turns.intents)
                     if turns.expired(self.stt_config.timeout_seconds):
                         await self._interrupt_capture(connection, 'provider_item_timeout',
-                                                      unresolved_items=len(turns.intents))
+                                                      unresolved_items=len(turns.intents), connection_id=connection_id)
                         return
                     if stop_seen and current.stt_state != 'error':
-                        await self._request_continuous_commit(provider, connection, boundary_reason='session_end')
+                        await self._request_continuous_commit(provider, connection, boundary_reason='session_end',
+                                                              connection_id=connection_id)
                         commit_pending = bool(turns.intents)
                         if not provider.has_pending_vad_completion():
                             self.manager.mark_stt_finalization_complete()
@@ -232,7 +247,7 @@ class LiveWebSocketGateway:
                 if self.manager.consume_stop_request() and not stop_seen:
                     stop_seen = True
                     commit_pending = await self._request_continuous_commit(
-                        provider, connection, boundary_reason="session_end"
+                        provider, connection, boundary_reason="session_end", connection_id=connection_id
                     )
                     pending_boundary_reason = "session_end" if commit_pending else None
                     if not commit_pending and not self._provider_has_pending_vad_completion(provider):
@@ -272,7 +287,7 @@ class LiveWebSocketGateway:
                     ):
                         diagnostic("bounded_fallback_fired", session=current, provider=provider, commit_pending=commit_pending, bounded_timer_armed=True, bounded_timer_age=bound_duration)
                         commit_pending = await self._request_continuous_commit(
-                            provider, connection, boundary_reason="bounded_fallback"
+                            provider, connection, boundary_reason="bounded_fallback", connection_id=connection_id
                         )
                         pending_boundary_reason = "bounded_fallback" if commit_pending else None
 
@@ -299,7 +314,7 @@ class LiveWebSocketGateway:
                 if browser_task in done:
                     message = browser_task.result()
                     if message is None:
-                        self.manager.mark_controller_disconnected(controller_id=controller_id)
+                        self.manager.mark_controller_disconnected(controller_id=controller_id, connection_id=connection_id)
                         return
                     if isinstance(message, bytes):
                         if stop_seen:
@@ -325,18 +340,18 @@ class LiveWebSocketGateway:
                             snapshot = self.manager.record_audio_diagnostics(track if isinstance(track, dict) else {})
                             await self._safe_send(connection, {"type": "audio_diagnostics_recorded", "snapshot": snapshot})
                         elif control_type == "capture_failure":
-                            await self._interrupt_capture(connection, "browser_capture_failure")
+                            await self._interrupt_capture(connection, "browser_capture_failure", connection_id=connection_id)
                             return
                         elif control_type == "commit" and not stop_seen and not commit_pending:
                             commit_pending = await self._request_continuous_commit(
-                                provider, connection, boundary_reason="explicit_commit"
+                                provider, connection, boundary_reason="explicit_commit", connection_id=connection_id
                             )
                             pending_boundary_reason = "explicit_commit" if commit_pending else None
                         elif control_type == "stop" and not stop_seen:
                             self.manager.request_stop(controller_id=controller_id)
                             stop_seen = True
                             commit_pending = await self._request_continuous_commit(
-                                provider, connection, boundary_reason="session_end"
+                                provider, connection, boundary_reason="session_end", connection_id=connection_id
                             )
                             pending_boundary_reason = "session_end" if commit_pending else None
                             if not commit_pending and not self._provider_has_pending_vad_completion(provider):
@@ -430,7 +445,8 @@ class LiveWebSocketGateway:
                                 "transport": event.get("_transport"),
                             }))
                             await self._interrupt_capture(connection, code,
-                                unresolved_items=len(turns.intents) if turns is not None else 0)
+                                unresolved_items=len(turns.intents) if turns is not None else 0,
+                                connection_id=connection_id)
                             return
 
                 await self._send_coalesced_render(connection)
@@ -448,9 +464,10 @@ class LiveWebSocketGateway:
         connection: ServerConnection,
         *,
         boundary_reason: str = "explicit_commit",
+        connection_id: str | None = None,
     ) -> bool:
         session = self.manager.current()
-        if session is None:
+        if session is None or (connection_id is not None and not self.manager.is_current_capture(connection_id)):
             return False
         has_audio_buffer = bool(getattr(session, "has_audio_buffer", lambda: False)())
         meaningful_audio = bool(getattr(session, "has_meaningful_audio_buffer", lambda: False)())
@@ -496,20 +513,27 @@ class LiveWebSocketGateway:
             )
             return True
         except RealtimeSTTFailure as exc:
+            if connection_id is not None and not self.manager.is_current_capture(connection_id):
+                return False
             if getattr(session, "mode", None) == "continuous" and session.runtime_state == "active":
-                self.manager.record_capture_interruption(exc.code)
+                self.manager.record_capture_interruption(exc.code, connection_id=connection_id)
             else:
                 self.manager.fail(exc.code, exc.message)
             await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message, "snapshot": self.manager.snapshot()})
             return False
 
     async def _interrupt_capture(self, connection: ServerConnection, code: str,
-                                 *, unresolved_items: int = 0) -> None:
+                                 *, unresolved_items: int = 0,
+                                 connection_id: str | None = None) -> None:
+        if connection_id is not None and not self.manager.is_current_capture(connection_id):
+            await connection.close()
+            return
         if self.manager.current().runtime_state == "finalizing":
             self.manager.fail(code, "Audio could not be finalized at session end")
             await self._drain_and_send(connection)
             return
-        snapshot = self.manager.record_capture_interruption(code, unresolved_items=unresolved_items)
+        snapshot = self.manager.record_capture_interruption(code, unresolved_items=unresolved_items,
+                                                            connection_id=connection_id)
         _logger.warning("capture_interrupted %s", _json({
             "code": code, "unresolved_items": unresolved_items,
             "last_frame_sequence": snapshot["live_state"]["audio_chunk_sequence"],
