@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: discussion-map-pilot
+  name: ronro-pilot
   labels:
-    app.kubernetes.io/name: discussion-map-ai-facilitator
-    app.kubernetes.io/part-of: discussion-map-pilot
+    app.kubernetes.io/name: ronro
+    app.kubernetes.io/part-of: ronro-pilot
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: discussion-map-ai-facilitator
-      app.kubernetes.io/part-of: discussion-map-pilot
+      app.kubernetes.io/name: ronro
+      app.kubernetes.io/part-of: ronro-pilot
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: discussion-map-ai-facilitator
-        app.kubernetes.io/part-of: discussion-map-pilot
+        app.kubernetes.io/name: ronro
+        app.kubernetes.io/part-of: ronro-pilot
         app.kubernetes.io/configuration: semantic-graph-rc4
     spec:
       terminationGracePeriodSeconds: 60
@@ -30,8 +30,8 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: discussion-map
-          image: registry.example.invalid/discussion-map-ai-facilitator:pilot-001
+        - name: ronro
+          image: registry.example.invalid/ronro:pilot-001
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -42,9 +42,9 @@ spec:
               protocol: TCP
           envFrom:
             - configMapRef:
-                name: discussion-map-pilot-config
+                name: ronro-pilot-config
             - secretRef:
-                name: discussion-map-openai
+                name: ronro-openai
           env:
             - name: APP_VERSION
               value: semantic-graph-rc4
@@ -85,6 +85,6 @@ spec:
       volumes:
         - name: evaluation
           persistentVolumeClaim:
-            claimName: discussion-map-pilot-evaluation
+            claimName: ronro-pilot-evaluation
         - name: tmp
           emptyDir: {}

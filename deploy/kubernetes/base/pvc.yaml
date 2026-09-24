@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: discussion-map-pilot-evaluation
+  name: ronro-pilot-evaluation
   labels:
-    app.kubernetes.io/name: discussion-map-ai-facilitator
+    app.kubernetes.io/name: ronro
     app.kubernetes.io/component: evaluation-storage
 spec:
   accessModes:
