@@ -15,4 +15,4 @@ node tests/canvas_motion_video.cjs
 
 The generated 1920×1080 MP4 is `tmp/ronro-semantic-canvas-motion.mp4`; it is intentionally ignored by Git. The frame images are under `tmp/canvas-motion/`. The browser renderer checks focus, the five-Node Live limit, timestamps, scrolling, and Final markers. Unit tests check event progression, stable placement through return/correction, and explicit Candidate-to-Confirmed transition.
 
-Observed limitation: in the long-Canonical scene, a faded peripheral label overlaps an active Canvas Node near the top. This is a Presentation collision, not a Canonical-data issue. The video retains it for honest review; peripheral placement should be adjusted before adopting this UI. The video does not establish physical 3–5 m readability or real Analyzer behavior.
+The faded peripheral layer sits behind primary Nodes, so it may share screen space without obscuring primary text. The local browser QA also checks fixed Node width/type size during focus changes and counts for currently active Nodes by participant-facing category. The video does not establish physical 3–5 m readability or real Analyzer behavior.

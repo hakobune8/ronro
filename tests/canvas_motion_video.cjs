@@ -21,7 +21,7 @@ fs.mkdirSync(out, { recursive: true });
     body: JSON.stringify(currentSnapshot) }));
   await page.goto('http://127.0.0.1:18080/shared?viewport=1920x1080', { waitUntil: 'networkidle' });
   await page.addStyleTag({ content: `
-    #motion-qa-caption { position: fixed; z-index: 100; right: 42px; top: 10px;
+    #motion-qa-caption { position: fixed; z-index: 100; right: 42px; top: 82px;
       padding: 8px 16px; border-radius: 9px; background: rgba(21,48,70,.90);
       color: white; font: 600 19px/1.3 -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
       pointer-events: none; text-align: right; max-width: 900px; }
@@ -34,6 +34,7 @@ fs.mkdirSync(out, { recursive: true });
     document.body.append(caption);
   });
   const entries = [];
+  const nodeGeometry = new Map();
   for (let index = 0; index < scenes.length; index++) {
     const item = scenes[index];
     currentSnapshot = item.snapshot;
@@ -52,6 +53,13 @@ fs.mkdirSync(out, { recursive: true });
       detailTime: document.querySelector('.canvas-detail-time')?.textContent || null,
       nodeTime: document.querySelector('.canvas-node.focus .canvas-time')?.textContent || null,
       markerCount: document.querySelectorAll('.canvas-final-marker').length,
+      counts: Object.fromEntries([...document.querySelectorAll('.canvas-count')]
+        .map(item => [item.dataset.countType, Number(item.querySelector('strong')?.textContent)])),
+      geometry: Object.fromEntries([...document.querySelectorAll('.canvas-node')]
+        .map(node => [node.dataset.nodeId, {
+          width: getComputedStyle(node).width,
+          fontSize: getComputedStyle(node.querySelector('.canvas-label')).fontSize,
+        }])),
       peripheralCardOverlaps: [...document.querySelectorAll('.canvas-peripheral')].filter(peripheral => {
         const a = peripheral.getBoundingClientRect();
         return [...document.querySelectorAll('.canvas-node')].some(node => {
@@ -62,11 +70,24 @@ fs.mkdirSync(out, { recursive: true });
       }).length,
     }));
     const expected = item.snapshot.map.semantic_canvas;
+    const expectedCounts = {idea:0,option:0,concern:0,candidate:0,confirmed:0,open_item:0,action:0};
+    for (const node of expected.nodes) {
+      if (['archived','revoked','resolved','completed'].includes(node.status)) continue;
+      const key=node.type==='decision' ? (node.status==='confirmed' ? 'confirmed' : 'candidate') : node.type;
+      if (Object.hasOwn(expectedCounts,key)) expectedCounts[key]++;
+    }
     if (state.scrollX || state.scrollY || (!state.final && state.nodeCount > 5) ||
       (!state.final && state.focus !== expected.focus_id) ||
       (!state.final && state.focus && state.detailTime !== state.nodeTime) ||
+      JSON.stringify(state.counts)!==JSON.stringify(expectedCounts) ||
       (state.final && state.markerCount === 0)) {
       throw new Error(`Scene ${index + 1} invalid: ${JSON.stringify(state)}`);
+    }
+    for (const [nodeId, geometry] of Object.entries(state.geometry)) {
+      if (nodeGeometry.has(nodeId) && JSON.stringify(nodeGeometry.get(nodeId))!==JSON.stringify(geometry)) {
+        throw new Error(`Node ${nodeId} changed size when focus moved: ${JSON.stringify(geometry)}`);
+      }
+      nodeGeometry.set(nodeId,geometry);
     }
     for (let frame = 0; frame < 5; frame++) {
       await page.waitForTimeout(frame === 0 ? 75 : 145);

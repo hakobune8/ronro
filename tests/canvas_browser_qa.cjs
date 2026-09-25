@@ -128,6 +128,21 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
           !focusTime && !subtitleTime;
       })(),
       focusClock: document.querySelector('.canvas-node.focus .canvas-time')?.textContent || null,
+      counts: Object.fromEntries([...document.querySelectorAll('.canvas-count')]
+        .map(item => [item.dataset.countType, Number(item.querySelector('strong')?.textContent)])),
+      fixedNodeGeometry: (() => {
+        const nodes=[...document.querySelectorAll('.canvas-node')];
+        if (!nodes.length) return false;
+        const widths=new Set(nodes.map(node=>getComputedStyle(node).width));
+        const sizes=new Set(nodes.map(node=>getComputedStyle(node.querySelector('.canvas-label')).fontSize));
+        return widths.size===1 && sizes.size===1 &&
+          getComputedStyle(nodes[0].querySelector('.canvas-label')).textWrap==='wrap';
+      })(),
+      peripheralBehindNodes: (() => {
+        const world=document.querySelector('.canvas-world');
+        const peripheral=document.querySelector('.canvas-periphery');
+        return Number(getComputedStyle(world).zIndex)>Number(getComputedStyle(peripheral).zIndex);
+      })(),
       subtitleHasHeading: !!document.querySelector('.canvas-detail h2'),
       typePaletteDistinct: (() => {
         const types=['idea','option','concern','decision','open_item','action'];
@@ -240,7 +255,14 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     if (snapshot.count === 300) await page.screenshot({ path: '/tmp/ronro-canvas-300-' + (snapshot.branched ? 'branched' : 'roots') + '-final.png' });
     if (snapshot.count === 'r4') await page.screenshot({ path: '/tmp/ronro-canvas-r4-short-final.png' });
     if (snapshot.count === 'r4-timed') await page.screenshot({ path: '/tmp/ronro-canvas-r4-timed-final.png' });
+    const expectedCounts = {idea:0,option:0,concern:0,candidate:0,confirmed:0,open_item:0,action:0};
+    for (const node of snapshot.map.semantic_canvas.nodes) {
+      if (['archived','revoked','resolved','completed'].includes(node.status)) continue;
+      const key=node.type==='decision' ? (node.status==='confirmed' ? 'confirmed' : 'candidate') : node.type;
+      if (Object.hasOwn(expectedCounts,key)) expectedCounts[key]++;
+    }
     results.push({ count: snapshot.count, branched: snapshot.branched, live, final, errors,
+      countsMatch: JSON.stringify(live.counts)===JSON.stringify(expectedCounts),
       near: snapshot.branched ? snapshot.map.semantic_canvas.near_ids : undefined });
     await page.close();
   }
@@ -248,6 +270,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
   console.log(JSON.stringify(results));
   if (results.some(item => item.errors.length || item.live.scrollX || item.live.scrollY ||
     item.final.scrollX || item.final.scrollY || item.live.primary > 5 || item.live.clippedPrimary ||
+    !item.countsMatch || !item.live.fixedNodeGeometry || !item.live.peripheralBehindNodes ||
     item.live.hiddenEdgeLabels || !item.live.detailInStage || !item.live.subtitleAtBottom ||
     item.live.subtitleHasHeading || !item.live.typePaletteDistinct ||
     !item.live.focusAccentMatchesSubtitle || !item.live.nodeTimeMatchesSubtitle ||
