@@ -1,6 +1,6 @@
 # Semantic Canvas / Auto Camera candidate (Issue #21)
 
-Status: **development hypothesis, not deployed or Human-accepted**.
+Status: **working Product hypothesis**. rc1 was deployed for acceptance; a stop/disconnect race found in synthetic smoke requires rc2 before this deployment can be accepted. Physical-distance and real-meeting review are not established by the automated checks.
 
 ## Implemented slice
 
@@ -29,4 +29,10 @@ Status: **development hypothesis, not deployed or Human-accepted**.
 4. The existing Pilot Guide still describes the deployed Focused Flow and state rail. Do not replace its screenshots or instructions until Human Review approves this candidate and deployment is planned.
 5. Physical 3–5m viewing, correction-in-place, and Live→Final visual transition need Human review. Synthetic QA establishes no-scroll/clipping only. Spoken correction and Canvas focus now use the same active-node focus policy; real-microphone acceptance remains separate.
 
-No production deployment, Analyzer change, Canonical schema change, audio rerun, or Pilot Guide update is part of this development slice.
+## rc1 deployed smoke and finalization correction (2026-09-25)
+
+Source `2196b8a` was published by [CI run 36121384239](https://github.com/hakobune8/ronro/actions/runs/36121384239) as `sha256:577c2005169b8cced64a5f715999c1a074c347ed22b50275e3b07d062e9c1e46`. The Pod reached Ready with zero restarts; six public HTTP routes returned 200 and `/live` upgraded to WebSocket 101. A deployed-browser synthetic 1920×1080 Snapshot showed one focus, five nearby Nodes, readable argument/provenance lines, the count strip, and no scrolling. The participant guide now uses public-safe synthetic Canvas screenshots. No third-party audio or transcript is included.
+
+Two short machine-generated Japanese speech sessions then exercised the real Provider. The first produced two Finals, a Concern, an Option and a provenance Edge, with a clean Drain. The second produced two Finals and two Nodes; after its Human-command request, Graph/Render revisions reached 10/10 and no provenance Edge remained, but the failing helper did not retain a separate correction response. The test client closed WebSocket before issuing HTTP stop. When that close raced with the stop request, the old runtime remained in `finalizing` with STT `committing` and Queue 0, rather than calling Drain. This was a test-client ordering error **and** a real runtime gap: a facilitator closing the capture tab near End could cause the same transition. The synthetic session was cleared by restarting the same digest; its unresolved approximately 1.5 seconds cannot be called Evidence-complete.
+
+The follow-up candidate handles transport loss during finalization by recording `finalization_transport_lost` as a possible Evidence gap, draining the Queue, and ending with `ended_with_incomplete_processing` instead of remaining stuck or falsely reporting a clean end. If Provider finalization had already completed, the same disconnect still ends cleanly. Three regression tests cover stop-then-disconnect, disconnect-then-stop, and completed-then-disconnect. The synthetic smoke helper now keeps WebSocket open, issues the normal stop control, and waits for `session_ended` before closing; the failure ordering remains covered by regression tests. rc2 deployment and acceptance are recorded separately after they occur.
