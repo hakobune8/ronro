@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import subprocess
 import tempfile
 import time
@@ -121,6 +122,9 @@ async def send_audio(url: str, pcm: bytes, controller: str) -> tuple[str | None,
 
 
 def main() -> None:
+    if len(sys.argv) == 2 and sys.argv[1] == "--disconnect-during-stop":
+        asyncio.run(disconnect_during_stop())
+        return
     prior = request("/api/live")
     if prior.get("live_state", {}).get("runtime_state") not in {"idle", "ended", "ended_with_incomplete_processing"}:
         raise RuntimeError("A live session is running; refuse to interrupt it")
@@ -145,6 +149,41 @@ def main() -> None:
                       "graph_revision": graph["revision"],
                       "rendered_revision": final["live_state"].get("rendered_revision")},
                      ensure_ascii=False))
+
+
+async def disconnect_during_stop() -> None:
+    """Synthetic boundary probe: finish visibly, never leave finalizing stuck."""
+
+    prior = await asyncio.to_thread(request, "/api/live")
+    if prior.get("live_state", {}).get("runtime_state") not in {"idle", "ended", "ended_with_incomplete_processing"}:
+        raise RuntimeError("A live session is running; refuse to interrupt it")
+    controller = "synthetic-stop-race-" + uuid.uuid4().hex[:12]
+    pcm = await asyncio.to_thread(make_pcm)
+    started = await asyncio.to_thread(request, "/api/live/start", {
+        "mode": "continuous", "controller_id": controller,
+        "all_participants_consented": True})
+    async with websockets.connect(started["websocket_url"], open_timeout=15) as socket:
+        for sequence in range(15):
+            payload = pcm[sequence * 4800:(sequence + 1) * 4800]
+            await socket.send(encode_audio_frame(AudioChunk(sequence, sequence / 10, payload)))
+            await asyncio.sleep(.1)
+        await asyncio.to_thread(request, "/api/live/stop", {"controller_id": controller})
+        await socket.close()
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        snap = await asyncio.to_thread(request, "/api/live?controller_id=" + controller)
+        state = snap["live_state"]
+        if state["runtime_state"] in {"ended", "ended_with_incomplete_processing"}:
+            print(json.dumps({"runtime_state": state["runtime_state"],
+                              "error_code": (state.get("error") or {}).get("code"),
+                              "possible_evidence_gap_count": state["metrics"]["possible_evidence_gap_count"],
+                              "queue": {name: state["queue"][name]
+                                        for name in ("pending", "processing", "failed")},
+                              "graph_revision": state["graph_revision"],
+                              "rendered_revision": state["rendered_revision"]}))
+            return
+        await asyncio.sleep(.25)
+    raise RuntimeError("Disconnect/stop race left the session finalizing")
 
 
 if __name__ == "__main__":
