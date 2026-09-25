@@ -202,14 +202,10 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
           .map(card=>subtitle.top-card.bottom);
         return gaps.length ? Math.min(...gaps) : null;
       })(),
-      hiddenEdgeLabels: (() => {
-        const cards=[...document.querySelectorAll('.canvas-node')].map(node=>node.getBoundingClientRect());
-        return [...document.querySelectorAll('.canvas-edge-label')].filter(label => {
-          const r=label.getBoundingClientRect();
-          return cards.some(card => Math.min(r.right,card.right)-Math.max(r.left,card.left)>2 &&
-            Math.min(r.bottom,card.bottom)-Math.max(r.top,card.top)>2);
-        }).length;
-      })(),
+      noEdgeLabels: !document.querySelector('.canvas-edge-label, .relation-badge'),
+      liveArrows: [...document.querySelectorAll('.canvas-edge')].every(line =>
+        !!line.getAttribute('marker-end') &&
+        !!document.getElementById(line.getAttribute('marker-end').slice(5,-1))),
       displayLabelIsShort: String(expected.caseId).startsWith('r4') ?
         document.querySelector('.canvas-node.focus .canvas-label')?.textContent === '倉庫の水を三避難所へ再配置する' : undefined,
       detailIsCanonical: String(expected.caseId).startsWith('r4') ?
@@ -250,22 +246,24 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
         .every(line => getComputedStyle(line).stroke !== 'none'),
       relationStrokesContinuous: [...document.querySelectorAll('.canvas-final-relations line')]
         .every(line => getComputedStyle(line).strokeDasharray === 'none'),
-      relationBadgesFit: [...document.querySelectorAll('.canvas-final-relations .relation-badge')]
-        .every(group => {
-          const text=group.querySelector('text')?.getBBox();
-          const rect=group.querySelector('rect')?.getBBox();
-          return text && rect && text.x>=rect.x+4 && text.x+text.width<=rect.x+rect.width-4 &&
-            text.y>=rect.y+2 && text.y+text.height<=rect.y+rect.height-2;
-        }),
+      noRelationBadges: !document.querySelector('.canvas-final-relations .relation-badge'),
+      relationArrows: [...document.querySelectorAll('.canvas-final-relations line')].every(line =>
+        !!line.getAttribute('marker-end') &&
+        !!document.getElementById(line.getAttribute('marker-end').slice(5,-1))),
       noDetachedEdges: !document.querySelector('.canvas-world .canvas-edge') &&
         !document.querySelector('.canvas-final-leaders'),
       relationsJoinMarkers: (() => {
-        const positions=[...document.querySelectorAll('.canvas-final-marker')]
-          .map(marker=>[parseFloat(marker.style.left),parseFloat(marker.style.top)]);
+        const byId=new Map([...document.querySelectorAll('.canvas-final-marker')]
+          .map(marker=>[marker.dataset.nodeId,marker]));
         return [...document.querySelectorAll('.canvas-final-relations line')].every(line =>
-          [['x1','y1'],['x2','y2']].every(([x,y]) => positions.some(([px,py]) =>
-            Math.abs(px-Number(line.getAttribute(x)))<.1 &&
-            Math.abs(py-Number(line.getAttribute(y)))<.1)));
+          [['source','x1','y1'],['target','x2','y2']].every(([id,x,y]) => {
+            const marker=byId.get(line.dataset[id]);
+            if (!marker) return false;
+            const cx=parseFloat(marker.style.left), cy=parseFloat(marker.style.top);
+            const dx=Math.abs(Number(line.getAttribute(x))-cx);
+            const dy=Math.abs(Number(line.getAttribute(y))-cy);
+            return Math.abs(dx-marker.offsetWidth/2)<7 || Math.abs(dy-marker.offsetHeight/2)<7;
+          }));
       })(),
       markerOverlap: (() => {
         const boxes=[...document.querySelectorAll('.canvas-final-marker')].map(node=>node.getBoundingClientRect());
@@ -315,7 +313,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     item.final.scrollX || item.final.scrollY || item.live.primary > 5 || item.live.clippedPrimary ||
     !item.countsMatch || !item.live.fixedNodeGeometry || !item.live.labelsFit ||
     !item.live.peripheralBehindNodes || !item.final.labelsFit ||
-    item.live.hiddenEdgeLabels || !item.live.detailInStage || !item.live.subtitleAtBottom ||
+    !item.live.noEdgeLabels || !item.live.liveArrows || !item.live.detailInStage || !item.live.subtitleAtBottom ||
     item.live.subtitleHasHeading || !item.live.typePaletteDistinct ||
     !item.live.focusAccentMatchesSubtitle || !item.live.nodeTimeMatchesSubtitle ||
     (String(item.count).startsWith('r4') ?
@@ -330,7 +328,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     item.final.oldBottomNote || item.final.neighborhoodCount || item.final.markerClockOverlap ||
     item.final.markerOverlap || !item.final.rootStylingCorrect || !item.final.noDetachedEdges ||
     !item.final.relationsJoinMarkers || !item.final.relationStrokesVisible ||
-    !item.final.relationStrokesContinuous || !item.final.relationBadgesFit ||
+    !item.final.relationStrokesContinuous || !item.final.noRelationBadges || !item.final.relationArrows ||
     (item.branched && item.final.relationCount===0) ||
     item.live.displayLabelIsShort === false || item.live.detailIsCanonical === false ||
     !item.final.topology)) process.exit(1);

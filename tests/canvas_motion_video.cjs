@@ -38,8 +38,9 @@ fs.mkdirSync(out, { recursive: true });
       nodeTime: document.querySelector('.canvas-node.focus .canvas-time')?.textContent || null,
       markerCount: document.querySelectorAll('.canvas-final-marker').length,
       finalRelationCount: document.querySelectorAll('.canvas-final-relations line').length,
-      finalRelationBadges: [...document.querySelectorAll('.canvas-final-relations .relation-badge')]
-        .map(group => group.querySelector('text')?.textContent),
+      finalRelationArrows: [...document.querySelectorAll('.canvas-final-relations line')]
+        .every(line => !!line.getAttribute('marker-end')),
+      noRelationLabels: !document.querySelector('.canvas-edge-label, .relation-badge'),
       noDetachedFinalEdges: !document.querySelector('.canvas-world .canvas-edge') &&
         !document.querySelector('.canvas-final-leaders'),
       finalMarkerTypes: [...document.querySelectorAll('.canvas-final-marker')]
@@ -90,7 +91,7 @@ fs.mkdirSync(out, { recursive: true });
       (!state.final && state.focus && state.detailTime !== state.nodeTime) ||
       JSON.stringify(state.counts)!==JSON.stringify(expectedCounts) ||
       (state.final && (state.markerCount === 0 || state.finalRelationCount === 0 ||
-        !state.finalRelationBadges.includes('案への懸念') ||
+        !state.finalRelationArrows || !state.noRelationLabels ||
         !['move','sms','decision'].every(id => state.finalMarkerLines[id] === 1) ||
         !state.finalLabelsFit || !state.roadTermIntact ||
         !state.noDetachedFinalEdges ||
