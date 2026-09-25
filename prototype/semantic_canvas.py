@@ -63,6 +63,11 @@ def _first_free(preferred: tuple[int, int], occupied: set[tuple[int, int]],
 
 def _proper_cross(a: Mapping[str, Any], b: Mapping[str, Any],
                   c: Mapping[str, Any], d: Mapping[str, Any]) -> bool:
+    if (max(a["x"], b["x"]) <= min(c["x"], d["x"]) or
+            max(c["x"], d["x"]) <= min(a["x"], b["x"]) or
+            max(a["y"], b["y"]) <= min(c["y"], d["y"]) or
+            max(c["y"], d["y"]) <= min(a["y"], b["y"])):
+        return False
     def side(p: Mapping[str, Any], q: Mapping[str, Any], r: Mapping[str, Any]) -> float:
         return (q["x"] - p["x"]) * (r["y"] - p["y"]) - (q["y"] - p["y"]) * (r["x"] - p["x"])
     return side(a, b, c) * side(a, b, d) < 0 and side(c, d, a) * side(c, d, b) < 0
@@ -73,6 +78,9 @@ def _line_hits_card(a: Mapping[str, Any], b: Mapping[str, Any],
     # Conservative world-space footprint of the 390px Live card. A line
     # crossing a third Node is worse than a line-to-line crossing.
     x, y = card["x"], card["y"]
+    if (max(a["x"], b["x"]) <= x - 202 or min(a["x"], b["x"]) >= x + 202 or
+            max(a["y"], b["y"]) <= y - 95 or min(a["y"], b["y"]) >= y + 95):
+        return False
     corners = ({"x": x - 202, "y": y - 95}, {"x": x + 202, "y": y - 95},
                {"x": x + 202, "y": y + 95}, {"x": x - 202, "y": y + 95})
     return any(_proper_cross(a, b, corner, corners[(index + 1) % 4])
@@ -146,30 +154,18 @@ def _repair_new_relation(source_id: str, target_id: str,
     return True
 
 
-def _creation_anchor(node: Mapping[str, Any], events: list[Mapping[str, Any]],
-                     creation_sequence: int, known_nodes: set[str],
-                     accepted_relations: set[tuple[str, str, str]]) -> tuple[str, str] | None:
-    """Use creation-Evidence relations for initial placement; later links may reflow."""
-    refs = set(node.get("evidence_ids") or ())
-    target_id = str(node["id"])
-    candidates: list[tuple[int, int, str, str]] = []
-    for event in events:
-        if event.get("event_type") != "relation_detected" or not refs.intersection(event.get("source_evidence_ids") or ()):
-            continue
-        payload = event.get("payload") or {}
-        relation = payload.get("relation_type")
-        if relation not in SEMANTIC or int(event.get("sequence", 0)) < creation_sequence:
-            continue
-        source, target = payload.get("source_node_id"), payload.get("target_node_id")
-        if (source, target, relation) not in accepted_relations:
-            continue
-        if relation == "discussion_provenance" and target == target_id and source in known_nodes:
-            candidates.append((0, int(event["sequence"]), str(source), "child"))
-        elif relation in {"supports", "opposes"} and source == target_id and target in known_nodes:
-            candidates.append((1, int(event["sequence"]), str(target), relation))
+def _placement_anchor(node_id: str, known_nodes: set[str],
+                      accepted_relations: set[tuple[str, str, str]]) -> tuple[str, str] | None:
+    """Use accepted semantic structure, including late Human links, for placement."""
+    candidates: list[tuple[int, str, str]] = []
+    for source, target, relation in accepted_relations:
+        if relation == "discussion_provenance" and target == node_id and source in known_nodes:
+            candidates.append((0, source, "child"))
+        elif relation in {"supports", "opposes"} and source == node_id and target in known_nodes:
+            candidates.append((1, target, relation))
     if not candidates:
         return None
-    _, _, anchor, placement = min(candidates)
+    _, anchor, placement = min(candidates)
     return anchor, placement
 
 
@@ -242,8 +238,7 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
             if position.get("placement") != "linked":
                 root_count += 1
             continue
-        node = all_nodes[node_id]
-        anchor = _creation_anchor(node, ordered, creation[node_id], set(positions), accepted_relations)
+        anchor = _placement_anchor(node_id, set(positions), accepted_relations)
         if anchor:
             parent, placement = anchor
             px, py = positions[parent]["cell"]
