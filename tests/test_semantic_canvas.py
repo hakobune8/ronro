@@ -4,11 +4,17 @@ import copy
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from evaluation.tooling.semantic_hypothesis_review import build_case
 from prototype.display_labels import POLICY_VERSION, VERSION as LABEL_VERSION, content_hash
 from prototype.layout import StableLayout, map_projection
+from prototype.materializer import initial_state
+from prototype.relation_correction import interpret_relation_correction
+from prototype.replay import ReplayResult, ReplayRunner
+from prototype.schema import SchemaValidator
 from prototype.semantic_canvas import project_semantic_canvas
+from prototype.semantic_projection import focused_flow
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,10 +79,9 @@ class SemanticCanvasTests(unittest.TestCase):
         self.assertEqual(project_semantic_canvas(graph, events)["nodes"][0]["time_at"],
                          "2026-09-25T01:00:00Z")
 
-    def test_late_link_without_crossing_and_human_removal_keep_positions(self) -> None:
+    def test_late_link_and_human_removal_replay_to_the_same_world(self) -> None:
         graph, events = synthetic(2)
-        placement_state = {}
-        first = project_semantic_canvas(graph, events, placement_state=placement_state)
+        first = project_semantic_canvas(graph, events)
         positions = {node["id"]: (node["x"], node["y"]) for node in first["nodes"]}
         late = {"event_id": "late", "sequence": 3, "event_type": "relation_detected",
                 "source_evidence_ids": ["e1"],
@@ -84,14 +89,15 @@ class SemanticCanvasTests(unittest.TestCase):
                             "relation_type": "discussion_provenance"}}
         graph["edges"] = [{"id": "edge-late", "type": "discussion_provenance",
                            "source_node_id": "n0", "target_node_id": "n1", "source_event_ids": ["late"]}]
-        linked = project_semantic_canvas(graph, [*events, late], placement_state=placement_state)
-        self.assertEqual({node["id"]: (node["x"], node["y"]) for node in linked["nodes"]}, positions)
+        linked = project_semantic_canvas(graph, [*events, late])
+        self.assertEqual(linked, project_semantic_canvas(graph, [*events, late]))
+        self.assertNotEqual({node["id"]: (node["x"], node["y"]) for node in linked["nodes"]}, positions)
         self.assertEqual(linked["edges"][0]["target_node_id"], "n1")
         graph["edges"] = []
         correction = {"event_id": "correction", "sequence": 4, "event_type": "correct_relation",
                       "payload": {"old_relation": late["payload"], "new_relation": None,
                                   "declared_independent": True}}
-        corrected = project_semantic_canvas(graph, [*events, late, correction], placement_state=placement_state)
+        corrected = project_semantic_canvas(graph, [*events, late, correction])
         self.assertEqual({node["id"]: (node["x"], node["y"]) for node in corrected["nodes"]}, positions)
         self.assertEqual(corrected["edges"], [])
         self.assertIn("n1", corrected["root_ids"])
@@ -113,7 +119,24 @@ class SemanticCanvasTests(unittest.TestCase):
         self.assertEqual(projected["latest_detail_id"], "n1")
         self.assertEqual(projected["edges"], [])
 
-    def test_runtime_projection_preserves_position_after_late_same_evidence_link(self) -> None:
+    def test_canvas_focus_and_spoken_correction_share_active_target(self) -> None:
+        graph, events = synthetic(3)
+        graph["edges"] = [{"id": "relation-01", "type": "discussion_provenance",
+                           "source_node_id": "n0", "target_node_id": "n1"}]
+        graph["nodes"][2]["status"] = "archived"
+        graph["nodes"][2]["source_event_ids"].append("archive-3")
+        events.append({"event_id": "archive-3", "sequence": 4,
+                       "event_type": "archive_node", "payload": {"node_id": "n2"}})
+        canvas = project_semantic_canvas(graph, events)
+        self.assertEqual(canvas["focus_id"], "n1")
+        self.assertEqual(canvas["focus_id"], focused_flow(graph, events)["focus_id"])
+        correction = interpret_relation_correction("これは別の論点です", graph, events)
+        self.assertEqual(correction["old_relation"]["target_node_id"], canvas["focus_id"])
+        graph["nodes"][1]["status"] = "parked"
+        self.assertEqual(project_semantic_canvas(graph, events)["focus_id"], "n0")
+        self.assertEqual(focused_flow(graph, events)["focus_id"], "n0")
+
+    def test_runtime_projection_cold_replay_agrees_after_late_same_evidence_link(self) -> None:
         graph, events = synthetic(2)
         layout = StableLayout()
         before = map_projection({"graph": graph}, events, layout)["semantic_canvas"]
@@ -125,26 +148,56 @@ class SemanticCanvasTests(unittest.TestCase):
         graph["edges"] = [{"id": "late-edge", "type": "discussion_provenance",
                            "source_node_id": "n0", "target_node_id": "n1", "source_event_ids": [late["event_id"]]}]
         after = map_projection({"graph": graph}, [*events, late], layout)["semantic_canvas"]
-        self.assertEqual({node["id"]: (node["x"], node["y"]) for node in after["nodes"]}, before_positions)
+        self.assertNotEqual({node["id"]: (node["x"], node["y"]) for node in after["nodes"]}, before_positions)
+        cold = map_projection({"graph": graph}, [*events, late], StableLayout())["semantic_canvas"]
+        self.assertEqual(after, cold)
         self.assertEqual(len(after["edges"]), 1)
         self.assertEqual(after["focus_id"], "n1")
+
+    def test_r4_incremental_and_cold_canvas_match_exactly(self) -> None:
+        complete, _ = build_case(self.cases[3], self.classifications)
+        session_id = complete.state["graph"]["session_id"]
+        runner = ReplayRunner(SchemaValidator(ROOT / "schemas"))
+        current = ReplayResult(initial_state(session_id, complete.state["evidence"], []), ())
+        layout = StableLayout()
+        for event in complete.events:
+            current = runner.apply_event(current, event)
+            incremental = map_projection(current.state, current.events, layout)["semantic_canvas"]
+        cold = map_projection(complete.state, complete.events, StableLayout())["semantic_canvas"]
+        self.assertEqual(incremental, cold)
+        self.assertEqual(current.state["graph"], complete.state["graph"])
+
+    def test_canvas_cache_is_derived_and_invalidates_on_input_change(self) -> None:
+        graph, events = synthetic(2)
+        layout = StableLayout()
+        with patch("prototype.layout.project_semantic_canvas", wraps=project_semantic_canvas) as projector:
+            first = layout.canvas_projection(graph, events, {})
+            first["nodes"][0]["label"] = "mutated caller copy"
+            self.assertNotEqual(layout.canvas_projection(graph, events, {})["nodes"][0]["label"],
+                                "mutated caller copy")
+            self.assertEqual(projector.call_count, 1)
+            changed = layout.canvas_projection(graph, events, {"n1": "短い表示"})
+            self.assertEqual(changed["nodes"][1]["label"], "短い表示")
+            self.assertEqual(projector.call_count, 2)
+            layout.reset()
+            self.assertEqual(layout.canvas_projection(graph, events, {"n1": "短い表示"}), changed)
+            self.assertEqual(projector.call_count, 3)
 
     def test_new_crossing_relation_reflows_live_world_once_without_graph_change(self) -> None:
         graph, events = synthetic(4)
         for index, node in enumerate(graph["nodes"]):
             node["id"] = "abcd"[index]
         cells = {"a": (0, 0), "b": (1, 1), "c": (0, 1), "d": (1, 0)}
-        placement_state = {node_id: {"cell": cell, "x": cell[0] * 440,
-                                     "y": cell[1] * 285, "placement": "unconfirmed"}
-                           for node_id, cell in cells.items()}
+        initial_positions = {node_id: {"cell": cell, "x": cell[0] * 440,
+                                       "y": cell[1] * 285, "placement": "unconfirmed"}
+                             for node_id, cell in cells.items()}
         first_relation = {"event_id": "rel-ab", "sequence": 5, "event_type": "relation_detected",
                           "payload": {"source_node_id": "a", "target_node_id": "b",
                                       "relation_type": "discussion_provenance"}}
         graph["edges"] = [{"id": "ab", "type": "discussion_provenance",
                            "source_node_id": "a", "target_node_id": "b"}]
-        placement_state["__canvas_layout_meta__"] = {"last_relation_sequence": 5}
         before = project_semantic_canvas(graph, [*events, first_relation],
-                                         placement_state=placement_state)
+                                         initial_positions=initial_positions)
         relation = {"event_id": "rel-cd", "sequence": 6, "event_type": "relation_detected",
                     "payload": {"source_node_id": "c", "target_node_id": "d",
                                 "relation_type": "discussion_provenance"}}
@@ -153,7 +206,7 @@ class SemanticCanvasTests(unittest.TestCase):
         graph["revision"] += 1
         original_graph = copy.deepcopy(graph)
         after = project_semantic_canvas(graph, [*events, first_relation, relation],
-                                        placement_state=placement_state)
+                                        initial_positions=initial_positions)
         original = {item["id"]: (item["x"], item["y"]) for item in before["nodes"]}
         moved = {item["id"]: (item["x"], item["y"]) for item in after["nodes"]}
         from prototype.semantic_canvas import _proper_cross
@@ -162,10 +215,10 @@ class SemanticCanvasTests(unittest.TestCase):
         self.assertTrue(_proper_cross(*(point(node_id, original) for node_id in "abcd")))
         self.assertFalse(_proper_cross(*(point(node_id, moved) for node_id in "abcd")))
         self.assertEqual(sum(original[nid] != moved[nid] for nid in original), 1)
-        self.assertNotEqual(original["d"], moved["d"])
         self.assertEqual(graph, original_graph)
         self.assertEqual(project_semantic_canvas(graph, [*events, first_relation, relation],
-                                                 placement_state=placement_state), after)
+                                                 initial_positions=initial_positions), after)
+        self.assertEqual(initial_positions["d"]["cell"], cells["d"])
 
     def test_display_title_is_short_but_focus_keeps_canonical_detail(self) -> None:
         result, ids = build_case(self.cases[3], self.classifications)

@@ -6,7 +6,7 @@ import copy
 import json
 
 from prototype.layout import StableLayout, map_projection
-from prototype.semantic_canvas import CELL_X, CELL_Y
+from prototype.semantic_canvas import CELL_X, CELL_Y, project_semantic_canvas
 
 
 def build_crossing_scenes() -> list[dict]:
@@ -37,12 +37,9 @@ def build_crossing_scenes() -> list[dict]:
                 "source_event_ids": [event_id]}
 
     edges = [relation("issue", "option", 5), relation("issue", "open", 6)]
-    layout = StableLayout()
-    layout._canvas_placements.update({node_id: {"cell": cell, "x": cell[0] * CELL_X,
-                                                 "y": cell[1] * CELL_Y,
-                                                 "placement": "unconfirmed"}
-                                      for node_id, cell in cells.items()})
-    layout._canvas_placements["__canvas_layout_meta__"] = {"last_relation_sequence": 6}
+    initial_positions = {node_id: {"cell": cell, "x": cell[0] * CELL_X,
+                                   "y": cell[1] * CELL_Y, "placement": "unconfirmed"}
+                         for node_id, cell in cells.items()}
 
     def snapshot(revision: int) -> dict:
         graph = {"session_id": "synthetic-live-crossing", "revision": revision,
@@ -50,7 +47,10 @@ def build_crossing_scenes() -> list[dict]:
                  "current_topic": {"primary_topic_id": None}}
         state = {"session": {"id": "synthetic-live-crossing", "title": "防災対応の検討会"},
                  "graph": graph}
-        projected = map_projection(state, copy.deepcopy(events), layout)
+        projected = map_projection(state, copy.deepcopy(events), StableLayout())
+        # Diagnostic geometry only. Runtime map_projection never accepts a seed.
+        projected["semantic_canvas"] = project_semantic_canvas(
+            graph, copy.deepcopy(events), initial_positions=initial_positions)
         projected["shared"] = {}
         return {"state": state, "map": projected, "live_state": {"runtime_state": "active"}}
 

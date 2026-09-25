@@ -1,16 +1,17 @@
 """Deterministic, non-canonical world placement and Auto Camera projection.
 
-Node positions are Presentation state. New semantic edges may trigger a bounded
-local crossing repair; they never rewrite Canonical Nodes or Relations.
+Accepted Graph and Event History determine Product positions. Explicit initial
+positions are only for synthetic geometry diagnostics, not runtime persistence.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any, Mapping, Sequence
 
+from .semantic_projection import focused_flow
 
-VERSION = "semantic-canvas-v1"
+
+VERSION = "semantic-canvas-v2"
 SEMANTIC = {"discussion_provenance", "supports", "opposes"}
 CELL_X = 440
 CELL_Y = 285
@@ -23,7 +24,7 @@ def _event_order(events: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]
 
 
 def _root_cell(index: int) -> tuple[int, int]:
-    """An outward square spiral; adding a Root never relocates old regions."""
+    """Place currently independent regions on a deterministic outward spiral."""
     if index == 0:
         return 0, 0
     x = y = 0
@@ -146,7 +147,8 @@ def _repair_new_relation(source_id: str, target_id: str,
 
 
 def _creation_anchor(node: Mapping[str, Any], events: list[Mapping[str, Any]],
-                     creation_sequence: int, known_nodes: set[str]) -> tuple[str, str] | None:
+                     creation_sequence: int, known_nodes: set[str],
+                     accepted_relations: set[tuple[str, str, str]]) -> tuple[str, str] | None:
     """Use creation-Evidence relations for initial placement; later links may reflow."""
     refs = set(node.get("evidence_ids") or ())
     target_id = str(node["id"])
@@ -159,6 +161,8 @@ def _creation_anchor(node: Mapping[str, Any], events: list[Mapping[str, Any]],
         if relation not in SEMANTIC or int(event.get("sequence", 0)) < creation_sequence:
             continue
         source, target = payload.get("source_node_id"), payload.get("target_node_id")
+        if (source, target, relation) not in accepted_relations:
+            continue
         if relation == "discussion_provenance" and target == target_id and source in known_nodes:
             candidates.append((0, int(event["sequence"]), str(source), "child"))
         elif relation in {"supports", "opposes"} and source == target_id and target in known_nodes:
@@ -167,34 +171,6 @@ def _creation_anchor(node: Mapping[str, Any], events: list[Mapping[str, Any]],
         return None
     _, _, anchor, placement = min(candidates)
     return anchor, placement
-
-
-def _focus(graph: Mapping[str, Any], events: list[Mapping[str, Any]],
-           nodes: Mapping[str, Mapping[str, Any]], activity: Mapping[str, int]) -> str | None:
-    if not nodes:
-        return None
-    focus_id = max(nodes, key=lambda node_id: (activity[node_id], node_id))
-    focus_seq = activity[focus_id]
-    membership: dict[str, set[str]] = defaultdict(set)
-    for edge in graph.get("edges", []):
-        if edge.get("type") in {"contains", "has_option"}:
-            membership[str(edge["source_node_id"])].add(str(edge["target_node_id"]))
-    for event in events:
-        sequence = int(event.get("sequence", 0))
-        if sequence <= focus_seq:
-            continue
-        kind = event.get("event_type")
-        payload = event.get("payload") or {}
-        if kind == "correct_relation":
-            relation = payload.get("new_relation") or payload.get("old_relation")
-            if relation and relation.get("target_node_id") in nodes:
-                focus_id, focus_seq = relation["target_node_id"], sequence
-        elif kind in {"topic_focus_changed", "set_current_topic"}:
-            members = membership.get(str(payload.get("topic_id")), set()) & nodes.keys()
-            # A newly opened empty Topic has no Node to duplicate as focus.
-            focus_id = max(members, key=lambda nid: (activity[nid], nid)) if members else None
-            focus_seq = sequence
-    return focus_id
 
 
 def _neighborhood(focus_id: str | None, nodes: Mapping[str, Any], edges: list[dict[str, Any]],
@@ -232,12 +208,11 @@ def _neighborhood(focus_id: str | None, nodes: Mapping[str, Any], edges: list[di
 
 def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[str, Any]],
                             display_labels: Mapping[str, str] | None = None,
-                            placement_state: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Project one world for Live and Final with revisable Presentation positions.
+                            *, initial_positions: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    """Project one world for Live and Final from the accepted Graph and Events.
 
-    ``placement_state`` belongs to Projection, never to Canonical Nodes. New
-    Relations may improve an obstructed layout; unchanged revisions do not
-    keep moving Nodes.
+    ``initial_positions`` permits controlled synthetic geometry tests only.
+    Runtime callers omit it, so a cold replay and an incremental render agree.
     """
     ordered = _event_order(events)
     by_event = {str(event.get("event_id")): int(event.get("sequence", 0)) for event in ordered}
@@ -253,12 +228,14 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
                             for event in ordered if event.get("event_type") == "correct_relation"
                             and (event.get("payload") or {}).get("declared_independent")
                             and (event.get("payload") or {}).get("old_relation")}
+    accepted_relations = {(str(edge["source_node_id"]), str(edge["target_node_id"]), str(edge["type"]))
+                          for edge in graph.get("edges", []) if edge.get("type") in SEMANTIC}
     positions: dict[str, dict[str, Any]] = {}
     occupied: set[tuple[int, int]] = set()
     root_count = 0
     for node_id in ordered_nodes:
-        if placement_state is not None and node_id in placement_state:
-            position = placement_state[node_id]
+        if initial_positions is not None and node_id in initial_positions:
+            position = initial_positions[node_id]
             cell = tuple(position["cell"])
             positions[node_id] = {**position, "cell": cell}
             occupied.add(cell)
@@ -266,7 +243,7 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
                 root_count += 1
             continue
         node = all_nodes[node_id]
-        anchor = _creation_anchor(node, ordered, creation[node_id], set(positions))
+        anchor = _creation_anchor(node, ordered, creation[node_id], set(positions), accepted_relations)
         if anchor:
             parent, placement = anchor
             px, py = positions[parent]["cell"]
@@ -290,19 +267,15 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
         occupied.add(cell)
         positions[node_id] = {"cell": cell, "x": cell[0] * CELL_X, "y": cell[1] * CELL_Y,
                               "placement": kind, "placement_anchor_id": anchor[0] if anchor else None}
-        if placement_state is not None:
-            placement_state[node_id] = dict(positions[node_id])
-
     edges = [{"id": edge["id"], "source_node_id": edge["source_node_id"],
-              "target_node_id": edge["target_node_id"], "type": edge["type"]}
+              "target_node_id": edge["target_node_id"], "type": edge["type"],
+              "source_event_ids": tuple(edge.get("source_event_ids") or ())}
              for edge in graph.get("edges", []) if edge.get("type") in SEMANTIC
              and edge.get("source_node_id") in positions and edge.get("target_node_id") in positions]
-    meta = placement_state.setdefault("__canvas_layout_meta__", {}) if placement_state is not None else {}
-    last_checked = int(meta.get("last_relation_sequence", 0))
-    accepted = {(edge["source_node_id"], edge["target_node_id"], edge["type"]) for edge in edges}
+    accepted = {(edge["source_node_id"], edge["target_node_id"], edge["type"]): edge for edge in edges}
+    active: dict[tuple[str, str, str], dict[str, Any]] = {}
     for event in ordered:
-        sequence = int(event.get("sequence", 0))
-        if sequence <= last_checked or event.get("event_type") not in {"relation_detected", "correct_relation"}:
+        if event.get("event_type") not in {"relation_detected", "correct_relation"}:
             continue
         payload = event.get("payload") or {}
         relation = payload.get("new_relation") if event.get("event_type") == "correct_relation" else payload
@@ -310,14 +283,21 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
             continue
         source, target = relation.get("source_node_id"), relation.get("target_node_id")
         kind = relation.get("relation_type")
-        if (source, target, kind) in accepted:
-            _repair_new_relation(source, target, positions, edges)
-    if placement_state is not None:
-        meta["last_relation_sequence"] = max((int(event.get("sequence", 0)) for event in ordered
-                                               if event.get("event_type") in {"relation_detected", "correct_relation"}),
-                                              default=last_checked)
-        for node_id in ordered_nodes:
-            placement_state[node_id] = dict(positions[node_id])
+        key = (source, target, kind)
+        edge = accepted.get(key)
+        if edge is None or key in active:
+            continue
+        if edge["source_event_ids"] and event.get("event_id") not in edge["source_event_ids"]:
+            continue
+        active[key] = edge
+        sequence = int(event.get("sequence", 0))
+        available = {nid: position for nid, position in positions.items() if creation[nid] <= sequence}
+        visible_edges = [item for item in active.values()
+                         if item["source_node_id"] in available and item["target_node_id"] in available]
+        if source in available and target in available and _repair_new_relation(source, target, available, visible_edges):
+            positions.update(available)
+    # Presentation must not expose Event bookkeeping as a new Relation field.
+    edges = [{key: value for key, value in edge.items() if key != "source_event_ids"} for edge in edges]
     incoming = {edge["target_node_id"] for edge in edges if edge["type"] == "discussion_provenance"}
     views = []
     for node_id in ordered_nodes:
@@ -334,19 +314,35 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
                       "time_at": time_at,
                       "root_state": root_state, "created_sequence": creation[node_id],
                       "activity_sequence": activity[node_id]})
-    focus_id = _focus(graph, ordered, all_nodes, activity)
-    primary = _neighborhood(focus_id, all_nodes, edges, activity, positions)
-    latest_id = max(all_nodes, key=lambda nid: (activity[nid], nid)) if all_nodes else None
+    # Spoken correction and the participant Canvas must share one current
+    # discussion target; archived/parked history is not a correction focus.
+    semantic_focus = focused_flow(graph, ordered)
+    focus_id = semantic_focus["focus_id"]
+    focusable = {nid: all_nodes[nid] for nid in all_nodes
+                 if all_nodes[nid]["status"] not in {"archived", "parked"}}
+    primary = _neighborhood(focus_id, focusable, edges, activity, positions)
+    latest_id = semantic_focus["latest_detail"]["id"] if semantic_focus["latest_detail"] else None
     if primary:
-        xs = [positions[nid]["x"] for nid in primary]
-        ys = [positions[nid]["y"] for nid in primary]
-        # Keep focus horizontally centered. Vertically, reserve room for a
-        # provenance parent above and the bounded Canonical subtitle below.
+        # The 1920x1080 stage is approximately 978px high. Reserve its top and
+        # the lower subtitle band before choosing a camera target. If distant
+        # context cannot fit at readable scale, omit the least useful neighbor
+        # rather than shrink the entire Canvas below the approved 0.74 scale.
+        anchor_y, top_center, bottom_center = 978 * .45, 110, 760
+        while True:
+            xs = [positions[nid]["x"] for nid in primary]
+            ys = [positions[nid]["y"] for nid in primary]
+            span = max(max(xs) - min(xs), (max(ys) - min(ys)) * 1.45)
+            scale = max(0.74, min(1.0, 1000 / max(span + 320, 1)))
+            if len(primary) == 1 or (max(ys) - min(ys)) * scale <= bottom_center - top_center:
+                break
+            primary.pop()
         focus_x, focus_y = positions[focus_id]["x"], positions[focus_id]["y"]
-        span = max(max(xs) - min(xs), (max(ys) - min(ys)) * 1.45)
+        preferred_y = focus_y + (sum(ys) / len(ys) - focus_y) * 0.5
+        lowest_y = max(ys) - (bottom_center - anchor_y) / scale
+        highest_y = min(ys) + (anchor_y - top_center) / scale
         live_camera = {"x": focus_x,
-                       "y": focus_y + (sum(ys) / len(ys) - focus_y) * 0.5,
-                       "scale": max(0.74, min(1.0, 1000 / max(span + 320, 1))),
+                       "y": min(max(preferred_y, lowest_y), highest_y),
+                       "scale": scale,
                        "focus_id": focus_id}
     else:
         live_camera = {"x": 0, "y": 0, "scale": 1.0, "focus_id": None}

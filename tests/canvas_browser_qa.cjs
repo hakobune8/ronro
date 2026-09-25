@@ -7,6 +7,7 @@ const python = `import copy
 import json
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
+from unittest.mock import patch
 from evaluation.tooling.semantic_hypothesis_review import build_case
 from prototype.display_labels import POLICY_VERSION, VERSION as LABEL_VERSION, content_hash
 from prototype.layout import StableLayout, map_projection
@@ -93,12 +94,12 @@ for case_name,repetitions in (('r4-timed',1),('r4-timed-long',8)):
     print(json.dumps({'count':case_name,'branched':False,'state':timed_state,
                       'map':map_projection(timed_state,spaced_events,StableLayout(),timed_presentation),
                       'live_state':{'runtime_state':'active'}},ensure_ascii=False))
-# Retain the pre-Live-reflow world solely to demonstrate the separate Final
-# callout crossing repair. Normal R4 snapshots above use actual Product layout.
-comparison_layout=StableLayout()
-comparison_layout._canvas_placements['__canvas_layout_meta__']={'last_relation_sequence':10**9}
+# Diagnostic only: suppress Live repair to isolate Final callout repair.
+# Normal R4 snapshots above use actual Product layout.
+with patch('prototype.semantic_canvas._repair_new_relation', return_value=False):
+    comparison_map=map_projection(spaced_state,spaced_events,StableLayout(),presentation)
 print(json.dumps({'count':'r4-timed-crossing','branched':False,'state':spaced_state,
-                  'map':map_projection(spaced_state,spaced_events,comparison_layout,presentation),
+                  'map':comparison_map,
                   'live_state':{'runtime_state':'active'}},ensure_ascii=False))`;
 const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: 'utf8' })
   .trim().split('\n').map(line => JSON.parse(line));
@@ -117,6 +118,15 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     await page.goto(url, { waitUntil: 'networkidle' });
     const live = await page.evaluate(expected => ({
       primary: document.querySelectorAll('.canvas-node:not(.mid)').length,
+      camera: expected.canvas.live_camera,
+      nearWorld: expected.canvas.nodes.filter(node => expected.canvas.near_ids.includes(node.id))
+        .map(node => ({id:node.id,x:node.x,y:node.y})),
+      primaryGeometry: [...document.querySelectorAll('.canvas-node:not(.mid)')].map(node => {
+        const rect=node.getBoundingClientRect(), stage=document.querySelector('.canvas-stage').getBoundingClientRect();
+        return {id:node.dataset.nodeId,top:Math.round(rect.top-stage.top),
+          bottom:Math.round(rect.bottom-stage.top),left:Math.round(rect.left-stage.left),
+          right:Math.round(rect.right-stage.left)};
+      }),
       displayed: document.querySelectorAll('.canvas-node').length,
       peripheral: document.querySelectorAll('.canvas-peripheral').length,
       stageWidth: document.querySelector('.canvas-stage').getBoundingClientRect().width,
