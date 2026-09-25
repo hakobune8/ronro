@@ -262,10 +262,10 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
           Math.min(a.right,b.right)-Math.max(a.left,b.left)>2 &&
           Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>2).length,0);
       })(),
-      rootHintsCorrect: [...document.querySelectorAll('.canvas-final-marker')].every(marker => {
-        const hint=marker.querySelector('.canvas-root-hint')?.textContent || '';
-        return marker.classList.contains('independent') ? hint==='別の話題' : !hint;
-      }),
+      rootStylingCorrect: [...document.querySelectorAll('.canvas-final-marker')].every(marker =>
+        !marker.querySelector('.canvas-root-hint') &&
+        (marker.classList.contains('unconfirmed') ? getComputedStyle(marker).borderTopStyle==='dashed' :
+          getComputedStyle(marker).borderTopStyle==='solid')),
       markerClocks: document.querySelectorAll('.canvas-final-marker .canvas-time').length,
       markerClockOverlap: [...document.querySelectorAll('.canvas-final-marker')].filter(marker => {
         const clock=marker.querySelector('.canvas-time')?.getBoundingClientRect();
@@ -316,7 +316,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     (['r4-long','r4-timed-long'].includes(item.count) ? !item.live.subtitleOverflowNote : !item.live.subtitleComplete) ||
     item.live.stageWidth !== item.final.stageWidth ||
     item.final.oldBottomNote || item.final.neighborhoodCount || item.final.markerClockOverlap ||
-    item.final.markerOverlap || !item.final.rootHintsCorrect || !item.final.noDetachedEdges ||
+    item.final.markerOverlap || !item.final.rootStylingCorrect || !item.final.noDetachedEdges ||
     !item.final.relationsJoinMarkers || !item.final.relationStrokesVisible ||
     !item.final.relationStrokesContinuous || !item.final.relationBadgesFit ||
     (item.branched && item.final.relationCount===0) ||

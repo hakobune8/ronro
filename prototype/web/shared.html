@@ -256,8 +256,6 @@
     .canvas-final-marker small { display: block; width: max-content; margin-bottom: 7px; padding: 2px 7px;
       border-radius: 4px; background: var(--type-accent,#587086); color: #fff; font-size: 16px; }
     .canvas-final-marker .canvas-final-label { display: block; }
-    .canvas-final-marker .canvas-root-hint { display: block; margin-top: 6px; color: #60778b;
-      font-size: 15px; font-weight: 600; }
     /* Canonical detail is a subtitle, not another graph card or an inspector. */
     .canvas-detail { position: absolute; z-index: 5; left: 50%; bottom: 14px;
       transform: translateX(-50%); width: min(1720px,calc(100% - 100px));
@@ -718,8 +716,7 @@
           }).join('');
         markers.innerHTML = placed.map(({node,x,y}) => {
           const rootClass = node.root_state === 'linked' ? '' : ` ${node.root_state}`;
-          const hint = node.root_state === 'independent' ? '別の話題' : '';
-          return `<div class="canvas-final-marker ${escapeHtml(node.type)}${rootClass}" data-node-id="${escapeHtml(node.id)}" style="left:${x}px;top:${y}px"><small>${escapeHtml(canvasRole(node))}</small>${canvasTimeMarkup(node)}<span class="canvas-final-label">${escapeHtml(node.label)}</span>${hint ? `<span class="canvas-root-hint">${hint}</span>` : ''}</div>`;
+          return `<div class="canvas-final-marker ${escapeHtml(node.type)}${rootClass}" data-node-id="${escapeHtml(node.id)}" style="left:${x}px;top:${y}px"><small>${escapeHtml(canvasRole(node))}</small>${canvasTimeMarkup(node)}<span class="canvas-final-label">${escapeHtml(node.label)}</span></div>`;
         }).join('');
       }
     }
