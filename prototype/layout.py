@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from typing import Any, Iterable
 from .display_labels import display_projection
 from .semantic_projection import focused_flow
+from .semantic_canvas import project_semantic_canvas
 
 
 MAIN_LANE_GAP = 320
@@ -23,12 +26,27 @@ class StableLayout:
 
     def __init__(self) -> None:
         self._placements: dict[str, dict[str, Any]] = {}
+        self._canvas_cache_key: str | None = None
+        self._canvas_cache_value: dict[str, Any] | None = None
         from .shared_projection import SharedProjection
         self.shared_projection = SharedProjection()
 
     def reset(self) -> None:
         self._placements.clear()
+        self._canvas_cache_key = None
+        self._canvas_cache_value = None
         self.shared_projection.reset()
+
+    def canvas_projection(self, graph: dict[str, Any], events: list[dict[str, Any]],
+                          labels: dict[str, str]) -> dict[str, Any]:
+        """Cache a pure projection only for byte-equivalent semantic inputs."""
+        encoded = json.dumps((graph, events, labels), ensure_ascii=False, sort_keys=True,
+                             separators=(",", ":")).encode("utf-8")
+        key = hashlib.sha256(encoded).hexdigest()
+        if key != self._canvas_cache_key or self._canvas_cache_value is None:
+            self._canvas_cache_value = project_semantic_canvas(graph, events, labels)
+            self._canvas_cache_key = key
+        return copy.deepcopy(self._canvas_cache_value)
 
     def project(
         self,
@@ -334,6 +352,7 @@ def map_projection(
         "presentation": copy.deepcopy(presentation or {}),
         "display_labels": display_labels,
         "semantic_focus": focused_flow(graph, event_list, semantic_labels),
+        "semantic_canvas": layout.canvas_projection(graph, event_list, semantic_labels),
         "recent_flow": recent_topic_flow(event_list, graph),
         "recent_discussion_flow": recent_discussion_flow(graph, event_list, semantic_labels),
         "counts": counts,

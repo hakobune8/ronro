@@ -9,6 +9,7 @@ from evaluation.tooling.semantic_hypothesis_review import build_case
 from prototype.commands import HumanCommandHandler
 from prototype.errors import PrototypeError
 from prototype.live_queue import LiveAnalyzerRuntime
+from prototype.layout import StableLayout, map_projection
 from prototype.real_analyzer import PROMPT_VERSION_V7, RealAnalyzer, StaticJsonProvider
 from prototype.relation_correction import interpret_relation_correction
 from prototype.replay import ReplayRunner, canonical_json
@@ -129,6 +130,10 @@ class RelationCorrectionTests(unittest.TestCase):
         runtime = LiveAnalyzerRuntime(session_id="hypothesis-r4", schema_validator=self.validator,
                                       replay_runner=self.runner, initial_result=result, analyzer=_UnexpectedAnalyzer())
         try:
+            before = runtime.snapshot()["map"]["semantic_canvas"]
+            self.assertTrue(any(edge["source_node_id"] == old["source_node_id"]
+                                and edge["target_node_id"] == old["target_node_id"]
+                                for edge in before["edges"]))
             event = runtime.execute_command({
                 "command_type": "correct_relation", "old_relation": old, "new_relation": None,
                 "declared_independent": True, "expected_revision": result.state["graph"]["revision"],
@@ -140,9 +145,17 @@ class RelationCorrectionTests(unittest.TestCase):
             self.assertFalse(any(edge["source_node_id"] == old["source_node_id"]
                                  and edge["target_node_id"] == old["target_node_id"]
                                  for edge in snapshot["state"]["graph"]["edges"]))
+            canvas = snapshot["map"]["semantic_canvas"]
+            self.assertFalse(any(edge["source_node_id"] == old["source_node_id"]
+                                 and edge["target_node_id"] == old["target_node_id"]
+                                 for edge in canvas["edges"]))
+            self.assertIn(old["target_node_id"], canvas["root_ids"])
+            self.assertEqual(canvas["focus_id"], snapshot["map"]["semantic_focus"]["focus_id"])
             replay = self.runner.replay_events(session_id="hypothesis-r4", evidence=snapshot["state"]["evidence"],
                                                utterances=snapshot["state"]["utterances"], events=snapshot["events"])
             self.assertEqual(canonical_json(snapshot["state"]), canonical_json(replay.state))
+            self.assertEqual(canvas, map_projection(replay.state, replay.events,
+                                                    StableLayout())["semantic_canvas"])
         finally:
             runtime.close()
 
@@ -193,6 +206,11 @@ class RelationCorrectionTests(unittest.TestCase):
             self.assertEqual(snapshot["events"][-1]["actor"], "human")
             self.assertEqual(snapshot["events"][-1]["event_type"], "correct_relation")
             self.assertEqual(focused_flow(snapshot["state"]["graph"], snapshot["events"])["focus_id"], ids["r4-n5"])
+            canvas = snapshot["map"]["semantic_canvas"]
+            self.assertEqual(canvas["focus_id"], ids["r4-n5"])
+            self.assertIn(ids["r4-n5"], canvas["root_ids"])
+            self.assertFalse(any(edge["target_node_id"] == ids["r4-n5"]
+                                 and edge["type"] == "discussion_provenance" for edge in canvas["edges"]))
         finally:
             runtime.close()
 
