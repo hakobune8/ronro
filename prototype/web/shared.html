@@ -193,10 +193,12 @@
     }
     .canvas-world { position: absolute; z-index: 1; top: 0; left: 0; width: 0; height: 0; transform-origin: 0 0;
       transition: transform .65s cubic-bezier(.2,.7,.25,1); will-change: transform; }
-    .canvas-edges { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
-    .canvas-edge.provenance { stroke: #86a9c6; stroke-width: 2.5; }
-    .canvas-edge.supports { stroke: #45946f; stroke-width: 2.2; }
-    .canvas-edge.opposes { stroke: #bc766b; stroke-width: 2.2; }
+    .canvas-edges { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none;
+      transition: opacity .2s ease; }
+    .canvas-edges.reflowing { opacity: .22; }
+    .canvas-edge.provenance { stroke: #547d9c; stroke-width: 4.2; }
+    .canvas-edge.supports { stroke: #2d7b54; stroke-width: 4; }
+    .canvas-edge.opposes { stroke: #a95347; stroke-width: 4; }
     .canvas-node.idea, .canvas-final-marker.idea { --type-accent: #166c84; --type-border: #5d9bb0; --type-tint: #eef8fb; }
     .canvas-node.option, .canvas-final-marker.option { --type-accent: #287545; --type-border: #70aa82; --type-tint: #eff9f1; }
     .canvas-node.concern, .canvas-final-marker.concern { --type-accent: #a94933; --type-border: #cf8c78; --type-tint: #fff3ef; }
@@ -206,7 +208,8 @@
     .canvas-node { position: absolute; transform: translate(-50%,-50%); width: 390px; min-height: 115px;
       padding: 13px 17px; border: 2px solid var(--type-border,#b9cfdd); border-radius: 14px;
       background: var(--type-tint,#fff);
-      box-shadow: 0 4px 12px rgba(31,65,95,.055); color: #1e3040; pointer-events: none; }
+      box-shadow: 0 4px 12px rgba(31,65,95,.055); color: #1e3040; pointer-events: none;
+      transition: left .55s cubic-bezier(.2,.7,.25,1), top .55s cubic-bezier(.2,.7,.25,1); }
     .canvas-node .canvas-role { display: inline-block; margin-bottom: 7px; padding: 2px 9px;
       border-radius: 5px; background: var(--type-accent,#49657b); color: #fff;
       font-size: 18px; font-weight: 750; }
@@ -229,10 +232,10 @@
     .canvas-final-markers { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
     .canvas-final-topology { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
     .canvas-final-relations { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
-    .canvas-final-relations line { stroke-width: 3; }
-    .canvas-final-relations line.provenance { stroke: #739bb9; }
-    .canvas-final-relations line.supports { stroke: #45946f; }
-    .canvas-final-relations line.opposes { stroke: #bc766b; }
+    .canvas-final-relations line { stroke-width: 5; }
+    .canvas-final-relations line.provenance { stroke: #547d9c; }
+    .canvas-final-relations line.supports { stroke: #2d7b54; }
+    .canvas-final-relations line.opposes { stroke: #a95347; }
     .canvas-final-topology circle { fill: #a7bfd0; opacity: .48; }
     .canvas-final-topology circle.idea { fill: #5d9bb0; }
     .canvas-final-topology circle.option { fill: #70aa82; }
@@ -268,7 +271,9 @@
     .canvas-final-note { position: absolute; right: 24px; bottom: 20px; color: #9a4d3b; font-size: 19px; }
     .canvas-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
       color: #526b7d; font-size: 28px; font-weight: 600; }
-    @media (prefers-reduced-motion: reduce) { .canvas-world { transition: none; } }
+    @media (prefers-reduced-motion: reduce) {
+      .canvas-world, .canvas-node, .canvas-edges { transition: none; }
+    }
     .passive { padding: 50px; font-size: 28px; }
   </style>
 </head>
@@ -540,9 +545,9 @@
 
     function canvasArrowDefs(prefix) {
       return `<defs>
-        <marker id="${prefix}-provenance" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse"><path d="M2 2 L10 6 L2 10" fill="none" stroke="#739bb9" stroke-width="2"/></marker>
-        <marker id="${prefix}-supports" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse"><path d="M2 2 L10 6 L2 10 Z" fill="#45946f"/></marker>
-        <marker id="${prefix}-opposes" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse"><path d="M2 2 L10 6 L2 10 L5 6 Z" fill="#bc766b"/></marker>
+        <marker id="${prefix}-provenance" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse"><path d="M2 2 L10 6 L2 10" fill="none" stroke="#547d9c" stroke-width="3"/></marker>
+        <marker id="${prefix}-supports" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse"><path d="M2 2 L10 6 L2 10 Z" fill="#2d7b54"/></marker>
+        <marker id="${prefix}-opposes" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse"><path d="M2 2 L10 6 L2 10 L5 6 Z" fill="#a95347"/></marker>
       </defs>`;
     }
 
@@ -726,6 +731,10 @@
         canvas.latest_detail_id,snapshot.map.display_labels]);
       if (key === previousCanvasKey) return;
       previousCanvasKey = key;
+      const priorPositions = new Map([...main.querySelectorAll('.canvas-node')].map(element => {
+        const style = getComputedStyle(element);
+        return [element.dataset.nodeId,{x:parseFloat(style.left),y:parseFloat(style.top)}];
+      }));
       main.classList.add('canvas-main');
       main.classList.toggle('final',final);
       main.classList.remove('focused-main','focused-sparse','no-rail');
@@ -733,12 +742,27 @@
       const stage = main.querySelector('.canvas-stage');
       const world = main.querySelector('.canvas-world');
       if (!stage || !world) return;
+      const moving=[];
+      if (!final && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        for (const node of visible) {
+          const prior=priorPositions.get(node.id);
+          if (!prior || !Number.isFinite(prior.x) || !Number.isFinite(prior.y) ||
+              Math.hypot(prior.x-node.x,prior.y-node.y)<1) continue;
+          const element=[...world.querySelectorAll('.canvas-node')]
+            .find(card => card.dataset.nodeId===node.id);
+          if (!element) continue;
+          element.style.left=`${prior.x}px`;
+          element.style.top=`${prior.y}px`;
+          moving.push({element,x:node.x,y:node.y});
+        }
+      }
       if (!final) {
         const cards = new Map([...world.querySelectorAll('.canvas-node')].map(element =>
           [element.dataset.nodeId, {width:element.offsetWidth,height:element.offsetHeight}]));
         main.querySelector('.canvas-edges').innerHTML = canvasArrowDefs('canvas-live-arrow') +
           canvasArrowLines(canvas.edges.filter(edge => visibleIds.has(edge.source_node_id) &&
             visibleIds.has(edge.target_node_id)),byId,cards,'canvas-live-arrow',true);
+        if (moving.length) main.querySelector('.canvas-edges').classList.add('reflowing');
       }
       const oldCamera = previousCanvasCamera;
       world.style.transition = 'none';
@@ -747,6 +771,12 @@
       requestAnimationFrame(() => requestAnimationFrame(() => {
         world.style.transition = '';
         world.style.transform = canvasTransform(camera,stage,Boolean(detail));
+        for (const {element,x,y} of moving) {
+          element.style.left=`${x}px`;
+          element.style.top=`${y}px`;
+        }
+        if (moving.length) setTimeout(() =>
+          main.querySelector('.canvas-edges')?.classList.remove('reflowing'),560);
       }));
       previousCanvasCamera = camera;
       previousCanvasDetailId = focus?.id || null;

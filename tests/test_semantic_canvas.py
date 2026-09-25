@@ -51,10 +51,12 @@ class SemanticCanvasTests(unittest.TestCase):
         self.assertEqual(views[ids["r4-n5"]]["label"], "再配置を決定候補に")
         self.assertEqual(views[ids["r4-n5"]]["canonical"], before["nodes"][-1]["label"])
         self.assertEqual(views[ids["r4-n5"]]["time_at"], before["nodes"][-1]["updated_at"])
-        self.assertEqual(views[ids["r4-n2"]]["x"], views[ids["r4-n5"]]["x"])
+        self.assertNotEqual((views[ids["r4-n2"]]["x"], views[ids["r4-n2"]]["y"]),
+                            (views[ids["r4-n5"]]["x"], views[ids["r4-n5"]]["y"]))
         self.assertGreater(views[ids["r4-n5"]]["y"], views[ids["r4-n2"]]["y"])
         self.assertTrue(any(edge["type"] == "supports" for edge in projected["edges"]))
-        self.assertTrue(0 < projected["final_camera"]["scale"] < projected["live_camera"]["scale"])
+        self.assertTrue(0 < projected["final_camera"]["scale"] <= 1)
+        self.assertTrue(0 < projected["live_camera"]["scale"] <= 1)
         self.assertEqual(result.state["graph"], before)
         self.assertEqual(project_semantic_canvas(before, list(reversed(result.events)),
                                                  {ids["r4-n5"]: "再配置を決定候補に"}), projected)
@@ -71,7 +73,7 @@ class SemanticCanvasTests(unittest.TestCase):
         self.assertEqual(project_semantic_canvas(graph, events)["nodes"][0]["time_at"],
                          "2026-09-25T01:00:00Z")
 
-    def test_late_link_and_human_removal_never_move_existing_nodes(self) -> None:
+    def test_late_link_without_crossing_and_human_removal_keep_positions(self) -> None:
         graph, events = synthetic(2)
         placement_state = {}
         first = project_semantic_canvas(graph, events, placement_state=placement_state)
@@ -126,6 +128,44 @@ class SemanticCanvasTests(unittest.TestCase):
         self.assertEqual({node["id"]: (node["x"], node["y"]) for node in after["nodes"]}, before_positions)
         self.assertEqual(len(after["edges"]), 1)
         self.assertEqual(after["focus_id"], "n1")
+
+    def test_new_crossing_relation_reflows_live_world_once_without_graph_change(self) -> None:
+        graph, events = synthetic(4)
+        for index, node in enumerate(graph["nodes"]):
+            node["id"] = "abcd"[index]
+        cells = {"a": (0, 0), "b": (1, 1), "c": (0, 1), "d": (1, 0)}
+        placement_state = {node_id: {"cell": cell, "x": cell[0] * 440,
+                                     "y": cell[1] * 285, "placement": "unconfirmed"}
+                           for node_id, cell in cells.items()}
+        first_relation = {"event_id": "rel-ab", "sequence": 5, "event_type": "relation_detected",
+                          "payload": {"source_node_id": "a", "target_node_id": "b",
+                                      "relation_type": "discussion_provenance"}}
+        graph["edges"] = [{"id": "ab", "type": "discussion_provenance",
+                           "source_node_id": "a", "target_node_id": "b"}]
+        placement_state["__canvas_layout_meta__"] = {"last_relation_sequence": 5}
+        before = project_semantic_canvas(graph, [*events, first_relation],
+                                         placement_state=placement_state)
+        relation = {"event_id": "rel-cd", "sequence": 6, "event_type": "relation_detected",
+                    "payload": {"source_node_id": "c", "target_node_id": "d",
+                                "relation_type": "discussion_provenance"}}
+        graph["edges"].append({"id": "cd", "type": "discussion_provenance",
+                               "source_node_id": "c", "target_node_id": "d"})
+        graph["revision"] += 1
+        original_graph = copy.deepcopy(graph)
+        after = project_semantic_canvas(graph, [*events, first_relation, relation],
+                                        placement_state=placement_state)
+        original = {item["id"]: (item["x"], item["y"]) for item in before["nodes"]}
+        moved = {item["id"]: (item["x"], item["y"]) for item in after["nodes"]}
+        from prototype.semantic_canvas import _proper_cross
+        def point(node_id: str, coordinates: dict[str, tuple[int, int]]) -> dict[str, int]:
+            return {"x": coordinates[node_id][0], "y": coordinates[node_id][1]}
+        self.assertTrue(_proper_cross(*(point(node_id, original) for node_id in "abcd")))
+        self.assertFalse(_proper_cross(*(point(node_id, moved) for node_id in "abcd")))
+        self.assertEqual(sum(original[nid] != moved[nid] for nid in original), 1)
+        self.assertNotEqual(original["d"], moved["d"])
+        self.assertEqual(graph, original_graph)
+        self.assertEqual(project_semantic_canvas(graph, [*events, first_relation, relation],
+                                                 placement_state=placement_state), after)
 
     def test_display_title_is_short_but_focus_keeps_canonical_detail(self) -> None:
         result, ids = build_case(self.cases[3], self.classifications)

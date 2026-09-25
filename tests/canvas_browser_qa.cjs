@@ -92,7 +92,14 @@ for case_name,repetitions in (('r4-timed',1),('r4-timed-long',8)):
                                   'display_label':'倉庫の水を三避難所へ再配置する'}}
     print(json.dumps({'count':case_name,'branched':False,'state':timed_state,
                       'map':map_projection(timed_state,spaced_events,StableLayout(),timed_presentation),
-                      'live_state':{'runtime_state':'active'}},ensure_ascii=False))`;
+                      'live_state':{'runtime_state':'active'}},ensure_ascii=False))
+# Retain the pre-Live-reflow world solely to demonstrate the separate Final
+# callout crossing repair. Normal R4 snapshots above use actual Product layout.
+comparison_layout=StableLayout()
+comparison_layout._canvas_placements['__canvas_layout_meta__']={'last_relation_sequence':10**9}
+print(json.dumps({'count':'r4-timed-crossing','branched':False,'state':spaced_state,
+                  'map':map_projection(spaced_state,spaced_events,comparison_layout,presentation),
+                  'live_state':{'runtime_state':'active'}},ensure_ascii=False))`;
 const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: 'utf8' })
   .trim().split('\n').map(line => JSON.parse(line));
 
@@ -206,6 +213,9 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
       liveArrows: [...document.querySelectorAll('.canvas-edge')].every(line =>
         !!line.getAttribute('marker-end') &&
         !!document.getElementById(line.getAttribute('marker-end').slice(5,-1))),
+      liveEdgesReadable: [...document.querySelectorAll('.canvas-edge')].every(line =>
+        parseFloat(getComputedStyle(line).strokeWidth) >= 4 &&
+        getComputedStyle(line).stroke !== 'none'),
       displayLabelIsShort: String(expected.caseId).startsWith('r4') ?
         document.querySelector('.canvas-node.focus .canvas-label')?.textContent === '倉庫の水を三避難所へ再配置する' : undefined,
       detailIsCanonical: String(expected.caseId).startsWith('r4') ?
@@ -243,7 +253,8 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
         .every(label => label.scrollWidth <= label.clientWidth + 2),
       relationCount: document.querySelectorAll('.canvas-final-relations line').length,
       relationStrokesVisible: [...document.querySelectorAll('.canvas-final-relations line')]
-        .every(line => getComputedStyle(line).stroke !== 'none'),
+        .every(line => getComputedStyle(line).stroke !== 'none' &&
+          parseFloat(getComputedStyle(line).strokeWidth) >= 5),
       relationStrokesContinuous: [...document.querySelectorAll('.canvas-final-relations line')]
         .every(line => getComputedStyle(line).strokeDasharray === 'none'),
       noRelationBadges: !document.querySelector('.canvas-final-relations .relation-badge'),
@@ -326,7 +337,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     }));
     if (snapshot.count === 300) await page.screenshot({ path: '/tmp/ronro-canvas-300-' + (snapshot.branched ? 'branched' : 'roots') + '-final.png' });
     if (snapshot.count === 'r4') await page.screenshot({ path: '/tmp/ronro-canvas-r4-short-final.png' });
-    if (snapshot.count === 'r4-timed') {
+    if (snapshot.count === 'r4-timed-crossing') {
       await page.screenshot({ path: '/tmp/ronro-canvas-r4-timed-final.png' });
       // Diagnostic comparison only: render the same accepted Graph once
       // without the bounded final-callout crossing repair. The normal render
@@ -374,7 +385,8 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     item.final.scrollX || item.final.scrollY || item.live.primary > 5 || item.live.clippedPrimary ||
     !item.countsMatch || !item.live.fixedNodeGeometry || !item.live.labelsFit ||
     !item.live.peripheralBehindNodes || !item.final.labelsFit ||
-    !item.live.noEdgeLabels || !item.live.liveArrows || !item.live.detailInStage || !item.live.subtitleAtBottom ||
+    !item.live.noEdgeLabels || !item.live.liveArrows || !item.live.liveEdgesReadable ||
+    !item.live.detailInStage || !item.live.subtitleAtBottom ||
     item.live.subtitleHasHeading || !item.live.typePaletteDistinct ||
     !item.live.focusAccentMatchesSubtitle || !item.live.nodeTimeMatchesSubtitle ||
     (String(item.count).startsWith('r4') ?

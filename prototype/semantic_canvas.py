@@ -1,8 +1,7 @@
 """Deterministic, non-canonical world placement and Auto Camera projection.
 
-The world is append-only in spatial identity: accepted late Relations and Human
-corrections change connectors, never the placement chosen at Node creation.
-This is a presentation hypothesis, not a new Canonical Graph contract.
+Node positions are Presentation state. New semantic edges may trigger a bounded
+local crossing repair; they never rewrite Canonical Nodes or Relations.
 """
 
 from __future__ import annotations
@@ -61,9 +60,94 @@ def _first_free(preferred: tuple[int, int], occupied: set[tuple[int, int]],
     raise ValueError("Canvas placement capacity exhausted")
 
 
+def _proper_cross(a: Mapping[str, Any], b: Mapping[str, Any],
+                  c: Mapping[str, Any], d: Mapping[str, Any]) -> bool:
+    def side(p: Mapping[str, Any], q: Mapping[str, Any], r: Mapping[str, Any]) -> float:
+        return (q["x"] - p["x"]) * (r["y"] - p["y"]) - (q["y"] - p["y"]) * (r["x"] - p["x"])
+    return side(a, b, c) * side(a, b, d) < 0 and side(c, d, a) * side(c, d, b) < 0
+
+
+def _line_hits_card(a: Mapping[str, Any], b: Mapping[str, Any],
+                    card: Mapping[str, Any]) -> bool:
+    # Conservative world-space footprint of the 390px Live card. A line
+    # crossing a third Node is worse than a line-to-line crossing.
+    x, y = card["x"], card["y"]
+    corners = ({"x": x - 202, "y": y - 95}, {"x": x + 202, "y": y - 95},
+               {"x": x + 202, "y": y + 95}, {"x": x - 202, "y": y + 95})
+    return any(_proper_cross(a, b, corner, corners[(index + 1) % 4])
+               for index, corner in enumerate(corners))
+
+
+def _conflict_score(node_id: str, positions: Mapping[str, Mapping[str, Any]],
+                    edges: Sequence[Mapping[str, Any]]) -> int:
+    incident = [edge for edge in edges if node_id in
+                (edge["source_node_id"], edge["target_node_id"])]
+    score = 0
+    for edge in incident:
+        source, target = edge["source_node_id"], edge["target_node_id"]
+        a, b = positions[source], positions[target]
+        for other in edges:
+            ends = {other["source_node_id"], other["target_node_id"]}
+            if node_id in ends or source in ends or target in ends:
+                continue
+            if _proper_cross(a, b, positions[other["source_node_id"]],
+                             positions[other["target_node_id"]]):
+                score += 1
+        for other_id, other_pos in positions.items():
+            if other_id not in (source, target) and _line_hits_card(a, b, other_pos):
+                score += 10
+    for edge in edges:
+        if node_id in (edge["source_node_id"], edge["target_node_id"]):
+            continue
+        if _line_hits_card(positions[edge["source_node_id"]],
+                           positions[edge["target_node_id"]], positions[node_id]):
+            score += 10
+    return score
+
+
+def _repair_new_relation(source_id: str, target_id: str,
+                         positions: dict[str, dict[str, Any]],
+                         edges: Sequence[Mapping[str, Any]]) -> bool:
+    # Try the target first, then the source. Only an actual reduction in
+    # crossings/card obstruction permits movement. No force layout or global
+    # recentering is used; at most one Node moves per new Relation.
+    offsets = ((0, 1), (-1, 0), (1, 0), (0, -1),
+               (-1, 1), (1, 1), (-1, -1), (1, -1),
+               (0, 2), (-2, 0), (2, 0), (0, -2))
+    occupied = {tuple(item["cell"]) for item in positions.values()}
+    best: tuple[int, int, int, str, tuple[int, int]] | None = None
+    for priority, node_id in enumerate((target_id, source_id)):
+        current = positions[node_id]
+        baseline = _conflict_score(node_id, positions, edges)
+        if not baseline:
+            continue
+        cx, cy = current["cell"]
+        for dx, dy in offsets:
+            cell = (cx + dx, cy + dy)
+            if cell in occupied:
+                continue
+            x, y = cell[0] * CELL_X, cell[1] * CELL_Y
+            if any(other_id != node_id and abs(other["x"] - x) < 410
+                   and abs(other["y"] - y) < 200 for other_id, other in positions.items()):
+                continue
+            positions[node_id] = {**current, "cell": cell, "x": x, "y": y}
+            remaining = _conflict_score(node_id, positions, edges)
+            positions[node_id] = current
+            if remaining < baseline:
+                candidate = (remaining, abs(dx) + abs(dy), priority, node_id, cell)
+                if best is None or candidate < best:
+                    best = candidate
+    if best is None:
+        return False
+    _, _, _, node_id, cell = best
+    positions[node_id] = {**positions[node_id], "cell": cell,
+                          "x": cell[0] * CELL_X, "y": cell[1] * CELL_Y}
+    return True
+
+
 def _creation_anchor(node: Mapping[str, Any], events: list[Mapping[str, Any]],
                      creation_sequence: int, known_nodes: set[str]) -> tuple[str, str] | None:
-    """Use only creation-Evidence relations; late links cannot move the Node."""
+    """Use creation-Evidence relations for initial placement; later links may reflow."""
     refs = set(node.get("evidence_ids") or ())
     target_id = str(node["id"])
     candidates: list[tuple[int, int, str, str]] = []
@@ -149,11 +233,11 @@ def _neighborhood(focus_id: str | None, nodes: Mapping[str, Any], edges: list[di
 def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[str, Any]],
                             display_labels: Mapping[str, str] | None = None,
                             placement_state: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Project one world for Live and Final, retaining optional Presentation placements.
+    """Project one world for Live and Final with revisable Presentation positions.
 
-    ``placement_state`` belongs to a session's Projection, never to Canonical
-    Nodes. A later Relation can therefore change connectors without relocating
-    a Node that participants have already seen.
+    ``placement_state`` belongs to Projection, never to Canonical Nodes. New
+    Relations may improve an obstructed layout; unchanged revisions do not
+    keep moving Nodes.
     """
     ordered = _event_order(events)
     by_event = {str(event.get("event_id")): int(event.get("sequence", 0)) for event in ordered}
@@ -213,6 +297,27 @@ def project_semantic_canvas(graph: Mapping[str, Any], events: Sequence[Mapping[s
               "target_node_id": edge["target_node_id"], "type": edge["type"]}
              for edge in graph.get("edges", []) if edge.get("type") in SEMANTIC
              and edge.get("source_node_id") in positions and edge.get("target_node_id") in positions]
+    meta = placement_state.setdefault("__canvas_layout_meta__", {}) if placement_state is not None else {}
+    last_checked = int(meta.get("last_relation_sequence", 0))
+    accepted = {(edge["source_node_id"], edge["target_node_id"], edge["type"]) for edge in edges}
+    for event in ordered:
+        sequence = int(event.get("sequence", 0))
+        if sequence <= last_checked or event.get("event_type") not in {"relation_detected", "correct_relation"}:
+            continue
+        payload = event.get("payload") or {}
+        relation = payload.get("new_relation") if event.get("event_type") == "correct_relation" else payload
+        if not relation:
+            continue
+        source, target = relation.get("source_node_id"), relation.get("target_node_id")
+        kind = relation.get("relation_type")
+        if (source, target, kind) in accepted:
+            _repair_new_relation(source, target, positions, edges)
+    if placement_state is not None:
+        meta["last_relation_sequence"] = max((int(event.get("sequence", 0)) for event in ordered
+                                               if event.get("event_type") in {"relation_detected", "correct_relation"}),
+                                              default=last_checked)
+        for node_id in ordered_nodes:
+            placement_state[node_id] = dict(positions[node_id])
     incoming = {edge["target_node_id"] for edge in edges if edge["type"] == "discussion_provenance"}
     views = []
     for node_id in ordered_nodes:
