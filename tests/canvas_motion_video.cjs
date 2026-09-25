@@ -37,6 +37,9 @@ fs.mkdirSync(out, { recursive: true });
       detailTime: document.querySelector('.canvas-detail-time')?.textContent || null,
       nodeTime: document.querySelector('.canvas-node.focus .canvas-time')?.textContent || null,
       markerCount: document.querySelectorAll('.canvas-final-marker').length,
+      finalRelationCount: document.querySelectorAll('.canvas-final-relations line').length,
+      noDetachedFinalEdges: !document.querySelector('.canvas-world .canvas-edge') &&
+        !document.querySelector('.canvas-final-leaders'),
       finalMarkerTypes: [...document.querySelectorAll('.canvas-final-marker')]
         .map(node => ({id:node.dataset.nodeId, type:[...node.classList].find(value =>
           ['idea','option','concern','decision','open_item','action'].includes(value)),
@@ -69,7 +72,8 @@ fs.mkdirSync(out, { recursive: true });
       (!state.final && state.focus !== expected.focus_id) ||
       (!state.final && state.focus && state.detailTime !== state.nodeTime) ||
       JSON.stringify(state.counts)!==JSON.stringify(expectedCounts) ||
-      (state.final && (state.markerCount === 0 ||
+      (state.final && (state.markerCount === 0 || state.finalRelationCount === 0 ||
+        !state.noDetachedFinalEdges ||
         !['decision','open_item','action'].every(type => state.finalMarkerTypes.some(item => item.type===type)) ||
         !state.finalMarkerTypes.some(item => item.independent) ||
         !state.finalMarkerTypes.some(item => item.unconfirmed)))) {

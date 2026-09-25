@@ -234,6 +234,21 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     await page.reload({ waitUntil: 'networkidle' });
     const final = await page.evaluate(() => ({
       markers: document.querySelectorAll('.canvas-final-marker').length,
+      relationCount: document.querySelectorAll('.canvas-final-relations line').length,
+      relationStrokesVisible: [...document.querySelectorAll('.canvas-final-relations line')]
+        .every(line => getComputedStyle(line).stroke !== 'none'),
+      relationStrokesContinuous: [...document.querySelectorAll('.canvas-final-relations line')]
+        .every(line => getComputedStyle(line).strokeDasharray === 'none'),
+      noDetachedEdges: !document.querySelector('.canvas-world .canvas-edge') &&
+        !document.querySelector('.canvas-final-leaders'),
+      relationsJoinMarkers: (() => {
+        const positions=[...document.querySelectorAll('.canvas-final-marker')]
+          .map(marker=>[parseFloat(marker.style.left),parseFloat(marker.style.top)]);
+        return [...document.querySelectorAll('.canvas-final-relations line')].every(line =>
+          [['x1','y1'],['x2','y2']].every(([x,y]) => positions.some(([px,py]) =>
+            Math.abs(px-Number(line.getAttribute(x)))<.1 &&
+            Math.abs(py-Number(line.getAttribute(y)))<.1)));
+      })(),
       markerOverlap: (() => {
         const boxes=[...document.querySelectorAll('.canvas-final-marker')].map(node=>node.getBoundingClientRect());
         return boxes.reduce((count,a,index)=>count+boxes.slice(index+1).filter(b=>
@@ -294,7 +309,10 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     (['r4-long','r4-timed-long'].includes(item.count) ? !item.live.subtitleOverflowNote : !item.live.subtitleComplete) ||
     item.live.stageWidth !== item.final.stageWidth ||
     item.final.oldBottomNote || item.final.neighborhoodCount || item.final.markerClockOverlap ||
-    item.final.markerOverlap || !item.final.rootHintsCorrect ||
+    item.final.markerOverlap || !item.final.rootHintsCorrect || !item.final.noDetachedEdges ||
+    !item.final.relationsJoinMarkers || !item.final.relationStrokesVisible ||
+    !item.final.relationStrokesContinuous ||
+    (item.branched && item.final.relationCount===0) ||
     item.live.displayLabelIsShort === false || item.live.detailIsCanonical === false ||
     !item.final.topology)) process.exit(1);
 })().catch(error => { console.error(error); process.exit(1); });

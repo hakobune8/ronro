@@ -201,7 +201,6 @@
       stroke: #fff; stroke-width: 5px; stroke-linejoin: round; }
     .canvas-edge-label.supports { fill: #287454; }
     .canvas-edge-label.opposes { fill: #a75d52; }
-    .canvas-main.final .canvas-edge { vector-effect: non-scaling-stroke; opacity: .28; }
     .canvas-node.idea, .canvas-final-marker.idea { --type-accent: #166c84; --type-border: #5d9bb0; --type-tint: #eef8fb; }
     .canvas-node.option, .canvas-final-marker.option { --type-accent: #287545; --type-border: #70aa82; --type-tint: #eff9f1; }
     .canvas-node.concern, .canvas-final-marker.concern { --type-accent: #a94933; --type-border: #cf8c78; --type-tint: #fff3ef; }
@@ -232,8 +231,14 @@
     .canvas-peripheral.unconfirmed { border-style: dashed; opacity: .4; }
     .canvas-final-markers { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
     .canvas-final-topology { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
-    .canvas-final-leaders { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
-    .canvas-final-leaders line { stroke: #a5b8c7; stroke-width: 1.5; stroke-dasharray: 2 6; }
+    .canvas-final-relations { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
+    .canvas-final-relations line { stroke-width: 3; }
+    .canvas-final-relations .provenance { stroke: #739bb9; }
+    .canvas-final-relations .supports { stroke: #45946f; }
+    .canvas-final-relations .opposes { stroke: #bc766b; }
+    .canvas-final-relations text { fill: #287454; font-size: 18px; font-weight: 700;
+      paint-order: stroke; stroke: #fff; stroke-width: 5px; stroke-linejoin: round; }
+    .canvas-final-relations text.opposes { fill: #a75d52; }
     .canvas-final-topology circle { fill: #a7bfd0; opacity: .48; }
     .canvas-final-topology circle.idea { fill: #5d9bb0; }
     .canvas-final-topology circle.option { fill: #70aa82; }
@@ -547,7 +552,7 @@
       const tx = target.x - (horizontal ? Math.sign(dx) * 145 : 0);
       const ty = target.y - (horizontal ? 0 : Math.sign(dy) * 62);
       const type = edge.type;
-      const label = type === 'supports' ? '支え' : type === 'opposes' ? '懸念' : '議論を受けて';
+      const label = type === 'supports' ? '支え' : type === 'opposes' ? '懸念' : 'ここから展開';
       const line = `<line class="canvas-edge ${type === 'discussion_provenance' ? 'provenance' : type}" x1="${sx}" y1="${sy}" x2="${tx}" y2="${ty}"/>`;
       return line + (detailed ? `<text class="canvas-edge-label ${type === 'discussion_provenance' ? '' : type}" x="${(sx+tx)/2}" y="${(sy+ty)/2-7}" text-anchor="middle">${label}</text>` : '');
     }
@@ -598,7 +603,7 @@
       const visible = final ? finalOverviewIds(canvas).map(id => byId.get(id)).filter(Boolean)
         : canvas.near_ids.map(id => byId.get(id)).filter(Boolean);
       const visibleIds = new Set(visible.map(node => node.id));
-      const edges = canvas.edges.filter(edge => final || (visibleIds.has(edge.source_node_id) && visibleIds.has(edge.target_node_id)))
+      const edges = canvas.edges.filter(edge => !final && visibleIds.has(edge.source_node_id) && visibleIds.has(edge.target_node_id))
         .map(edge => canvasEdgeMarkup(edge,byId.get(edge.source_node_id),byId.get(edge.target_node_id),
           !final && near.has(edge.source_node_id) && near.has(edge.target_node_id))).join('');
       const nodeMarkup = (final ? [] : visible).map(node => {
@@ -610,7 +615,7 @@
       const detail = !final && focus ? `<aside class="canvas-detail${fresh.has(focus.id) ? ' just-updated' : ''}">${canvasTimeMarkup(focus, 'canvas-detail-time')}<p>${escapeHtml(focus.canonical)}</p><div class="detail-overflow">続きあり</div></aside>` : '';
       const note = state === 'ended_with_incomplete_processing' ? '処理が完了していません。内容の確認が必要です。'
         : '';
-      const markup = `<section class="canvas-stage" aria-label="議論の論点図"><div class="canvas-world"><svg class="canvas-edges" aria-hidden="true">${edges}</svg>${nodeMarkup}</div><div class="canvas-periphery"></div><svg class="canvas-final-topology" aria-hidden="true"></svg><svg class="canvas-final-leaders" aria-hidden="true"></svg><div class="canvas-final-markers"></div>${canvas.nodes.length ? '' : '<div class="canvas-empty">議論を整理しています</div>'}${note ? `<div class="canvas-final-note">${note}</div>` : ''}${detail}</section>`;
+      const markup = `<section class="canvas-stage" aria-label="議論の論点図"><div class="canvas-world"><svg class="canvas-edges" aria-hidden="true">${edges}</svg>${nodeMarkup}</div><div class="canvas-periphery"></div><svg class="canvas-final-topology" aria-hidden="true"></svg><svg class="canvas-final-relations" aria-hidden="true"></svg><div class="canvas-final-markers"></div>${canvas.nodes.length ? '' : '<div class="canvas-empty">議論を整理しています</div>'}${note ? `<div class="canvas-final-note">${note}</div>` : ''}${detail}</section>`;
       const main = $('shared-main');
       const key = JSON.stringify([canvas.session_id,canvas.revision,state,canvas.focus_id,
         canvas.latest_detail_id,snapshot.map.display_labels]);
@@ -670,8 +675,8 @@
         }
         topology.innerHTML = [...bins.values()].map(item => `<circle class="${escapeHtml(item.type)}" cx="${item.x}" cy="${item.y}" r="${Math.min(12,4+Math.sqrt(item.count)*2)}"/>`).join('');
         const markers = main.querySelector('.canvas-final-markers');
-        const leaders = main.querySelector('.canvas-final-leaders');
-        leaders.setAttribute('viewBox',`0 0 ${stage.clientWidth} ${stage.clientHeight}`);
+        const relations = main.querySelector('.canvas-final-relations');
+        relations.setAttribute('viewBox',`0 0 ${stage.clientWidth} ${stage.clientHeight}`);
         const used = [];
         const candidates = visible.map(node => {
           const sx = stage.clientWidth/2 + (node.x-camera.x)*camera.scale;
@@ -687,13 +692,21 @@
             if (px<145 || px>stage.clientWidth-145 || py<95 || py>stage.clientHeight-115) continue;
             if (used.some(point => Math.abs(point.x-px)<265 && Math.abs(point.y-py)<160)) continue;
             used.push({x:px,y:py});
-            placed.push({node,anchorX:x,anchorY:y,x:px,y:py});
+            placed.push({node,x:px,y:py});
             break;
           }
           if (placed.length>=9) break;
         }
-        leaders.innerHTML = placed.filter(item => Math.hypot(item.x-item.anchorX,item.y-item.anchorY)>40)
-          .map(item => `<line x1="${item.anchorX}" y1="${item.anchorY}" x2="${item.x}" y2="${item.y}"/>`).join('');
+        const markerById = new Map(placed.map(item => [item.node.id,item]));
+        relations.innerHTML = canvas.edges.filter(edge => markerById.has(edge.source_node_id) && markerById.has(edge.target_node_id))
+          .map(edge => {
+            const source = markerById.get(edge.source_node_id);
+            const target = markerById.get(edge.target_node_id);
+            const type = edge.type === 'discussion_provenance' ? 'provenance' : edge.type;
+            const line = `<line class="${escapeHtml(type)}" x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}"/>`;
+            const label = type === 'supports' ? '支え' : type === 'opposes' ? '懸念' : '';
+            return line + (label ? `<text class="${escapeHtml(type)}" x="${(source.x+target.x)/2}" y="${(source.y+target.y)/2-9}" text-anchor="middle">${label}</text>` : '');
+          }).join('');
         markers.innerHTML = placed.map(({node,x,y}) => {
           const rootClass = node.root_state === 'linked' ? '' : ` ${node.root_state}`;
           const hint = node.root_state === 'independent' ? '別の話題' : '';
