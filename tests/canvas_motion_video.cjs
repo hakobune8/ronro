@@ -99,7 +99,7 @@ fs.mkdirSync(out, { recursive: true });
       JSON.stringify(state.counts)!==JSON.stringify(expectedCounts) ||
       (state.final && (state.markerCount === 0 || state.finalRelationCount === 0 ||
         !state.finalRelationArrows || !state.noRelationLabels ||
-        state.sharedTargetTipGap === null || state.sharedTargetTipGap < 18 ||
+        state.sharedTargetTipGap === null || state.sharedTargetTipGap < 45 ||
         !['move','sms','decision'].every(id => state.finalMarkerLines[id] === 1) ||
         !state.finalLabelsFit || !state.roadTermIntact ||
         !state.noDetachedFinalEdges ||

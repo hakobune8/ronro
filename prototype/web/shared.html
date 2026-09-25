@@ -606,6 +606,40 @@
           else point.y=node.y+offset;
         });
       }
+      // When a discussion-backbone arrow and an argument arrow enter the
+      // same side, spacing them by a few pixels still reads as a double tip.
+      // Land the backbone at the near corner instead, leaving the argument on
+      // the side. This is an endpoint treatment, not a new semantic edge.
+      const incoming = new Map();
+      for (const item of geometry) {
+        const key=item.edge.target_node_id;
+        if (!incoming.has(key)) incoming.set(key,[]);
+        incoming.get(key).push(item);
+      }
+      for (const group of incoming.values()) {
+        for (const item of group) {
+          if (item.edge.type !== 'discussion_provenance') continue;
+          const size=item.targetSize, target=item.target, source=item.source;
+          const side=Math.abs(source.x-target.x)/(size.width/2) >=
+            Math.abs(source.y-target.y)/(size.height/2)
+            ? (source.x>=target.x ? 'right' : 'left')
+            : (source.y>=target.y ? 'bottom' : 'top');
+          const mixed=group.some(other => other!==item &&
+            other.edge.type !== 'discussion_provenance' &&
+            (Math.abs(other.source.x-target.x)/(size.width/2) >=
+              Math.abs(other.source.y-target.y)/(size.height/2)
+              ? (other.source.x>=target.x ? 'right' : 'left')
+              : (other.source.y>=target.y ? 'bottom' : 'top')) === side);
+          if (!mixed) continue;
+          if (side === 'left' || side === 'right') {
+            item.end.x=target.x+(side==='right' ? 1 : -1)*(size.width/2+5);
+            item.end.y=target.y+(source.y<=target.y ? -1 : 1)*(size.height/2+5);
+          } else {
+            item.end.x=target.x+(source.x<=target.x ? -1 : 1)*(size.width/2+5);
+            item.end.y=target.y+(side==='bottom' ? 1 : -1)*(size.height/2+5);
+          }
+        }
+      }
       return geometry.map(item => canvasArrowLine(item.edge,item.start,item.end,prefix,live)).join('');
     }
 
