@@ -567,12 +567,102 @@
       return {x:from.x+dx*distance,y:from.y+dy*distance};
     }
 
-    function canvasArrowLine(edge, source, target, prefix, sourceSize, targetSize, live = false) {
-      const start = canvasBorderPoint(source,target,sourceSize.width,sourceSize.height);
-      const end = canvasBorderPoint(target,source,targetSize.width,targetSize.height);
+    function canvasArrowLine(edge, start, end, prefix, live = false) {
       if (Math.hypot(end.x-start.x,end.y-start.y) < 15) return '';
       const type = edge.type === 'discussion_provenance' ? 'provenance' : edge.type;
       return `<line class="${live ? 'canvas-edge ' : ''}${escapeHtml(type)}" data-source="${escapeHtml(edge.source_node_id)}" data-target="${escapeHtml(edge.target_node_id)}" x1="${start.x}" y1="${start.y}" x2="${end.x}" y2="${end.y}" marker-end="url(#${prefix}-${type})"/>`;
+    }
+
+    function canvasArrowLines(edges, byId, sizes, prefix, live = false) {
+      const geometry = edges.map(edge => {
+        const source = byId.get(edge.source_node_id), target = byId.get(edge.target_node_id);
+        const sourceSize = sizes.get(edge.source_node_id), targetSize = sizes.get(edge.target_node_id);
+        return {edge, source, target, sourceSize, targetSize,
+          start:canvasBorderPoint(source,target,sourceSize.width,sourceSize.height),
+          end:canvasBorderPoint(target,source,targetSize.width,targetSize.height)};
+      });
+      const ports = new Map();
+      for (const item of geometry) {
+        for (const [node,other,size,point] of [[item.source,item.target,item.sourceSize,item.start],
+          [item.target,item.source,item.targetSize,item.end]]) {
+          const dx=other.x-node.x, dy=other.y-node.y;
+          const side=Math.abs(dx)/(size.width/2) >= Math.abs(dy)/(size.height/2)
+            ? (dx>=0 ? 'right' : 'left') : (dy>=0 ? 'bottom' : 'top');
+          const key=`${node.node?.id || node.id}:${side}`;
+          if (!ports.has(key)) ports.set(key,[]);
+          ports.get(key).push({item,point,node,size,side,other});
+        }
+      }
+      for (const group of ports.values()) {
+        if (group.length < 2) continue;
+        const horizontal = group[0].side === 'top' || group[0].side === 'bottom';
+        group.sort((a,b) => (horizontal ? a.other.x-b.other.x : a.other.y-b.other.y) ||
+          a.item.edge.id.localeCompare(b.item.edge.id));
+        const half=(horizontal ? group[0].size.width : group[0].size.height)/2;
+        const step=Math.min(28,Math.max(0,(half-18)/((group.length-1)/2)));
+        group.forEach(({point,node},index) => {
+          const offset=(index-(group.length-1)/2)*step;
+          if (horizontal) point.x=node.x+offset;
+          else point.y=node.y+offset;
+        });
+      }
+      return geometry.map(item => canvasArrowLine(item.edge,item.start,item.end,prefix,live)).join('');
+    }
+
+    function canvasProperCross(a,b,c,d) {
+      const orient=(p,q,r) => (q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
+      const ab1=orient(a,b,c), ab2=orient(a,b,d), cd1=orient(c,d,a), cd2=orient(c,d,b);
+      return ab1*ab2 < -1 && cd1*cd2 < -1;
+    }
+
+    function canvasLineCrossesCard(a,b,card,size) {
+      const left=card.x-size.width/2-7, right=card.x+size.width/2+7;
+      const top=card.y-size.height/2-7, bottom=card.y+size.height/2+7;
+      const corners=[{x:left,y:top},{x:right,y:top},{x:right,y:bottom},{x:left,y:bottom}];
+      return corners.some((corner,index) =>
+        canvasProperCross(a,b,corner,corners[(index+1)%4]));
+    }
+
+    function canvasImproveFinalCrossings(placed, edges, sizes, width, height) {
+      const byId=new Map(placed.map(item => [item.node.id,item]));
+      const shown=edges.filter(edge => byId.has(edge.source_node_id) && byId.has(edge.target_node_id));
+      const crossingScore=() => shown.reduce((count,edge,index) => {
+        const a=byId.get(edge.source_node_id), b=byId.get(edge.target_node_id);
+        const obscured=placed.filter(item => item!==a && item!==b &&
+          canvasLineCrossesCard(a,b,item,sizes.get(item.node.id))).length;
+        const crossed=shown.slice(index+1).filter(other => {
+          if ([edge.source_node_id,edge.target_node_id].some(id =>
+            id===other.source_node_id || id===other.target_node_id)) return false;
+          return canvasProperCross(a,b,byId.get(other.source_node_id),byId.get(other.target_node_id));
+        }).length;
+        return count+obscured*10+crossed;
+      },0);
+      const offsets=[[-320,0],[320,0],[0,-180],[0,180],[-320,-180],[320,-180],[-320,180],[320,180]];
+      for (let pass=0; pass<2; pass++) {
+        const baseline=crossingScore();
+        if (!baseline) break;
+        let best=null;
+        for (const item of placed) {
+          const size=sizes.get(item.node.id);
+          const original={x:item.x,y:item.y};
+          for (const [dx,dy] of offsets) {
+            const x=original.x+dx, y=original.y+dy;
+            if (x-size.width/2<14 || x+size.width/2>width-14 ||
+                y-size.height/2<14 || y+size.height/2>height-14) continue;
+            if (placed.some(other => other!==item &&
+              Math.abs(other.x-x)<(size.width+sizes.get(other.node.id).width)/2+12 &&
+              Math.abs(other.y-y)<(size.height+sizes.get(other.node.id).height)/2+12)) continue;
+            item.x=x; item.y=y;
+            const remaining=crossingScore();
+            item.x=original.x; item.y=original.y;
+            const travel=Math.hypot(dx,dy);
+            if (remaining<baseline && (!best || remaining<best.remaining ||
+                (remaining===best.remaining && travel<best.travel))) best={item,x,y,remaining,travel};
+          }
+        }
+        if (!best) break;
+        best.item.x=best.x; best.item.y=best.y;
+      }
     }
 
     function finalOverviewIds(canvas) {
@@ -647,9 +737,8 @@
         const cards = new Map([...world.querySelectorAll('.canvas-node')].map(element =>
           [element.dataset.nodeId, {width:element.offsetWidth,height:element.offsetHeight}]));
         main.querySelector('.canvas-edges').innerHTML = canvasArrowDefs('canvas-live-arrow') +
-          canvas.edges.filter(edge => visibleIds.has(edge.source_node_id) && visibleIds.has(edge.target_node_id))
-            .map(edge => canvasArrowLine(edge,byId.get(edge.source_node_id),byId.get(edge.target_node_id),
-              'canvas-live-arrow',cards.get(edge.source_node_id),cards.get(edge.target_node_id),true)).join('');
+          canvasArrowLines(canvas.edges.filter(edge => visibleIds.has(edge.source_node_id) &&
+            visibleIds.has(edge.target_node_id)),byId,cards,'canvas-live-arrow',true);
       }
       const oldCamera = previousCanvasCamera;
       world.style.transition = 'none';
@@ -727,11 +816,15 @@
         }).join('');
         const markerSizes = new Map([...markers.querySelectorAll('.canvas-final-marker')].map(element =>
           [element.dataset.nodeId, {width:element.offsetWidth,height:element.offsetHeight}]));
+        canvasImproveFinalCrossings(placed,canvas.edges,markerSizes,stage.clientWidth,stage.clientHeight);
+        for (const item of placed) {
+          const marker=markers.querySelector(`[data-node-id="${CSS.escape(item.node.id)}"]`);
+          marker.style.left=`${item.x}px`;
+          marker.style.top=`${item.y}px`;
+        }
         relations.innerHTML = canvasArrowDefs('canvas-final-arrow') +
-          canvas.edges.filter(edge => markerById.has(edge.source_node_id) && markerById.has(edge.target_node_id))
-            .map(edge => canvasArrowLine(edge,markerById.get(edge.source_node_id),
-              markerById.get(edge.target_node_id),'canvas-final-arrow',
-              markerSizes.get(edge.source_node_id),markerSizes.get(edge.target_node_id))).join('');
+          canvasArrowLines(canvas.edges.filter(edge => markerById.has(edge.source_node_id) &&
+            markerById.has(edge.target_node_id)),markerById,markerSizes,'canvas-final-arrow');
       }
     }
     window.addEventListener('resize', fitDiscussionCards);

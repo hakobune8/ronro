@@ -250,6 +250,37 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
       relationArrows: [...document.querySelectorAll('.canvas-final-relations line')].every(line =>
         !!line.getAttribute('marker-end') &&
         !!document.getElementById(line.getAttribute('marker-end').slice(5,-1))),
+      relationCrossings: (() => {
+        const lines=[...document.querySelectorAll('.canvas-final-relations line')];
+        const point=(line,x,y)=>({x:Number(line.getAttribute(x)),y:Number(line.getAttribute(y))});
+        const side=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+        let count=0;
+        lines.forEach((line,index)=>lines.slice(index+1).forEach(other=>{
+          if ([line.dataset.source,line.dataset.target].some(id=>
+            id===other.dataset.source || id===other.dataset.target)) return;
+          const a=point(line,'x1','y1'), b=point(line,'x2','y2');
+          const c=point(other,'x1','y1'), d=point(other,'x2','y2');
+          if (side(a,b,c)*side(a,b,d)<-1 && side(c,d,a)*side(c,d,b)<-1) count++;
+        }));
+        return count;
+      })(),
+      relationCardObstructions: (() => {
+        const markers=[...document.querySelectorAll('.canvas-final-marker')];
+        const lines=[...document.querySelectorAll('.canvas-final-relations line')];
+        const point=(line,x,y)=>({x:Number(line.getAttribute(x)),y:Number(line.getAttribute(y))});
+        const side=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+        return lines.reduce((count,line)=>count+markers.filter(marker=>{
+          if ([line.dataset.source,line.dataset.target].includes(marker.dataset.nodeId)) return false;
+          const x=parseFloat(marker.style.left), y=parseFloat(marker.style.top);
+          const w=marker.offsetWidth/2, h=marker.offsetHeight/2;
+          const corners=[{x:x-w,y:y-h},{x:x+w,y:y-h},{x:x+w,y:y+h},{x:x-w,y:y+h}];
+          const a=point(line,'x1','y1'),b=point(line,'x2','y2');
+          return corners.some((c,index)=>{
+            const d=corners[(index+1)%4];
+            return side(a,b,c)*side(a,b,d)<-1 && side(c,d,a)*side(c,d,b)<-1;
+          });
+        }).length,0);
+      })(),
       noDetachedEdges: !document.querySelector('.canvas-world .canvas-edge') &&
         !document.querySelector('.canvas-final-leaders'),
       relationsJoinMarkers: (() => {
@@ -329,6 +360,8 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     item.final.markerOverlap || !item.final.rootStylingCorrect || !item.final.noDetachedEdges ||
     !item.final.relationsJoinMarkers || !item.final.relationStrokesVisible ||
     !item.final.relationStrokesContinuous || !item.final.noRelationBadges || !item.final.relationArrows ||
+    (String(item.count).startsWith('r4') &&
+      (item.final.relationCrossings || item.final.relationCardObstructions)) ||
     (item.branched && item.final.relationCount===0) ||
     item.live.displayLabelIsShort === false || item.live.detailIsCanonical === false ||
     !item.final.topology)) process.exit(1);
