@@ -136,7 +136,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
         const widths=new Set(nodes.map(node=>getComputedStyle(node).width));
         const sizes=new Set(nodes.map(node=>getComputedStyle(node.querySelector('.canvas-label')).fontSize));
         return widths.size===1 && sizes.size===1 &&
-          getComputedStyle(nodes[0].querySelector('.canvas-label')).textWrap==='wrap';
+          getComputedStyle(nodes[0].querySelector('.canvas-label')).textWrap==='balance';
       })(),
       peripheralBehindNodes: (() => {
         const world=document.querySelector('.canvas-world');
@@ -184,6 +184,13 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
           return Math.min(subtitle.right,card.right)-Math.max(subtitle.left,card.left)>4 &&
             Math.min(subtitle.bottom,card.bottom)-Math.max(subtitle.top,card.top)>4;
         }).length;
+      })(),
+      primaryOverlap: (() => {
+        const cards=[...document.querySelectorAll('.canvas-node:not(.mid)')]
+          .map(node=>node.getBoundingClientRect());
+        return cards.reduce((count,a,index)=>count+cards.slice(index+1).filter(b=>
+          Math.min(a.right,b.right)-Math.max(a.left,b.left)>2 &&
+          Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>2).length,0);
       })(),
       minSubtitleGap: (() => {
         const subtitle=document.querySelector('.canvas-detail')?.getBoundingClientRect();
@@ -310,7 +317,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
       item.live.focusClock !== (String(item.count).startsWith('r4-timed') ? '09:19' : '09:01') || !item.final.markerClocks :
       !item.live.focusClock || !item.final.markerClocks) ||
     item.live.focusCenterOffsetX > 3 ||
-    item.live.cardsCoveredBySubtitle ||
+    item.live.cardsCoveredBySubtitle || item.live.primaryOverlap ||
     (item.live.minSubtitleGap !== null && item.live.minSubtitleGap < 16) ||
     item.live.subtitleLines > 5.1 ||
     (['r4-long','r4-timed-long'].includes(item.count) ? !item.live.subtitleOverflowNote : !item.live.subtitleComplete) ||

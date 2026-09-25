@@ -47,6 +47,12 @@ fs.mkdirSync(out, { recursive: true });
           ['idea','option','concern','decision','open_item','action'].includes(value)),
           independent:node.classList.contains('independent'),
           unconfirmed:node.classList.contains('unconfirmed')})),
+      finalMarkerLines: Object.fromEntries([...document.querySelectorAll('.canvas-final-marker')]
+        .map(node => {
+          const label=node.querySelector('.canvas-final-label');
+          return [node.dataset.nodeId,Math.round(label.getBoundingClientRect().height /
+            parseFloat(getComputedStyle(label).lineHeight))];
+        })),
       counts: Object.fromEntries([...document.querySelectorAll('.canvas-count')]
         .map(item => [item.dataset.countType, Number(item.querySelector('strong')?.textContent)])),
       geometry: Object.fromEntries([...document.querySelectorAll('.canvas-node')]
@@ -76,6 +82,7 @@ fs.mkdirSync(out, { recursive: true });
       JSON.stringify(state.counts)!==JSON.stringify(expectedCounts) ||
       (state.final && (state.markerCount === 0 || state.finalRelationCount === 0 ||
         !state.finalRelationBadges.includes('案への懸念') ||
+        !['move','sms','decision'].every(id => state.finalMarkerLines[id] === 1) ||
         !state.noDetachedFinalEdges ||
         !['decision','open_item','action'].every(type => state.finalMarkerTypes.some(item => item.type===type)) ||
         !state.finalMarkerTypes.some(item => item.independent) ||
