@@ -326,7 +326,37 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     }));
     if (snapshot.count === 300) await page.screenshot({ path: '/tmp/ronro-canvas-300-' + (snapshot.branched ? 'branched' : 'roots') + '-final.png' });
     if (snapshot.count === 'r4') await page.screenshot({ path: '/tmp/ronro-canvas-r4-short-final.png' });
-    if (snapshot.count === 'r4-timed') await page.screenshot({ path: '/tmp/ronro-canvas-r4-timed-final.png' });
+    if (snapshot.count === 'r4-timed') {
+      await page.screenshot({ path: '/tmp/ronro-canvas-r4-timed-final.png' });
+      // Diagnostic comparison only: render the same accepted Graph once
+      // without the bounded final-callout crossing repair. The normal render
+      // above remains the assertion target and Product behavior.
+      const baselineCrossings = await page.evaluate(sample => {
+        const repair=canvasImproveFinalCrossings;
+        try {
+          canvasImproveFinalCrossings=() => {};
+          previousCanvasKey=null;
+          renderShared(sample);
+        } finally {
+          canvasImproveFinalCrossings=repair;
+        }
+        const lines=[...document.querySelectorAll('.canvas-final-relations line')];
+        const point=(line,x,y)=>({x:Number(line.getAttribute(x)),y:Number(line.getAttribute(y))});
+        const side=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+        let count=0;
+        lines.forEach((line,index)=>lines.slice(index+1).forEach(other=>{
+          if ([line.dataset.source,line.dataset.target].some(id=>
+            id===other.dataset.source || id===other.dataset.target)) return;
+          const a=point(line,'x1','y1'),b=point(line,'x2','y2');
+          const c=point(other,'x1','y1'),d=point(other,'x2','y2');
+          if (side(a,b,c)*side(a,b,d)<-1 && side(c,d,a)*side(c,d,b)<-1) count++;
+        }));
+        return count;
+      }, snapshot);
+      await page.screenshot({ path: '/tmp/ronro-canvas-r4-timed-final-before-crossing-repair.png' });
+      if (baselineCrossings <= final.relationCrossings)
+        throw new Error(`Crossing repair did not improve R4: ${baselineCrossings} -> ${final.relationCrossings}`);
+    }
     const expectedCounts = {idea:0,option:0,concern:0,candidate:0,confirmed:0,open_item:0,action:0};
     for (const node of snapshot.map.semantic_canvas.nodes) {
       if (['archived','revoked','resolved','completed'].includes(node.status)) continue;
