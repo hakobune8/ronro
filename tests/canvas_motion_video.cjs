@@ -75,7 +75,7 @@ fs.mkdirSync(out, { recursive: true });
       (!state.final && state.focus && state.detailTime !== state.nodeTime) ||
       JSON.stringify(state.counts)!==JSON.stringify(expectedCounts) ||
       (state.final && (state.markerCount === 0 || state.finalRelationCount === 0 ||
-        !state.finalRelationBadges.includes('懸念') ||
+        !state.finalRelationBadges.includes('案への懸念') ||
         !state.noDetachedFinalEdges ||
         !['decision','open_item','action'].every(type => state.finalMarkerTypes.some(item => item.type===type)) ||
         !state.finalMarkerTypes.some(item => item.independent) ||

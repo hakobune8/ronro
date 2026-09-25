@@ -545,6 +545,12 @@
       return `translate(${stage.clientWidth / 2}px,${anchorY}px) scale(${camera.scale}) translate(${-camera.x}px,${-camera.y}px)`;
     }
 
+    function canvasRelationLabel(type, target) {
+      if (type === 'supports') return '支え';
+      if (type === 'opposes') return target?.type === 'option' ? '案への懸念' : '反対意見';
+      return 'ここから展開';
+    }
+
     function canvasEdgeMarkup(edge, source, target, detailed) {
       const dx = target.x - source.x, dy = target.y - source.y;
       const horizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
@@ -553,7 +559,7 @@
       const tx = target.x - (horizontal ? Math.sign(dx) * 145 : 0);
       const ty = target.y - (horizontal ? 0 : Math.sign(dy) * 62);
       const type = edge.type;
-      const label = type === 'supports' ? '支え' : type === 'opposes' ? '懸念' : 'ここから展開';
+      const label = canvasRelationLabel(type, target);
       const line = `<line class="canvas-edge ${type === 'discussion_provenance' ? 'provenance' : type}" x1="${sx}" y1="${sy}" x2="${tx}" y2="${ty}"/>`;
       return line + (detailed ? `<text class="canvas-edge-label ${type === 'discussion_provenance' ? '' : type}" x="${(sx+tx)/2}" y="${(sy+ty)/2-7}" text-anchor="middle">${label}</text>` : '');
     }
@@ -705,9 +711,10 @@
             const target = markerById.get(edge.target_node_id);
             const type = edge.type === 'discussion_provenance' ? 'provenance' : edge.type;
             const line = `<line class="${escapeHtml(type)}" x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}"/>`;
-            const label = type === 'supports' ? '支え' : type === 'opposes' ? '懸念' : '';
+            const label = type === 'provenance' ? '' : canvasRelationLabel(type, target.node);
             const midX = (source.x+target.x)/2, midY = (source.y+target.y)/2;
-            return line + (label ? `<g class="relation-badge ${escapeHtml(type)}"><rect x="${midX-36}" y="${midY-17}" width="72" height="34" rx="9"/><text x="${midX}" y="${midY+1}" text-anchor="middle" dominant-baseline="middle">${label}</text></g>` : '');
+            const badgeWidth = Math.max(72, label.length * 22 + 20);
+            return line + (label ? `<g class="relation-badge ${escapeHtml(type)}"><rect x="${midX-badgeWidth/2}" y="${midY-17}" width="${badgeWidth}" height="34" rx="9"/><text x="${midX}" y="${midY+1}" text-anchor="middle" dominant-baseline="middle">${escapeHtml(label)}</text></g>` : '');
           }).join('');
         markers.innerHTML = placed.map(({node,x,y}) => {
           const rootClass = node.root_state === 'linked' ? '' : ` ${node.root_state}`;
