@@ -28,6 +28,8 @@ class CanvasMotionFixtureTests(unittest.TestCase):
         self.assertEqual(before, returned)
         self.assertEqual(before, corrected)
         self.assertEqual(scenes[9]["snapshot"]["map"]["semantic_canvas"]["focus_id"], "move")
+        self.assertIn("radio", scenes[8]["snapshot"]["map"]["semantic_canvas"]["root_ids"])
+        self.assertIn("water", scenes[8]["snapshot"]["map"]["semantic_canvas"]["unconfirmed_ids"])
         late_edges = scenes[10]["snapshot"]["map"]["semantic_canvas"]["edges"]
         fixed_edges = scenes[11]["snapshot"]["map"]["semantic_canvas"]["edges"]
         self.assertTrue(any(edge["source_node_id"] == "move" and edge["target_node_id"] == "check"

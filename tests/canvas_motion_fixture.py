@@ -112,11 +112,21 @@ def build_scenes() -> list[dict]:
     node("radio", "idea", "住民向け連絡手段を確認",
          "飲料水の配布方法とは別に、停電時に住民へ情報を伝える連絡手段を確認したいという話題に移った。")
     scene("別の話題", "独立したCanvas領域へカメラ移動")
+    # A later Human correction explicitly establishes that this was another
+    # discussion entry point. The Node has already been placed on the Canvas.
+    minute = 22
+    link("water", "radio")
+    mistaken = next(edge for edge in edges if edge["source_node_id"] == "water" and edge["target_node_id"] == "radio")
+    edges.remove(mistaken)
+    event("correct_relation", {"old_relation": {"source_node_id": "water",
+                                                 "target_node_id": "radio",
+                                                 "relation_type": "discussion_provenance"},
+                               "declared_independent": True})
     minute = 24
     node("sms", "option", "SMSで配布情報を伝える",
          "通信状況が許す場合は、SMSで配布場所と開始時刻を住民へ伝える案が挙がった。")
     link("radio", "sms")
-    scene("別の枝が成長", "前の論点は周辺に残る")
+    scene("別の枝が成長", "独立と確認した入口を含む別の枝")
     minute = 27
     update("move", "飲料水の話に戻り、既存倉庫の水を三避難所へ再配置する案の実行条件を改めて確認した。")
     scene("前の話へ戻る", "既存Nodeへフォーカスとカメラが戻る")

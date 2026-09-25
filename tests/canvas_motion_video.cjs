@@ -20,30 +20,14 @@ fs.mkdirSync(out, { recursive: true });
   await page.route('**/api/live', route => route.fulfill({ contentType: 'application/json',
     body: JSON.stringify(currentSnapshot) }));
   await page.goto('http://127.0.0.1:18080/shared?viewport=1920x1080', { waitUntil: 'networkidle' });
-  await page.addStyleTag({ content: `
-    #motion-qa-caption { position: fixed; z-index: 100; right: 42px; top: 82px;
-      padding: 8px 16px; border-radius: 9px; background: rgba(21,48,70,.90);
-      color: white; font: 600 19px/1.3 -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
-      pointer-events: none; text-align: right; max-width: 900px; }
-    #motion-qa-caption small { font-size: 14px; opacity: .85; display: block; }
-  ` });
-  await page.evaluate(() => {
-    const caption = document.createElement('div');
-    caption.id = 'motion-qa-caption';
-    caption.setAttribute('aria-label', '合成テスト場面');
-    document.body.append(caption);
-  });
   const entries = [];
   const nodeGeometry = new Map();
   for (let index = 0; index < scenes.length; index++) {
     const item = scenes[index];
     currentSnapshot = item.snapshot;
-    await page.evaluate(({ snapshot, title, note, minute, index, total }) => {
-      document.querySelector('#motion-qa-caption').innerHTML =
-        `<small>合成データ · ${index + 1}/${total} · 会議 ${String(minute).padStart(2, '0')}分</small>` +
-        `${title}｜${note}`;
+    await page.evaluate(({ snapshot }) => {
       renderShared(snapshot);
-    }, { ...item, index, total: scenes.length });
+    }, item);
     const state = await page.evaluate(() => ({
       focus: document.querySelector('.canvas-node.focus')?.dataset.nodeId || null,
       nodeCount: document.querySelectorAll('.canvas-node').length,
@@ -53,6 +37,11 @@ fs.mkdirSync(out, { recursive: true });
       detailTime: document.querySelector('.canvas-detail-time')?.textContent || null,
       nodeTime: document.querySelector('.canvas-node.focus .canvas-time')?.textContent || null,
       markerCount: document.querySelectorAll('.canvas-final-marker').length,
+      finalMarkerTypes: [...document.querySelectorAll('.canvas-final-marker')]
+        .map(node => ({id:node.dataset.nodeId, type:[...node.classList].find(value =>
+          ['idea','option','concern','decision','open_item','action'].includes(value)),
+          independent:node.classList.contains('independent'),
+          unconfirmed:node.classList.contains('unconfirmed')})),
       counts: Object.fromEntries([...document.querySelectorAll('.canvas-count')]
         .map(item => [item.dataset.countType, Number(item.querySelector('strong')?.textContent)])),
       geometry: Object.fromEntries([...document.querySelectorAll('.canvas-node')]
@@ -80,7 +69,10 @@ fs.mkdirSync(out, { recursive: true });
       (!state.final && state.focus !== expected.focus_id) ||
       (!state.final && state.focus && state.detailTime !== state.nodeTime) ||
       JSON.stringify(state.counts)!==JSON.stringify(expectedCounts) ||
-      (state.final && state.markerCount === 0)) {
+      (state.final && (state.markerCount === 0 ||
+        !['decision','open_item','action'].every(type => state.finalMarkerTypes.some(item => item.type===type)) ||
+        !state.finalMarkerTypes.some(item => item.independent) ||
+        !state.finalMarkerTypes.some(item => item.unconfirmed)))) {
       throw new Error(`Scene ${index + 1} invalid: ${JSON.stringify(state)}`);
     }
     for (const [nodeId, geometry] of Object.entries(state.geometry)) {

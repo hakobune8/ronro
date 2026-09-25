@@ -232,6 +232,8 @@
     .canvas-peripheral.unconfirmed { border-style: dashed; opacity: .4; }
     .canvas-final-markers { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
     .canvas-final-topology { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
+    .canvas-final-leaders { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
+    .canvas-final-leaders line { stroke: #a5b8c7; stroke-width: 1.5; stroke-dasharray: 2 6; }
     .canvas-final-topology circle { fill: #a7bfd0; opacity: .48; }
     .canvas-final-topology circle.idea { fill: #5d9bb0; }
     .canvas-final-topology circle.option { fill: #70aa82; }
@@ -244,9 +246,12 @@
       color: #263d50; font-size: 21px; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere;
       box-shadow: 0 3px 10px rgba(31,65,95,.05); }
     .canvas-final-marker.unconfirmed { border-style: dashed; }
+    .canvas-final-marker.independent { box-shadow: 0 0 0 3px #e4eef4; }
     .canvas-final-marker small { display: block; width: max-content; margin-bottom: 7px; padding: 2px 7px;
       border-radius: 4px; background: var(--type-accent,#587086); color: #fff; font-size: 16px; }
     .canvas-final-marker .canvas-final-label { display: block; }
+    .canvas-final-marker .canvas-root-hint { display: block; margin-top: 6px; color: #60778b;
+      font-size: 15px; font-weight: 600; }
     /* Canonical detail is a subtitle, not another graph card or an inspector. */
     .canvas-detail { position: absolute; z-index: 5; left: 50%; bottom: 14px;
       transform: translateX(-50%); width: min(1720px,calc(100% - 100px));
@@ -559,22 +564,27 @@
           outgoing.get(edge.source_node_id).push(edge.target_node_id);
         }
       }
-      const roots = canvas.nodes.filter(node => node.root_state !== 'linked')
-        .sort((a,b) => (degree.get(b.id)||0)-(degree.get(a.id)||0) || a.created_sequence-b.created_sequence || a.id.localeCompare(b.id))
-        .slice(0,6).map(node => node.id);
-      const selected = [...roots], queue = [...roots];
-      while (queue.length && selected.length < 12) {
-        const parent = queue.shift();
-        for (const child of outgoing.get(parent)||[]) {
-          if (!selected.includes(child) && byId.has(child)) { selected.push(child); queue.push(child); }
-          if (selected.length >= 12) break;
-        }
+      const byCreation = (a,b) => a.created_sequence-b.created_sequence || a.id.localeCompare(b.id);
+      const selected = [];
+      const add = id => { if (byId.has(id) && !selected.includes(id)) selected.push(id); };
+      const stateNodes = canvas.nodes.filter(node => ['decision','open_item','action'].includes(node.type))
+        .sort((a,b) => ({decision:0,open_item:1,action:2}[a.type] -
+                        {decision:0,open_item:1,action:2}[b.type]) || byCreation(a,b));
+      stateNodes.slice(0,4).forEach(node => add(node.id));
+      const independent = canvas.nodes.filter(node => node.root_state === 'independent').sort(byCreation);
+      const entryCandidates = canvas.nodes.filter(node => node.root_state === 'unconfirmed')
+        .sort((a,b) => Number(outgoing.has(b.id))-Number(outgoing.has(a.id)) || byCreation(a,b));
+      const entries = [...independent.slice(0,2), ...entryCandidates.slice(0,3)];
+      entries.forEach(node => add(node.id));
+      // One nearby branch point per entry conveys structure without claiming
+      // that every no-parent Node is an independently verified Root.
+      for (const entry of entries) {
+        const child = (outgoing.get(entry.id)||[]).map(id => byId.get(id)).filter(Boolean)
+          .sort((a,b) => (degree.get(b.id)||0)-(degree.get(a.id)||0) || byCreation(a,b))[0];
+        if (child) add(child.id);
       }
-      for (const node of canvas.nodes.filter(node => ['decision','open_item','action'].includes(node.type))) {
-        if (!selected.includes(node.id)) selected.push(node.id);
-        if (selected.length >= 15) break;
-      }
-      return selected.slice(0,15);
+      if (canvas.nodes.length <= 12) canvas.nodes.slice().sort(byCreation).forEach(node => add(node.id));
+      return selected.slice(0,12);
     }
 
     function renderSemanticCanvas(snapshot, graph, fresh) {
@@ -600,7 +610,7 @@
       const detail = !final && focus ? `<aside class="canvas-detail${fresh.has(focus.id) ? ' just-updated' : ''}">${canvasTimeMarkup(focus, 'canvas-detail-time')}<p>${escapeHtml(focus.canonical)}</p><div class="detail-overflow">続きあり</div></aside>` : '';
       const note = state === 'ended_with_incomplete_processing' ? '処理が完了していません。内容の確認が必要です。'
         : '';
-      const markup = `<section class="canvas-stage" aria-label="議論の論点図"><div class="canvas-world"><svg class="canvas-edges" aria-hidden="true">${edges}</svg>${nodeMarkup}</div><div class="canvas-periphery"></div><svg class="canvas-final-topology" aria-hidden="true"></svg><div class="canvas-final-markers"></div>${canvas.nodes.length ? '' : '<div class="canvas-empty">議論を整理しています</div>'}${note ? `<div class="canvas-final-note">${note}</div>` : ''}${detail}</section>`;
+      const markup = `<section class="canvas-stage" aria-label="議論の論点図"><div class="canvas-world"><svg class="canvas-edges" aria-hidden="true">${edges}</svg>${nodeMarkup}</div><div class="canvas-periphery"></div><svg class="canvas-final-topology" aria-hidden="true"></svg><svg class="canvas-final-leaders" aria-hidden="true"></svg><div class="canvas-final-markers"></div>${canvas.nodes.length ? '' : '<div class="canvas-empty">議論を整理しています</div>'}${note ? `<div class="canvas-final-note">${note}</div>` : ''}${detail}</section>`;
       const main = $('shared-main');
       const key = JSON.stringify([canvas.session_id,canvas.revision,state,canvas.focus_id,
         canvas.latest_detail_id,snapshot.map.display_labels]);
@@ -660,17 +670,35 @@
         }
         topology.innerHTML = [...bins.values()].map(item => `<circle class="${escapeHtml(item.type)}" cx="${item.x}" cy="${item.y}" r="${Math.min(12,4+Math.sqrt(item.count)*2)}"/>`).join('');
         const markers = main.querySelector('.canvas-final-markers');
+        const leaders = main.querySelector('.canvas-final-leaders');
+        leaders.setAttribute('viewBox',`0 0 ${stage.clientWidth} ${stage.clientHeight}`);
         const used = [];
         const candidates = visible.map(node => {
           const sx = stage.clientWidth/2 + (node.x-camera.x)*camera.scale;
           const sy = stage.clientHeight/2 + (node.y-camera.y)*camera.scale;
           return {node,x:sx,y:sy};
         });
-        markers.innerHTML = candidates.filter(({x,y}) => x>130 && x<stage.clientWidth-130 && y>80 && y<stage.clientHeight-95)
-          .filter(({x,y}) => {
-            if (used.some(point => Math.abs(point.x-x)<245 && Math.abs(point.y-y)<110)) return false;
-            used.push({x,y}); return true;
-          }).map(({node,x,y}) => `<div class="canvas-final-marker ${escapeHtml(node.type)} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${x}px;top:${y}px"><small>${escapeHtml(canvasRole(node))}</small>${canvasTimeMarkup(node)}<span class="canvas-final-label">${escapeHtml(node.label)}</span></div>`).join('');
+        const offsets = [[0,0],[-280,0],[280,0],[0,-180],[0,180],
+          [-280,-180],[280,-180],[-280,180],[280,180],[-560,0],[560,0]];
+        const placed = [];
+        for (const {node,x,y} of candidates) {
+          for (const [dx,dy] of offsets) {
+            const px=x+dx, py=y+dy;
+            if (px<145 || px>stage.clientWidth-145 || py<95 || py>stage.clientHeight-115) continue;
+            if (used.some(point => Math.abs(point.x-px)<265 && Math.abs(point.y-py)<160)) continue;
+            used.push({x:px,y:py});
+            placed.push({node,anchorX:x,anchorY:y,x:px,y:py});
+            break;
+          }
+          if (placed.length>=9) break;
+        }
+        leaders.innerHTML = placed.filter(item => Math.hypot(item.x-item.anchorX,item.y-item.anchorY)>40)
+          .map(item => `<line x1="${item.anchorX}" y1="${item.anchorY}" x2="${item.x}" y2="${item.y}"/>`).join('');
+        markers.innerHTML = placed.map(({node,x,y}) => {
+          const rootClass = node.root_state === 'linked' ? '' : ` ${node.root_state}`;
+          const hint = node.root_state === 'independent' ? '別の話題' : '';
+          return `<div class="canvas-final-marker ${escapeHtml(node.type)}${rootClass}" data-node-id="${escapeHtml(node.id)}" style="left:${x}px;top:${y}px"><small>${escapeHtml(canvasRole(node))}</small>${canvasTimeMarkup(node)}<span class="canvas-final-label">${escapeHtml(node.label)}</span>${hint ? `<span class="canvas-root-hint">${hint}</span>` : ''}</div>`;
+        }).join('');
       }
     }
     window.addEventListener('resize', fitDiscussionCards);

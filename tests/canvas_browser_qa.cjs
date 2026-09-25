@@ -234,6 +234,16 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     await page.reload({ waitUntil: 'networkidle' });
     const final = await page.evaluate(() => ({
       markers: document.querySelectorAll('.canvas-final-marker').length,
+      markerOverlap: (() => {
+        const boxes=[...document.querySelectorAll('.canvas-final-marker')].map(node=>node.getBoundingClientRect());
+        return boxes.reduce((count,a,index)=>count+boxes.slice(index+1).filter(b=>
+          Math.min(a.right,b.right)-Math.max(a.left,b.left)>2 &&
+          Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>2).length,0);
+      })(),
+      rootHintsCorrect: [...document.querySelectorAll('.canvas-final-marker')].every(marker => {
+        const hint=marker.querySelector('.canvas-root-hint')?.textContent || '';
+        return marker.classList.contains('independent') ? hint==='別の話題' : !hint;
+      }),
       markerClocks: document.querySelectorAll('.canvas-final-marker .canvas-time').length,
       markerClockOverlap: [...document.querySelectorAll('.canvas-final-marker')].filter(marker => {
         const clock=marker.querySelector('.canvas-time')?.getBoundingClientRect();
@@ -284,6 +294,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     (['r4-long','r4-timed-long'].includes(item.count) ? !item.live.subtitleOverflowNote : !item.live.subtitleComplete) ||
     item.live.stageWidth !== item.final.stageWidth ||
     item.final.oldBottomNote || item.final.neighborhoodCount || item.final.markerClockOverlap ||
+    item.final.markerOverlap || !item.final.rootHintsCorrect ||
     item.live.displayLabelIsShort === false || item.live.detailIsCanonical === false ||
     !item.final.topology)) process.exit(1);
 })().catch(error => { console.error(error); process.exit(1); });
