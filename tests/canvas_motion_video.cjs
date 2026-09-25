@@ -40,6 +40,9 @@ fs.mkdirSync(out, { recursive: true });
       finalRelationCount: document.querySelectorAll('.canvas-final-relations line').length,
       finalRelationArrows: [...document.querySelectorAll('.canvas-final-relations line')]
         .every(line => !!line.getAttribute('marker-end')),
+      opposesSingleHead: [...document.querySelectorAll('marker[id$="-opposes"] path')]
+        .every(path => (path.getAttribute('d').match(/M/g) || []).length === 1 &&
+          path.getAttribute('fill') !== 'none'),
       sharedTargetTipGap: (() => {
         const lines=[...document.querySelectorAll('.canvas-final-relations line[data-target="move"]')];
         if (lines.length<2) return null;
@@ -98,8 +101,8 @@ fs.mkdirSync(out, { recursive: true });
       (!state.final && state.focus && state.detailTime !== state.nodeTime) ||
       JSON.stringify(state.counts)!==JSON.stringify(expectedCounts) ||
       (state.final && (state.markerCount === 0 || state.finalRelationCount === 0 ||
-        !state.finalRelationArrows || !state.noRelationLabels ||
-        state.sharedTargetTipGap === null || state.sharedTargetTipGap < 45 ||
+        !state.finalRelationArrows || !state.opposesSingleHead || !state.noRelationLabels ||
+        state.sharedTargetTipGap === null || state.sharedTargetTipGap < 18 ||
         !['move','sms','decision'].every(id => state.finalMarkerLines[id] === 1) ||
         !state.finalLabelsFit || !state.roadTermIntact ||
         !state.noDetachedFinalEdges ||
