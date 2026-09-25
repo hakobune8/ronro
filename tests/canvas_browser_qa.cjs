@@ -239,6 +239,13 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
         .every(line => getComputedStyle(line).stroke !== 'none'),
       relationStrokesContinuous: [...document.querySelectorAll('.canvas-final-relations line')]
         .every(line => getComputedStyle(line).strokeDasharray === 'none'),
+      relationBadgesFit: [...document.querySelectorAll('.canvas-final-relations .relation-badge')]
+        .every(group => {
+          const text=group.querySelector('text')?.getBBox();
+          const rect=group.querySelector('rect')?.getBBox();
+          return text && rect && text.x>=rect.x+4 && text.x+text.width<=rect.x+rect.width-4 &&
+            text.y>=rect.y+2 && text.y+text.height<=rect.y+rect.height-2;
+        }),
       noDetachedEdges: !document.querySelector('.canvas-world .canvas-edge') &&
         !document.querySelector('.canvas-final-leaders'),
       relationsJoinMarkers: (() => {
@@ -311,7 +318,7 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     item.final.oldBottomNote || item.final.neighborhoodCount || item.final.markerClockOverlap ||
     item.final.markerOverlap || !item.final.rootHintsCorrect || !item.final.noDetachedEdges ||
     !item.final.relationsJoinMarkers || !item.final.relationStrokesVisible ||
-    !item.final.relationStrokesContinuous ||
+    !item.final.relationStrokesContinuous || !item.final.relationBadgesFit ||
     (item.branched && item.final.relationCount===0) ||
     item.live.displayLabelIsShort === false || item.live.detailIsCanonical === false ||
     !item.final.topology)) process.exit(1);

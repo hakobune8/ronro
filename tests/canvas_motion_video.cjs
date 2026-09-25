@@ -38,6 +38,8 @@ fs.mkdirSync(out, { recursive: true });
       nodeTime: document.querySelector('.canvas-node.focus .canvas-time')?.textContent || null,
       markerCount: document.querySelectorAll('.canvas-final-marker').length,
       finalRelationCount: document.querySelectorAll('.canvas-final-relations line').length,
+      finalRelationBadges: [...document.querySelectorAll('.canvas-final-relations .relation-badge')]
+        .map(group => group.querySelector('text')?.textContent),
       noDetachedFinalEdges: !document.querySelector('.canvas-world .canvas-edge') &&
         !document.querySelector('.canvas-final-leaders'),
       finalMarkerTypes: [...document.querySelectorAll('.canvas-final-marker')]
@@ -73,6 +75,7 @@ fs.mkdirSync(out, { recursive: true });
       (!state.final && state.focus && state.detailTime !== state.nodeTime) ||
       JSON.stringify(state.counts)!==JSON.stringify(expectedCounts) ||
       (state.final && (state.markerCount === 0 || state.finalRelationCount === 0 ||
+        !state.finalRelationBadges.includes('懸念') ||
         !state.noDetachedFinalEdges ||
         !['decision','open_item','action'].every(type => state.finalMarkerTypes.some(item => item.type===type)) ||
         !state.finalMarkerTypes.some(item => item.independent) ||
@@ -91,6 +94,7 @@ fs.mkdirSync(out, { recursive: true });
       await page.screenshot({ path: filename, type: 'jpeg', quality: 86 });
       entries.push({ filename, duration: frame === 4 ? 1.6 : .145 });
     }
+    if (state.final) await page.screenshot({ path: path.join(out, 'final-review.png'), type: 'png' });
     console.log(`${index + 1}/${scenes.length} ${item.title}: ${JSON.stringify(state)}`);
   }
   await browser.close();

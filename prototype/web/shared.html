@@ -233,12 +233,13 @@
     .canvas-final-topology { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
     .canvas-final-relations { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
     .canvas-final-relations line { stroke-width: 3; }
-    .canvas-final-relations .provenance { stroke: #739bb9; }
-    .canvas-final-relations .supports { stroke: #45946f; }
-    .canvas-final-relations .opposes { stroke: #bc766b; }
-    .canvas-final-relations text { fill: #287454; font-size: 18px; font-weight: 700;
-      paint-order: stroke; stroke: #fff; stroke-width: 5px; stroke-linejoin: round; }
-    .canvas-final-relations text.opposes { fill: #a75d52; }
+    .canvas-final-relations line.provenance { stroke: #739bb9; }
+    .canvas-final-relations line.supports { stroke: #45946f; }
+    .canvas-final-relations line.opposes { stroke: #bc766b; }
+    .canvas-final-relations .relation-badge rect { fill: #fff; stroke: #80b79a; stroke-width: 1.5; }
+    .canvas-final-relations .relation-badge.opposes rect { stroke: #cf968a; }
+    .canvas-final-relations .relation-badge text { fill: #246a4a; font-size: 21px; font-weight: 750; }
+    .canvas-final-relations .relation-badge.opposes text { fill: #914b3d; }
     .canvas-final-topology circle { fill: #a7bfd0; opacity: .48; }
     .canvas-final-topology circle.idea { fill: #5d9bb0; }
     .canvas-final-topology circle.option { fill: #70aa82; }
@@ -705,7 +706,8 @@
             const type = edge.type === 'discussion_provenance' ? 'provenance' : edge.type;
             const line = `<line class="${escapeHtml(type)}" x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}"/>`;
             const label = type === 'supports' ? '支え' : type === 'opposes' ? '懸念' : '';
-            return line + (label ? `<text class="${escapeHtml(type)}" x="${(source.x+target.x)/2}" y="${(source.y+target.y)/2-9}" text-anchor="middle">${label}</text>` : '');
+            const midX = (source.x+target.x)/2, midY = (source.y+target.y)/2;
+            return line + (label ? `<g class="relation-badge ${escapeHtml(type)}"><rect x="${midX-36}" y="${midY-17}" width="72" height="34" rx="9"/><text x="${midX}" y="${midY+1}" text-anchor="middle" dominant-baseline="middle">${label}</text></g>` : '');
           }).join('');
         markers.innerHTML = placed.map(({node,x,y}) => {
           const rootClass = node.root_state === 'linked' ? '' : ` ${node.root_state}`;
