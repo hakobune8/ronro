@@ -217,7 +217,8 @@
     .canvas-node .canvas-time, .canvas-final-marker .canvas-time { position: absolute; top: 14px; right: 14px;
       color: #526b7d; font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; }
     .canvas-node .canvas-label { display: block; font-size: 32px; line-height: 1.3; font-weight: 670;
-      overflow-wrap: anywhere; text-wrap: balance; }
+      word-break: auto-phrase; overflow-wrap: anywhere; text-wrap: pretty; }
+    .canvas-label .canvas-word, .canvas-final-label .canvas-word { white-space: nowrap; }
     .canvas-node.focus { border-color: var(--focus-accent);
       box-shadow: 0 0 0 3px #d8e8f6,0 6px 24px rgba(31,105,175,.17); z-index: 3; }
     .canvas-node.mid { opacity: .38; box-shadow: none; }
@@ -249,8 +250,9 @@
     .canvas-final-topology circle.open_item { fill: #a78bc7; opacity: .75; }
     .canvas-final-marker { position: absolute; transform: translate(-50%,-50%); width: 290px; padding: 12px 15px;
       border: 2px solid var(--type-border,#b8cdda); border-radius: 13px; background: var(--type-tint,#fff);
-      color: #263d50; font-size: 21px; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere;
-      text-wrap: balance;
+      color: #263d50; font-size: 21px; font-weight: 650; line-height: 1.3;
+      word-break: auto-phrase; overflow-wrap: anywhere;
+      text-wrap: pretty;
       box-shadow: 0 3px 10px rgba(31,65,95,.05); }
     .canvas-final-marker.unconfirmed { border-style: dashed; }
     .canvas-final-marker.independent { box-shadow: 0 0 0 3px #e4eef4; }
@@ -550,6 +552,19 @@
       return 'ここから展開';
     }
 
+    const canvasWordSegmenter = typeof Intl.Segmenter === 'function'
+      ? new Intl.Segmenter('ja', {granularity:'word'}) : null;
+    function canvasDisplayLabelMarkup(label) {
+      if (!canvasWordSegmenter) return escapeHtml(label);
+      return [...canvasWordSegmenter.segment(label)].map(part => {
+        const escaped = escapeHtml(part.segment);
+        // Keep ordinary Japanese terms intact; very long tokens remain
+        // breakable so one unusual label cannot overflow its card.
+        return part.isWordLike && [...part.segment].length <= 8
+          ? `<span class="canvas-word">${escaped}</span>` : escaped;
+      }).join('');
+    }
+
     function canvasEdgeMarkup(edge, source, target, detailed) {
       const dx = target.x - source.x, dy = target.y - source.y;
       const horizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
@@ -616,7 +631,7 @@
         const isFocus = !final && node.id === canvas.focus_id;
         const soft = final || !near.has(node.id);
         const stateClass = node.type === 'decision' && node.status === 'confirmed' ? ' confirmed' : '';
-        return `<div class="canvas-node ${escapeHtml(node.type)}${stateClass} ${isFocus ? 'focus' : soft ? 'mid' : ''} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${node.x}px;top:${node.y}px" data-node-id="${escapeHtml(node.id)}"><span class="canvas-role">${escapeHtml(canvasRole(node))}</span>${canvasTimeMarkup(node)}<span class="canvas-label">${escapeHtml(node.label)}</span></div>`;
+        return `<div class="canvas-node ${escapeHtml(node.type)}${stateClass} ${isFocus ? 'focus' : soft ? 'mid' : ''} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${node.x}px;top:${node.y}px" data-node-id="${escapeHtml(node.id)}"><span class="canvas-role">${escapeHtml(canvasRole(node))}</span>${canvasTimeMarkup(node)}<span class="canvas-label">${canvasDisplayLabelMarkup(node.label)}</span></div>`;
       }).join('');
       const detail = !final && focus ? `<aside class="canvas-detail${fresh.has(focus.id) ? ' just-updated' : ''}">${canvasTimeMarkup(focus, 'canvas-detail-time')}<p>${escapeHtml(focus.canonical)}</p><div class="detail-overflow">続きあり</div></aside>` : '';
       const note = state === 'ended_with_incomplete_processing' ? '処理が完了していません。内容の確認が必要です。'
@@ -717,7 +732,7 @@
           }).join('');
         markers.innerHTML = placed.map(({node,x,y}) => {
           const rootClass = node.root_state === 'linked' ? '' : ` ${node.root_state}`;
-          return `<div class="canvas-final-marker ${escapeHtml(node.type)}${rootClass}" data-node-id="${escapeHtml(node.id)}" style="left:${x}px;top:${y}px"><small>${escapeHtml(canvasRole(node))}</small>${canvasTimeMarkup(node)}<span class="canvas-final-label">${escapeHtml(node.label)}</span></div>`;
+          return `<div class="canvas-final-marker ${escapeHtml(node.type)}${rootClass}" data-node-id="${escapeHtml(node.id)}" style="left:${x}px;top:${y}px"><small>${escapeHtml(canvasRole(node))}</small>${canvasTimeMarkup(node)}<span class="canvas-final-label">${canvasDisplayLabelMarkup(node.label)}</span></div>`;
         }).join('');
       }
     }

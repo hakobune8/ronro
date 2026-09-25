@@ -136,8 +136,10 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
         const widths=new Set(nodes.map(node=>getComputedStyle(node).width));
         const sizes=new Set(nodes.map(node=>getComputedStyle(node.querySelector('.canvas-label')).fontSize));
         return widths.size===1 && sizes.size===1 &&
-          getComputedStyle(nodes[0].querySelector('.canvas-label')).textWrap==='balance';
+          getComputedStyle(nodes[0].querySelector('.canvas-label')).textWrap==='pretty';
       })(),
+      labelsFit: [...document.querySelectorAll('.canvas-node .canvas-label')]
+        .every(label => label.scrollWidth <= label.clientWidth + 2),
       peripheralBehindNodes: (() => {
         const world=document.querySelector('.canvas-world');
         const peripheral=document.querySelector('.canvas-periphery');
@@ -241,6 +243,8 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
     await page.reload({ waitUntil: 'networkidle' });
     const final = await page.evaluate(() => ({
       markers: document.querySelectorAll('.canvas-final-marker').length,
+      labelsFit: [...document.querySelectorAll('.canvas-final-label')]
+        .every(label => label.scrollWidth <= label.clientWidth + 2),
       relationCount: document.querySelectorAll('.canvas-final-relations line').length,
       relationStrokesVisible: [...document.querySelectorAll('.canvas-final-relations line')]
         .every(line => getComputedStyle(line).stroke !== 'none'),
@@ -309,7 +313,8 @@ const snapshots = execFileSync('.venv/bin/python', ['-c', python], { encoding: '
   console.log(JSON.stringify(results));
   if (results.some(item => item.errors.length || item.live.scrollX || item.live.scrollY ||
     item.final.scrollX || item.final.scrollY || item.live.primary > 5 || item.live.clippedPrimary ||
-    !item.countsMatch || !item.live.fixedNodeGeometry || !item.live.peripheralBehindNodes ||
+    !item.countsMatch || !item.live.fixedNodeGeometry || !item.live.labelsFit ||
+    !item.live.peripheralBehindNodes || !item.final.labelsFit ||
     item.live.hiddenEdgeLabels || !item.live.detailInStage || !item.live.subtitleAtBottom ||
     item.live.subtitleHasHeading || !item.live.typePaletteDistinct ||
     !item.live.focusAccentMatchesSubtitle || !item.live.nodeTimeMatchesSubtitle ||

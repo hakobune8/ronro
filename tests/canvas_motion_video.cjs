@@ -53,6 +53,15 @@ fs.mkdirSync(out, { recursive: true });
           return [node.dataset.nodeId,Math.round(label.getBoundingClientRect().height /
             parseFloat(getComputedStyle(label).lineHeight))];
         })),
+      finalLabelsFit: [...document.querySelectorAll('.canvas-final-label')]
+        .every(label => label.scrollWidth <= label.clientWidth + 2),
+      roadTermIntact: (() => {
+        const card=document.querySelector('.canvas-final-marker[data-node-id="truck-risk"]');
+        const word=[...card?.querySelectorAll('.canvas-word') || []]
+          .find(node => node.textContent === '通行止め');
+        return !!word && word.getClientRects().length === 1 &&
+          card.querySelector('.canvas-final-label').textContent === '輸送路が一部通行止めの可能性';
+      })(),
       counts: Object.fromEntries([...document.querySelectorAll('.canvas-count')]
         .map(item => [item.dataset.countType, Number(item.querySelector('strong')?.textContent)])),
       geometry: Object.fromEntries([...document.querySelectorAll('.canvas-node')]
@@ -83,6 +92,7 @@ fs.mkdirSync(out, { recursive: true });
       (state.final && (state.markerCount === 0 || state.finalRelationCount === 0 ||
         !state.finalRelationBadges.includes('案への懸念') ||
         !['move','sms','decision'].every(id => state.finalMarkerLines[id] === 1) ||
+        !state.finalLabelsFit || !state.roadTermIntact ||
         !state.noDetachedFinalEdges ||
         !['decision','open_item','action'].every(type => state.finalMarkerTypes.some(item => item.type===type)) ||
         !state.finalMarkerTypes.some(item => item.independent) ||
