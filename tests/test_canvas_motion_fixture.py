@@ -2,7 +2,7 @@
 
 import unittest
 
-from canvas_motion_fixture import build_scenes
+from tests.canvas_motion_fixture import build_scenes
 
 
 class CanvasMotionFixtureTests(unittest.TestCase):

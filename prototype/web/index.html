@@ -487,6 +487,18 @@
       return frame;
     }
 
+    function liveResumeCursor(snapshot) {
+      const live = snapshot?.live_state;
+      const lastSequence = Number(live?.audio_chunk_sequence ?? -1);
+      const audioEnd = Number(live?.audio_end_seconds ?? 0);
+      if (!live || (lastSequence >= 0 && live.audio_end_seconds == null) ||
+          !Number.isSafeInteger(lastSequence) || lastSequence < -1 ||
+          !Number.isFinite(audioEnd) || audioEnd < 0) {
+        throw new Error('音声の再開位置を確認できません。送信せずに接続を確認してください。');
+      }
+      return { sequence: lastSequence + 1, sentSamples: Math.round(audioEnd * LIVE_TARGET_RATE) };
+    }
+
     function liveLog(event) {
       liveEventLines.push(JSON.stringify(event, null, 0));
       liveEventLines = liveEventLines.slice(-18);
@@ -681,8 +693,6 @@
       try {
         liveMode = mode;
         liveEventLines = [];
-        liveSentSamples = 0;
-        liveChunkSequence = 0;
         const started = await getJson('/api/live/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -690,14 +700,31 @@
         });
         applyLiveSnapshot(started);
         liveSocket = new WebSocket(started.websocket_url);
+        const connectionSocket = liveSocket;
+        let handshakeSnapshot = null;
+        let captureStarted = false;
         liveSocket.binaryType = 'arraybuffer';
-        liveSocket.onopen = async () => {
+        liveSocket.onopen = () => setStatus('音声接続と再開位置を確認しています。');
+        async function startCaptureAfterHandshake() {
+          if (captureStarted || liveSocket !== connectionSocket || connectionSocket.readyState !== WebSocket.OPEN) return;
+          captureStarted = true;
           try {
+            const cursor = liveResumeCursor(handshakeSnapshot);
+            liveChunkSequence = cursor.sequence;
+            liveSentSamples = cursor.sentSamples;
             if (!navigator.mediaDevices?.getUserMedia) throw new Error('Browser microphone API is unavailable');
             liveStream = await requestLiveMicrophone({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+            if (liveSocket !== connectionSocket || connectionSocket.readyState !== WebSocket.OPEN) {
+              stopLiveCapture();
+              return;
+            }
             liveContext = new AudioContext();
             await liveContext.resume();
             await liveContext.audioWorklet.addModule('/static/live-audio-worklet.js');
+            if (liveSocket !== connectionSocket || connectionSocket.readyState !== WebSocket.OPEN) {
+              stopLiveCapture();
+              return;
+            }
             liveSource = liveContext.createMediaStreamSource(liveStream);
             liveWorklet = new AudioWorkletNode(liveContext, 'discussion-map-capture', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
             liveWorklet.port.onmessage = (event) => { if (event.data?.type === 'pcm') handleLivePcm(event.data.samples, event.data.sampleRate || liveContext.sampleRate); };
@@ -710,14 +737,17 @@
           } catch (error) {
             stopLiveCapture();
             setStatus(`Microphone error: ${error.message}`, true);
-            if (liveSocket) { liveSocket.close(); liveSocket = null; }
+            if (liveSocket === connectionSocket) connectionSocket.close();
           }
-        };
+        }
         liveSocket.onmessage = (message) => {
+          if (liveSocket !== connectionSocket) return;
           try {
             const event = JSON.parse(message.data);
             liveLog({ type: event.type, code: event.code, text: event.text });
             if (event.snapshot) applyLiveSnapshot(event.snapshot);
+            if (event.type === 'runtime_snapshot') handshakeSnapshot = event.snapshot;
+            if (event.type === 'stt_connected') void startCaptureAfterHandshake();
             if (event.type === 'error') setStatus(`[${event.code}] ${event.message}`, true);
             if (event.type === 'live_complete') stopLiveCapture();
             if (event.type === 'session_ended') {
@@ -729,7 +759,12 @@
           } catch (error) { setStatus(`Live event parse error: ${error.message}`, true); }
         };
         liveSocket.onerror = () => setStatus('Live WebSocket error', true);
-        liveSocket.onclose = () => { stopLiveCapture(); liveSocket = null; updateLivePanel({ live_state: { runtime_state: 'disconnected' } }); };
+        liveSocket.onclose = () => {
+          if (liveSocket !== connectionSocket) return;
+          stopLiveCapture();
+          liveSocket = null;
+          updateLivePanel({ live_state: { runtime_state: 'disconnected' } });
+        };
       } catch (error) {
         setStatus(`[${error.code || 'live_start_failed'}] ${error.message}`, true);
       }
