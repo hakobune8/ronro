@@ -2,9 +2,9 @@
 
 **議論の現在地を共有する。**
 
-![現在の論点図：課題から案と決定候補へ展開した画面](docs/pilot/assets/ronro-focused-flow-stage-2.png)
+![現在の論点図：課題から案と決定候補へ展開したSemantic Canvas](docs/pilot/assets/ronro-semantic-canvas-stage-2.png)
 
-*現行の Focused Flow を制御された合成会議で表示した例です。実会議の記録や、AIによる関係付けの正確さを示すものではありません。*
+*現行のSemantic Canvasを制御された合成会議で表示した例です。実会議の記録や、AIによる関係付けの正確さを示すものではありません。*
 
 論路（ろんろ / RONRO）は、会議中の議論を「論点図」として整理し、参加者が「今、何を議論しているか」「何が決まりつつあるか」「何がまだ残っているか」を共有するためのオープンソース・プロトタイプです。
 
@@ -12,11 +12,11 @@
 
 ## 何を作っているか
 
-会議では、複数の論点を行き来したり、以前の論点へ戻ったりします。論路は、上部の「話の流れ」と、今話している論点の近くにあるつながり・状態を同じ共有画面へ整理します。
+会議では、複数の論点を行き来したり、以前の論点へ戻ったりします。論路は、一枚のSemantic Canvas上で今話している論点と近くのつながりを示します。話題が移れば見る範囲も移り、終了時には同じCanvasを引いて全体を見渡します。
 
-![話題が移ったときの「話の流れ」と現在の論点](docs/pilot/assets/ronro-focused-flow-topic-change.png)
+![会議終了時に同じCanvasを引いて全体を見た画面](docs/pilot/assets/ronro-semantic-canvas-final.png)
 
-*こちらも制御された合成会議の画面例です。現在の話題を左端に示し、無関係な論点を無理に結びません。*
+*こちらも制御された合成会議の画面例です。離れた論点を無理に結ばず、会議全体を見渡します。*
 
 - 今話していること
 - 出てきた考えや選択肢
@@ -55,7 +55,7 @@ Discussion Graph
 - Final Transcriptの正規化（Normalization v2）
 - FIFO Queueと単一Analyzer Worker
 - `gpt-5.6-luna` / `analyzer-prompt-v10-action-time-horizon` によるAnalyzer経路（Pilot候補設定）
-- Focused Flowによる現在の論点と、上部の「話の流れ」の表示
+- Semantic CanvasとAuto Cameraによる現在地周辺の表示、および終了時の全体表示
 - 根拠がある場合の論点間のつながり、決定候補、未解決事項、次の対応の表示
 - Human Commandによる進行役の修正・確認
 - Session DrainとEvaluation Harness
@@ -104,7 +104,7 @@ cp .env.example .env
 - [MVP要件（改名前の名称を保持）](docs/requirements/discussion-map-ai-facilitator-mvp.md)
 - [Architecture Summary](docs/architecture/mvp-architecture-summary.md)
 - [論路のNaming Decision](docs/product/ronro-naming.md)
-- [ライブパイロットガイド](docs/pilot/ronro-live-pilot-guide.md)
+- ライブパイロットガイド：[画面で読む](docs/pilot/ronro-live-pilot-guide.md) / [配布用PDF](docs/pilot/ronro-live-pilot-guide.pdf)
 - [Live Pilot Protocol](docs/evaluation/live-pilot-protocol.md)
 - [Kubernetes配備手順](docs/deployment/kubernetes-pilot-deployment.md)
 - [Public Release Readiness](docs/release/public-release-readiness.md)
@@ -117,7 +117,7 @@ cp .env.example .env
 - AIの整理結果には誤りが含まれる可能性があります。
 - 決定候補は自動的に確定されません。最終判断は人が行います。
 - マイク音声はSpeech-to-Textと議論整理のため外部APIへ送信されます。
-- Raw Audioはデフォルトで永続保存しません。Evaluation Artifactの扱いは実行環境の設定と同意に従います。
+- パイロット環境では参加者全員の明示的な同意を開始条件として入力音声を評価用に保存し、評価担当者のみがアクセスでき、会議終了から7日後に自動削除します。本運用では音声を保存しない方針です。
 - 機密性の高い会議で利用する場合は、データの送信先・保存設定・参加者への説明を事前に確認してください。
 
 ## 今後の候補

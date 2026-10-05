@@ -4,13 +4,13 @@
 
 ## 現行の案内
 
-- 参加者向け：[ライブパイロットガイド](pilot/ronro-live-pilot-guide.md)
+- 参加者向けライブパイロットガイド：[Markdown](pilot/ronro-live-pilot-guide.md) / [配布用PDF](pilot/ronro-live-pilot-guide.pdf)
 - 進行役向け：[進行役チェックリスト](pilot/ronro-live-pilot-facilitator-checklist.md)
 - 配備・確認：[Kubernetes Pilot Deployment](deployment/kubernetes-pilot-deployment.md)、[Pilot Day Checklist](deployment/kubernetes-pilot-checklist.md)
 - 名称と互換性：[論路 Naming Decision](product/ronro-naming.md)
 - 安全上の注意：[Security Policy](../SECURITY.md)
 
-画面画像は制御された合成会議による表示例であり、実会議の結果やAnalyzerの精度を示すものではありません。現行のFocused Flowの例は[パイロットガイド](pilot/ronro-live-pilot-guide.md)にもあります。
+画面画像は制御された合成会議による表示例であり、実会議の結果やAnalyzerの精度を示すものではありません。現行Semantic Canvasの段階別の例は[パイロットガイド](pilot/ronro-live-pilot-guide.md)にもあります。
 
 ## 設計・評価の履歴
 
