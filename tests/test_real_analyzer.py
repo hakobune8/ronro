@@ -8,6 +8,7 @@ from prototype.real_analyzer import (
     AnalysisContextBuilder,
     OpenAICompatibleProvider,
     PROMPT_VERSION_V5,
+    PROMPT_VERSION_V10,
     RealAnalyzer,
     StaticJsonProvider,
     build_analyzer_prompt,
@@ -57,6 +58,19 @@ class RealAnalyzerTests(unittest.TestCase):
             meeting_goal="MVPの中心価値を決める",
         )
 
+    def test_v10_action_time_horizon_instruction_preserves_semantic_graph_contract(self) -> None:
+        context = AnalysisContextBuilder().build(
+            utterance=utterance("本日の会議では点検結果を確認します"),
+            current_graph={"nodes": [], "edges": [], "current_topic": {}},
+            recent_events=[], meeting_goal=None,
+        )
+        system, payload = build_analyzer_prompt(context, prompt_version=PROMPT_VERSION_V10)
+        self.assertIn("An Action is work to execute after this meeting", system)
+        self.assertIn("current meeting process, NOT Action", system)
+        self.assertIn("post-meeting Action", system)
+        self.assertIn("discussion_provenance", system)
+        self.assertEqual(payload["current_utterance"]["text"], "本日の会議では点検結果を確認します")
+
     @unittest.skipUnless(RECORDED_DATASET_AVAILABLE, "recorded analyzer dataset is excluded from the public tree")
     def test_recorded_dataset_has_five_scenarios_and_human_annotations(self) -> None:
         scenarios = RecordedScenarioLoader(RECORDED).load_all()
@@ -102,6 +116,35 @@ class RealAnalyzerTests(unittest.TestCase):
             self.validator.validate_event(event)
             self.assertNotIn("sequence", candidate.__dict__)
             self.assertTrue(event["event_id"].startswith("real:"))
+
+    def test_exact_live_utterance_evidence_alias_is_resolved(self) -> None:
+        session_id = "live-safe"
+        canonical_id = f"live-evidence:{session_id}:1"
+        analyzer = self.analyzer({"events": [{
+            "kind": "node", "node_type": "idea", "label": "橋の点検結果を確認する",
+            "source_evidence_ids": [f"live-evidence:live-utterance:{session_id}:1"],
+        }]})
+        live_utterance = {
+            **utterance("橋の点検結果を確認します", canonical_id),
+            "id": f"live-utterance:{session_id}:1", "session_id": session_id,
+        }
+        candidates = analyzer.analyze(live_utterance, {"nodes": [], "edges": [], "current_topic": {}}, [])
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].source_evidence_ids, (canonical_id,))
+        self.assertEqual(analyzer.last_trace["live_evidence_alias_resolved"], 1)
+
+    def test_other_invalid_live_evidence_reference_is_rejected(self) -> None:
+        session_id = "live-safe"
+        analyzer = self.analyzer({"events": [{
+            "kind": "node", "node_type": "idea", "label": "橋の点検結果を確認する",
+            "source_evidence_ids": ["live-evidence:someone-else:1"],
+        }]})
+        live_utterance = {
+            **utterance("橋の点検結果を確認します", f"live-evidence:{session_id}:1"),
+            "id": f"live-utterance:{session_id}:1", "session_id": session_id,
+        }
+        self.assertEqual(analyzer.analyze(live_utterance, {"nodes": [], "edges": [], "current_topic": {}}, []), [])
+        self.assertEqual(analyzer.last_trace["validation_error"]["code"], "evidence_reference_invalid")
 
     def test_noop_is_valid_and_does_not_touch_graph(self) -> None:
         analyzer = self.analyzer({"events": []})

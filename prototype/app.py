@@ -158,7 +158,7 @@ class DeveloperPrototypeApp:
             "fixture_name": runtime.fixture.name,
             "state": copy.deepcopy(result.state),
             "events": copy.deepcopy(list(result.events)),
-            "map": copy.deepcopy(map_projection(result.state, result.events, runtime.layout)),
+            "map": copy.deepcopy(map_projection(result.state, result.events, runtime.layout, result.presentation)),
             "replay": replay,
             "can_undo": runtime.session.can_undo(),
             "undo_target_event_id": result.events[-1]["event_id"] if runtime.session.can_undo() else None,

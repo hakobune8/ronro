@@ -196,6 +196,7 @@ def _automatic_metrics(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     # A final transcript can be observed even when an Analyzer failed.  The
     # evidence count is therefore the loss check, not the completed count.
     evidence_loss = max(0, utterance_count - len(evidence))
+    possible_gap_count = int(metrics.get("possible_evidence_gap_count", 0) or 0)
     e2e = _latency(snapshot, "e2e_latency")
     return {
         "audio_duration_seconds": metrics.get("session_duration_seconds"),
@@ -214,6 +215,9 @@ def _automatic_metrics(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "final_rendered_revision": metrics.get("rendered_revision", live_state.get("rendered_revision")),
         "evidence_count": len(evidence),
         "evidence_loss_count": evidence_loss,
+        "possible_evidence_gap_count": possible_gap_count,
+        "possible_evidence_gap_seconds": metrics.get("possible_evidence_gap_seconds", 0),
+        "evidence_completeness": "unverified" if possible_gap_count else "no_known_loss",
         "queue_failed_count": queue.get("failed", metrics.get("analyzer_failures", 0)),
         "runtime_state": live_state.get("runtime_state"),
         "drain": _deepcopy(metrics.get("drain") or live_state.get("drain")),
@@ -585,7 +589,8 @@ def _success_criteria(
         "pipeline_crash": 0 if live_state.get("runtime_state") in {"ended", "ended_with_incomplete_processing"} else None,
         "graph_corruption": 0 if isinstance(graph.get("revision"), int) else None,
         "automatic_confirmation": safety,
-        "evidence_loss": automatic.get("evidence_loss_count"),
+        "evidence_loss": None if automatic.get("possible_evidence_gap_count") else automatic.get("evidence_loss_count"),
+        "possible_evidence_gap_count": automatic.get("possible_evidence_gap_count", 0),
         "critical_information_recall": comparison.get("critical_information_recall"),
         "map_quality": round(sum(rubric.values()) / len(rubric), 4) if rubric else None,
         "median_e2e_seconds": e2e.get("p50"),
@@ -645,6 +650,8 @@ def render_markdown_report(artifact: Mapping[str, Any]) -> str:
         metric("Final utterances", runtime.get("stt_final_utterance_count")),
         metric("Partial transcripts", runtime.get("partial_count")),
         metric("STT failures", runtime.get("stt_failures")),
+        metric("Possible untranscribed VAD items / seconds", f"{runtime.get('possible_evidence_gap_count', 0)} / {runtime.get('possible_evidence_gap_seconds', 0)}"),
+        metric("Evidence completeness", runtime.get("evidence_completeness")),
         metric("Analyzer calls / failures", f"{runtime.get('analyzer_calls')} / {runtime.get('analyzer_failures')}"),
         metric("Queue max depth", runtime.get("queue_max_depth")),
         metric("Queue wait p50 / p95 / max", _latency_line(runtime.get("queue_wait"))),
