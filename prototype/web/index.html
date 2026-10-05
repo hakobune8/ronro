@@ -686,11 +686,15 @@
 
     async function startLiveSession(mode = 'one_utterance') {
       if (liveSocket) return;
-      if (mode === 'continuous' && !$('live-pilot-audio-consent').hidden && !$('live-all-participants-consented').checked) {
-        setStatus('参加者全員の録音同意を確認してから開始してください。', true);
-        return;
-      }
       try {
+        if (mode === 'continuous') {
+          const current = await getJson(`/api/live?controller_id=${encodeURIComponent(controllerInstanceId())}`);
+          applyLiveSnapshot(current);
+          if (current.live_state?.pilot_audio?.enabled && !$('live-all-participants-consented').checked) {
+            setStatus('参加者全員の録音同意を確認してから開始してください。', true);
+            return;
+          }
+        }
         liveMode = mode;
         liveEventLines = [];
         const started = await getJson('/api/live/start', {
@@ -1349,6 +1353,9 @@
         const recorded = body.fixtures.filter((fixture) => !fixture.has_invalid_cases && fixture.kind === 'recorded');
         $('fixture').innerHTML = '<optgroup label="Canonical Fixtures">' + fixtures.map((fixture) => `<option value="${escapeHtml(fixture.fixture_id)}">${escapeHtml(fixture.fixture_id)} — ${escapeHtml(fixture.name)}</option>`).join('') + '</optgroup>' + '<optgroup label="Recorded Analyzer Scenarios">' + recorded.map((scenario) => `<option value="${escapeHtml(scenario.fixture_id)}">${escapeHtml(scenario.fixture_id)} — ${escapeHtml(scenario.name)}</option>`).join('') + '</optgroup>';
         await loadFinal();
+      } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
+      try {
+        applyLiveSnapshot(await getJson(`/api/live?controller_id=${encodeURIComponent(controllerInstanceId())}`));
       } catch (error) { setStatus(`[${error.code}] ${error.message}`, true); }
     })();
   </script>

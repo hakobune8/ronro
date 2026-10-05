@@ -86,6 +86,30 @@ async function checkControl(browser, startedSequence, startedEnd, acceptedSequen
   await page.close();
 }
 
+async function checkControlConsentPreflight(browser) {
+  const page = await browser.newPage();
+  await page.goto(pathToFileURL(path.join(root, 'prototype/web/index.html')).href);
+  await prepare(page);
+  await page.evaluate(() => {
+    window.__startCalls = 0;
+    getJson = async (route) => {
+      if (route.startsWith('/api/live?')) return { live_state: { runtime_state: 'idle', pilot_audio: { enabled: true } } };
+      if (route === '/api/live/start') {
+        window.__startCalls += 1;
+        return { ...window.__testSnapshot(-1, 0), websocket_url: 'ws://synthetic' };
+      }
+      throw new Error(`unexpected route: ${route}`);
+    };
+  });
+  await page.evaluate(() => startLiveSession('continuous'));
+  assert.equal(await page.evaluate(() => window.__startCalls), 0, 'recording began without consent');
+  assert.equal(await page.locator('#live-pilot-audio-consent').isVisible(), true);
+  await page.locator('#live-all-participants-consented').check();
+  await page.evaluate(() => startLiveSession('continuous'));
+  assert.equal(await page.evaluate(() => window.__startCalls), 1);
+  await page.close();
+}
+
 async function checkPhone(browser, acceptedSequence, acceptedEnd) {
   const page = await browser.newPage();
   await page.goto(pathToFileURL(path.join(root, 'prototype/web/session.html')).href);
@@ -115,13 +139,14 @@ async function checkPhone(browser, acceptedSequence, acceptedEnd) {
 (async () => {
   const browser = await chromium.launch({ headless: true });
   try {
+    await checkControlConsentPreflight(browser);
     await checkControl(browser, -1, 0, -1, 0);
     await checkControl(browser, 40, 4.1, 86, 8.7);
     await checkControl(browser, 86, 8.7, null, 0);
     await checkPhone(browser, -1, 0);
     await checkPhone(browser, 86, 8.7);
     await checkPhone(browser, null, 0);
-    console.log('audio resume QA: fresh start, reconnect, and missing-cursor fail-closed on /control and /session');
+    console.log('audio resume QA: consent preflight, fresh start, reconnect, and missing-cursor fail-closed on /control and /session');
   } finally {
     await browser.close();
   }
