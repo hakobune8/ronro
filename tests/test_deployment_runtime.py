@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import threading
 import unittest
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from prototype.app import DeveloperPrototypeApp
+from prototype.errors import PrototypeError
 from prototype.live_session import LiveSessionManager
 from prototype.server import create_server
 
@@ -26,6 +30,127 @@ class NoopAnalyzer:
 
 
 class DeploymentRuntimeTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("kubectl"), "kubectl is required for manifest rendering")
+    def test_edge_manifest_preserves_external_nodeports_without_duplicate_ingress(self) -> None:
+        rendered = subprocess.run(
+            ["kubectl", "kustomize", str(ROOT / "deploy/kubernetes/pilot/ghcr-edge")],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertIn("namespace: ronro-pilot", rendered)
+        self.assertIn("name: ronro-pilot", rendered)
+        self.assertIn("nodePort: 30100", rendered)
+        self.assertIn("nodePort: 30101", rendered)
+        self.assertNotIn("kind: Ingress", rendered)
+        self.assertNotIn("discussion-map-ai-facilitator", rendered)
+
+    def test_http_live_snapshot_controller_contract_and_read_only_access(self) -> None:
+        manager = LiveSessionManager(
+            schema_dir=ROOT / "schemas",
+            analyzer_factory=NoopAnalyzer,
+        )
+        app = DeveloperPrototypeApp(ROOT / "evaluation" / "fixtures", ROOT / "schemas")
+        server = create_server(app, "127.0.0.1", 0, live_manager=manager, live_ws_port=18765)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        base = f"http://{host}:{port}"
+        try:
+            start_request = Request(
+                f"{base}/api/live/start",
+                data=json.dumps({"mode": "continuous", "controller_id": "phone-a"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(start_request, timeout=2) as response:
+                started = json.loads(response.read().decode("utf-8"))
+            session_id = started["live_state"]["session_id"]
+            graph_revision = started["live_state"]["graph_revision"]
+
+            with urlopen(f"{base}/api/live?controller_id=phone-a", timeout=2) as response:
+                self.assertEqual(response.status, 200)
+                owner_snapshot = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(owner_snapshot["live_state"]["session_id"], session_id)
+            self.assertEqual(owner_snapshot["live_state"]["controller"]["status"], "owned_by_this_controller")
+
+            with urlopen(f"{base}/api/live", timeout=2) as response:
+                self.assertEqual(response.status, 200)
+                anonymous_snapshot = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(anonymous_snapshot["live_state"]["session_id"], session_id)
+            self.assertEqual(anonymous_snapshot["live_state"]["graph_revision"], graph_revision)
+            self.assertEqual(anonymous_snapshot["live_state"]["controller"]["status"], "owned_by_other")
+
+            with urlopen(f"{base}/api/live?controller_id=phone-b", timeout=2) as response:
+                self.assertEqual(response.status, 200)
+                other_snapshot = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(other_snapshot["live_state"]["controller"]["status"], "owned_by_other")
+            self.assertEqual(other_snapshot["live_state"]["session_id"], session_id)
+            self.assertEqual(manager.current().runtime_state, "starting")
+            self.assertEqual(manager.current().snapshot()["live_state"]["graph_revision"], graph_revision)
+
+            other_stop = Request(
+                f"{base}/api/live/stop",
+                data=json.dumps({"controller_id": "phone-b"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(HTTPError) as stop_error:
+                urlopen(other_stop, timeout=2)
+            self.assertEqual(stop_error.exception.code, 409)
+            stop_error.exception.close()
+
+            owner_stop = Request(
+                f"{base}/api/live/stop",
+                data=json.dumps({"controller_id": "phone-a"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(owner_stop, timeout=2) as response:
+                self.assertEqual(response.status, 200)
+            ended = manager.drain(timeout_seconds=0.5, allow_without_stt=True)
+            self.assertEqual(ended["live_state"]["runtime_state"], "ended")
+        finally:
+            current = manager.current()
+            if current is not None:
+                current.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_controller_ownership_and_short_reconnect(self) -> None:
+        manager = LiveSessionManager(
+            schema_dir=ROOT / "schemas",
+            analyzer_factory=NoopAnalyzer,
+        )
+        first = manager.start_mode("continuous", controller_id="phone-a")
+        session_id = first["live_state"]["session_id"]
+        self.assertEqual(first["live_state"]["controller"]["status"], "owned_by_this_controller")
+
+        same_controller = manager.start_mode("continuous", controller_id="phone-a")
+        self.assertEqual(same_controller["live_state"]["session_id"], session_id)
+
+        with self.assertRaises(PrototypeError) as start_error:
+            manager.start_mode("continuous", controller_id="phone-b")
+        self.assertEqual(start_error.exception.code, "live_controller_owned")
+        self.assertEqual(manager.snapshot_for_controller("phone-b")["live_state"]["controller"]["status"], "owned_by_other")
+
+        with self.assertRaises(PrototypeError) as stop_error:
+            manager.request_stop(controller_id="phone-b")
+        self.assertEqual(stop_error.exception.code, "live_controller_owned")
+
+        with self.assertRaises(PrototypeError) as command_error:
+            manager.execute_command({"controller_id": "phone-b", "command_type": "correct_relation"})
+        self.assertEqual(command_error.exception.code, "live_controller_owned")
+
+        manager.mark_connected(controller_id="phone-a")
+        manager.mark_controller_disconnected(controller_id="phone-a")
+        self.assertEqual(manager.current().runtime_state, "starting")
+        self.assertFalse(manager.current().transport_connected)
+        manager.mark_connected(controller_id="phone-a")
+        self.assertTrue(manager.current().transport_connected)
+        manager.current().close()
+
     def test_shutdown_without_transport_drains_continuous_session(self) -> None:
         manager = LiveSessionManager(
             schema_dir=ROOT / "schemas",
@@ -63,13 +188,13 @@ class DeploymentRuntimeTests(unittest.TestCase):
                 headers={
                     "Content-Type": "application/json",
                     "X-Forwarded-Proto": "https",
-                    "X-Forwarded-Host": "discussion-map-pilot.example.test",
+                    "X-Forwarded-Host": "ronro-pilot.example.test",
                 },
                 method="POST",
             )
             with urlopen(request, timeout=2) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-            self.assertEqual(payload["websocket_url"], "wss://discussion-map-pilot.example.test/live")
+            self.assertEqual(payload["websocket_url"], "wss://ronro-pilot.example.test/live")
         finally:
             current = manager.current()
             if current is not None:

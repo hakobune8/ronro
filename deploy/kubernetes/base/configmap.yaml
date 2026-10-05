@@ -1,20 +1,22 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: discussion-map-pilot-config
+  name: ronro-pilot-config
   labels:
-    app.kubernetes.io/name: discussion-map-ai-facilitator
+    app.kubernetes.io/name: ronro
     app.kubernetes.io/component: runtime-config
 data:
   RUNTIME_ENVIRONMENT: pilot
-  LIVE_CONFIGURATION_VERSION: pilot-001
-  PROMPT_VERSION: analyzer-prompt-v4
+  LIVE_CONFIGURATION_VERSION: pilot-audio-continuity-rc2
+  PROMPT_VERSION: analyzer-prompt-v10-action-time-horizon
+  REAL_ANALYZER_OUTPUT_SCHEMA_VERSION: v3
   NORMALIZATION_VERSION: v2
   CONTEXT_VERSION: v1
   TYPE_D: "OFF"
   PRESENTATION_COMPACTION: "ON"
   OPEN_ITEM_LIFECYCLE: "ON"
   RENDER_COALESCING_SECONDS: "2"
+  LIVE_STT_EMPTY_VAD_POLICY: "warn_short_no_delta"
   DRAIN_TIMEOUT_SECONDS: "30"
 
   OPENAI_BASE_URL: https://api.openai.com/v1
@@ -22,8 +24,10 @@ data:
   OPENAI_REALTIME_STT_MODEL: gpt-transcribe
   OPENAI_REALTIME_LANGUAGE: ja
   OPENAI_REALTIME_TIMEOUT_SECONDS: "45"
-  OPENAI_REALTIME_PROMPT: "日本語の技術会議。Discussion Map AI FacilitatorのMVPについて、Discussion Map、Visual Artifact、Current Topic、STT、AI Analyzer、Candidate Decision、Open Item、Action Item、Parking Lotが話題になります。"
-  OPENAI_REALTIME_KEYWORDS: '["Discussion Map","MVP","Visual Artifact","Current Topic","STT","GPT-5.6 Luna","Candidate Decision","Open Item","Action Item","Parking Lot"]'
+  OPENAI_REALTIME_PROMPT: "日本語の会議・打ち合わせの音声です。発話内容を忠実に文字起こしし、音声として確認できない内容を補完しないでください。"
+  OPENAI_REALTIME_KEYWORDS: '["論路"]'
+  OPENAI_REALTIME_FINALIZATION_MODE: server_vad_bounded
+  OPENAI_REALTIME_PERIODIC_COMMIT_SECONDS: "30"
 
   REAL_ANALYZER_MODEL: gpt-5.6-luna
   REAL_ANALYZER_REASONING_EFFORT: medium
@@ -31,4 +35,6 @@ data:
 
   EVALUATION_ROOT: /data/evaluation/live/sessions
   EVALUATION_REPORT_ROOT: /data/evaluation/live/reports
+  PILOT_RAW_AUDIO_ENABLED: "true"
+  PILOT_AUDIO_ROOT: /data/pilot-audio/recordings
   LIVE_WEBSOCKET_PATH: /live

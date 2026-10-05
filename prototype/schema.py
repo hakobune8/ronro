@@ -26,10 +26,12 @@ class SchemaValidator:
         self.event_schema = self._load_schema("discussion-event.schema.json")
         self.analyzer_output_schema = self._load_schema("real-analyzer-output.schema.json")
         self.analyzer_output_v2_schema = self._load_schema("analyzer-output-v2.schema.json")
+        self.analyzer_output_v3_schema = self._load_schema("analyzer-output-v3.schema.json")
         self._domain = self._build_validator(self.domain_schema)
         self._event = self._build_validator(self.event_schema)
         self._analyzer_output = self._build_validator(self.analyzer_output_schema)
         self._analyzer_output_v2 = self._build_validator(self.analyzer_output_v2_schema)
+        self._analyzer_output_v3 = self._build_validator(self.analyzer_output_v3_schema)
 
     def _load_schema(self, filename: str) -> dict[str, Any]:
         path = self.schema_dir / filename
@@ -88,6 +90,8 @@ class SchemaValidator:
         """Validate provider-facing intent output before canonicalization."""
 
         validator = self._analyzer_output_v2 if version == "v2" else self._analyzer_output
+        if version == "v3":
+            validator = self._analyzer_output_v3
         self._validate(validator, value, f"Real Analyzer output {version}")
 
     def analyzer_output_schema_for(self, version: str) -> dict[str, Any] | None:
@@ -95,4 +99,6 @@ class SchemaValidator:
 
         if version == "v2":
             return self.analyzer_output_v2_schema
+        if version == "v3":
+            return self.analyzer_output_v3_schema
         return None

@@ -3,6 +3,13 @@
 .env
 .env.*
 .venv
+*.pem
+*.key
+*.crt
+secrets*.yaml
+secret*.yaml
+deploy/**/secret*.yaml
+deploy/**/image-pull-secrets*.yaml
 __pycache__
 *.py[cod]
 .pytest_cache
@@ -23,3 +30,8 @@ docs
 tests
 screenshots
 *.log
+
+# Keep only repository-authored synthetic fixtures in the image context.
+evaluation/**
+!evaluation/fixtures/
+!evaluation/fixtures/**

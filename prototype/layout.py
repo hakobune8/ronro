@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 from typing import Any, Iterable
+from .display_labels import display_projection
+from .semantic_projection import focused_flow
 
 
 MAIN_LANE_GAP = 320
@@ -21,9 +23,12 @@ class StableLayout:
 
     def __init__(self) -> None:
         self._placements: dict[str, dict[str, Any]] = {}
+        from .shared_projection import SharedProjection
+        self.shared_projection = SharedProjection()
 
     def reset(self) -> None:
         self._placements.clear()
+        self.shared_projection.reset()
 
     def project(
         self,
@@ -274,10 +279,38 @@ def recent_topic_flow(
     return flow[-limit:]
 
 
+def recent_discussion_flow(
+    graph: dict[str, Any], events: Iterable[dict[str, Any]],
+    display_labels: dict[str, str] | None = None, limit: int = 3,
+) -> list[dict[str, Any]]:
+    """Recent within-Topic points; chronology, never an inferred semantic edge."""
+
+    labels = display_labels or {}
+    sequence = {event["event_id"]: event["sequence"] for event in events}
+    current_topic_id = graph.get("current_topic", {}).get("primary_topic_id")
+    topic_members = {edge["target_node_id"] for edge in graph.get("edges", [])
+                     if edge["type"] in {"contains", "has_option"}
+                     and edge["source_node_id"] == current_topic_id}
+    any_topic_members = {edge["target_node_id"] for edge in graph.get("edges", [])
+                         if edge["type"] in {"contains", "has_option"}}
+    candidates = []
+    for node in graph.get("nodes", []):
+        if node["type"] not in {"idea", "option", "concern"} or node["status"] in {"archived", "parked"}:
+            continue
+        if current_topic_id and node["id"] not in topic_members and node["id"] in any_topic_members:
+            continue
+        last_sequence = max((sequence.get(event_id, 0) for event_id in node.get("source_event_ids", [])), default=0)
+        if last_sequence:
+            candidates.append({"node_id": node["id"], "label": labels.get(node["id"]) or node["label"],
+                               "sequence": last_sequence})
+    return sorted(candidates, key=lambda item: (-item["sequence"], item["node_id"]))[:limit]
+
+
 def map_projection(
     state: dict[str, Any],
     events: Iterable[dict[str, Any]],
     layout: StableLayout,
+    presentation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build M5-only presentation data; the canonical Graph remains untouched."""
 
@@ -293,9 +326,17 @@ def map_projection(
         "actions": sum(node["type"] == "action" and node["status"] != "archived" for node in nodes),
         "parked": sum(node["status"] == "parked" for node in nodes),
     }
+    display_labels = display_projection(graph, presentation)
+    semantic_labels = {node_id: value["text"] for node_id, value in display_labels.items()
+                       if value.get("text")}
     return {
         **projected,
+        "presentation": copy.deepcopy(presentation or {}),
+        "display_labels": display_labels,
+        "semantic_focus": focused_flow(graph, event_list, semantic_labels),
         "recent_flow": recent_topic_flow(event_list, graph),
+        "recent_discussion_flow": recent_discussion_flow(graph, event_list, semantic_labels),
         "counts": counts,
         "observation": None,
+        **({"shared": layout.shared_projection.project(state, event_list)} if "evidence" in state and "utterances" in state else {}),
     }

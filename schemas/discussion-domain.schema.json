@@ -92,7 +92,8 @@
         "has_option",
         "supports",
         "opposes",
-        "related_to"
+        "related_to",
+        "discussion_provenance"
       ]
     },
     "idArray": {
