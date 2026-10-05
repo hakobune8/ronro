@@ -1,2 +1,2 @@
-jsonschema>=4.23,<5
-websockets>=13,<16
+jsonschema>=4.26.0,<5
+websockets>=17.1,<18
