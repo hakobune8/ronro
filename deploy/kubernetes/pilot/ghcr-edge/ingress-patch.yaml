@@ -1,0 +1,7 @@
+# The public RONRO Ingress is owned by SSLHQ/staips-infra in the edge cluster.
+# This overlay only exposes NodePorts in the application cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ronro-pilot
+$patch: delete

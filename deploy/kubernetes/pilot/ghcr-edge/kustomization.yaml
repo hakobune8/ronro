@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ronro-pilot
+
+resources:
+  - ../../base
+
+images:
+  - name: registry.example.invalid/ronro
+    newName: ghcr.io/hakobune8/ronro
+    digest: sha256:7e123bc9834a6022e3f05f00e6d88dd284fabdb1543cace18f774da5b702168f
+
+patches:
+  - path: deployment-patch.yaml
+  - path: service-patch.yaml
+  - path: ingress-patch.yaml
+  # Keep the edge-cluster EndpointSlice's fixed NodePort contract.
+  - target:
+      version: v1
+      kind: Service
+      name: ronro-pilot
+    patch: |-
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30100
+      - op: add
+        path: /spec/ports/1/nodePort
+        value: 30101

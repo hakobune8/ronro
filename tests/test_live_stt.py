@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
+from unittest.mock import patch
 
 from prototype.live_stt import (
+    DEFAULT_KEYWORDS,
+    DEFAULT_STT_PROMPT,
     DEFAULT_STT_MODEL,
     RealtimeSTTConfig,
     adapt_realtime_event,
     build_append_event,
     build_commit_event,
     build_session_update,
+    build_turn_detection,
 )
 
 
@@ -33,6 +38,64 @@ class LiveSTTAdapterTests(unittest.TestCase):
         self.assertEqual(build_append_event(b"\x00\x00")['type'], "input_audio_buffer.append")
         self.assertEqual(build_commit_event()["type"], "input_audio_buffer.commit")
 
+    def test_finalization_strategy_payloads_are_provider_scoped(self) -> None:
+        server = build_turn_detection(replace(self.config, finalization_mode="server_vad"))
+        self.assertEqual(
+            server,
+            {
+                "type": "server_vad",
+                "threshold": 0.5,
+                "prefix_padding_ms": 300,
+                "silence_duration_ms": 500,
+            },
+        )
+        semantic = build_turn_detection(
+            replace(self.config, finalization_mode="semantic_vad", semantic_vad_eagerness="low")
+        )
+        self.assertEqual(semantic, {"type": "semantic_vad", "eagerness": "low"})
+        bounded = build_session_update(replace(self.config, finalization_mode="bounded"))
+        self.assertIsNone(bounded["session"]["audio"]["input"]["turn_detection"])
+        hybrid = build_session_update(replace(self.config, finalization_mode="server_vad_bounded"))
+        self.assertEqual(
+            hybrid["session"]["audio"]["input"]["turn_detection"]["type"],
+            "server_vad",
+        )
+
+    def test_session_update_keeps_default_baseline_explicit_commit(self) -> None:
+        self.assertEqual(self.config.finalization_mode, "none")
+        self.assertIsNone(build_turn_detection(self.config))
+
+    def test_short_vad_gap_continuation_is_default_but_strict_is_available(self) -> None:
+        self.assertEqual(self.config.empty_vad_policy, "warn_short_no_delta")
+        self.assertEqual(replace(self.config, empty_vad_policy="strict").empty_vad_policy, "strict")
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(RealtimeSTTConfig.from_environment().empty_vad_policy, "warn_short_no_delta")
+        with patch.dict("os.environ", {"LIVE_STT_EMPTY_VAD_POLICY": "strict"}):
+            self.assertEqual(RealtimeSTTConfig.from_environment().empty_vad_policy, "strict")
+
+    def test_default_realtime_context_is_generic_and_not_demo_seeded(self) -> None:
+        self.assertIn("忠実に文字起こし", DEFAULT_STT_PROMPT)
+        self.assertIn("補完しない", DEFAULT_STT_PROMPT)
+        self.assertNotIn("Discussion Map AI Facilitator", DEFAULT_STT_PROMPT)
+        self.assertNotIn("MVP", DEFAULT_STT_PROMPT)
+        self.assertEqual(DEFAULT_KEYWORDS, ("論路",))
+
+    def test_provider_identifiers_are_preserved_when_available(self) -> None:
+        event = adapt_realtime_event(
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "event_id": "evt-1",
+                "item_id": "item-1",
+                "transcript_id": "transcript-1",
+                "commit_id": "commit-1",
+                "transcript": "会議の音声を確認します",
+            }
+        )
+        self.assertEqual(event["event_id"], "evt-1")
+        self.assertEqual(event["item_id"], "item-1")
+        self.assertEqual(event["transcript_id"], "transcript-1")
+        self.assertEqual(event["commit_id"], "commit-1")
+
     def test_partial_event_is_runtime_only(self) -> None:
         value = adapt_realtime_event({
             "type": "conversation.item.input_audio_transcription.delta",
@@ -46,6 +109,7 @@ class LiveSTTAdapterTests(unittest.TestCase):
         seen: set[str] = set()
         raw = {
             "type": "conversation.item.input_audio_transcription.completed",
+            "event_id": "evt-1",
             "item_id": "item-1",
             "transcript": "Discussion Mapを中心に検討します",
         }
