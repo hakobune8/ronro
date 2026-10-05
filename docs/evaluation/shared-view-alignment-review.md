@@ -163,9 +163,9 @@ RFC-0003は、Current Topic、Discussion Flow、Candidate / Confirmedの区別�
 
 初回Alignmentでは既存の`ui-large` Demo Scenarioを使ってShared Viewの構造を確認した。Final Passでは、Pilot向けの意味のあるDiscussionを通る`pilot-shared` Demo Scenarioを使い、次の3段階を実画面で再確認した。
 
-- Stage 1: [会議開始](../pilot/assets/shared-view-stage-1.png)
-- Stage 2: [議論中](../pilot/assets/shared-view-stage-2.png)
-- Stage 3: [議論が進んだ状態](../pilot/assets/shared-view-stage-3.png)
+- Stage 1: [会議開始](assets/legacy/shared-view-stage-1.png)
+- Stage 2: [議論中](assets/legacy/shared-view-stage-2.png)
+- Stage 3: [議論が進んだ状態](assets/legacy/shared-view-stage-3.png)
 
 1920×1080の16:9表示で、Current Topicが最初に目に入り、決定候補・未解決事項・Action・話の流れを内容として読めることを確認した。Stage 3では過去Topicを控えめに残し、Parkingを「あとで話すこと」として小さく表示している。画面にはParticipant操作ボタン、件数中心のKPI、内部状態の詳細を置いていない。
 
@@ -204,9 +204,9 @@ Pilot用の`pilot-shared` Fixtureは、既存のCanonical Events → Graph → P
 
 実Shared Viewを1920×1080で再取得した。
 
-- [Stage 1 — 会議開始](../pilot/assets/shared-view-stage-1.png)
-- [Stage 2 — 議論中](../pilot/assets/shared-view-stage-2.png)
-- [Stage 3 — 議論が進んだ状態](../pilot/assets/shared-view-stage-3.png)
+- [Stage 1 — 会議開始](assets/legacy/shared-view-stage-1.png)
+- [Stage 2 — 議論中](assets/legacy/shared-view-stage-2.png)
+- [Stage 3 — 議論が進んだ状態](assets/legacy/shared-view-stage-3.png)
 
 3段階とも、Current Topicの内容が最初に目に入り、文章が数字より目立つ。操作UI、Debug情報、Metricはなく、決定候補は`◇`と疑問形で候補のまま表示される。未解決事項と次にやることは内容として読め、話の流れはTopic Returnを含む順序として表示される。Stage 3のParkingは内容がある場合だけ小さく表示される。
 
@@ -298,9 +298,9 @@ Shared ViewのHeaderは`論路`、副題は`議論の現在地を共有する`�
 
 Naming後の実Shared View Screenshotは次の3段階で取得した。
 
-- [Stage 1 — 会議開始](../pilot/assets/ronro-shared-view-stage-1.png)
-- [Stage 2 — 議論中](../pilot/assets/ronro-shared-view-stage-2.png)
-- [Stage 3 — 議論が進んだ状態](../pilot/assets/ronro-shared-view-stage-3.png)
+- [Stage 1 — 会議開始](assets/legacy/ronro-shared-view-stage-1.png)
+- [Stage 2 — 議論中](assets/legacy/ronro-shared-view-stage-2.png)
+- [Stage 3 — 議論が進んだ状態](assets/legacy/ronro-shared-view-stage-3.png)
 
 3段階とも、`論路`は小さなProduct identityに留まり、Current Topicと論点図の内容がVisual Heroである。Shared Viewに旧称、操作UI、Debug情報、Metricsは表示されず、決定候補は確定済みに見えない。Canonical Contract、Product Logic、Analyzer、STT、Queue、Live Session、Human Command API、Evaluation Metrics、Kubernetes構成は変更していない。
 

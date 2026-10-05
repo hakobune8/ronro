@@ -89,3 +89,7 @@ Pilot #1では、参加者向けSurfaceとmetadataだけを論路へ揃え、既
 上記は命名を決めた当時の移行範囲を記録したものであり、遡って書き換えない。現在の公開Repositoryは `hakobune8/ronro`、ローカル作業パスは `github.com/hakobune8/ronro` である。Pilot向けアプリケーションNamespace・Deployment・Service・ConfigMap・Secret・PVCは `ronro-pilot` / `ronro-*` 系へ移行した。公開Ingressは別Repository `SSLHQ/staips-infra` の `staips-edge/ronro` が管理し、アプリケーションServiceのNodePort 30100/30101を参照する。
 
 旧Kubernetes名は過去の評価・配備記録には当時の事実として残す。互換ファイル名や内部Code Symbolの一括改名は引き続き行わない。
+
+## 旧画面画像の整理（2026-10-05）
+
+旧Shared View・Focused Flow・Discussion Mapの画像は、評価記録からの参照を維持したまま `docs/evaluation/assets/legacy/` へ移した。現行Pilot用の画面画像は `docs/pilot/assets/ronro-semantic-canvas-*.png` とし、[現行Guide](../pilot/ronro-live-pilot-guide.md)を入口とする。これは過去の画面・命名判断を変更するものではない。

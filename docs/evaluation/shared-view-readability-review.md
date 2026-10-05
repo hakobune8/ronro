@@ -61,19 +61,19 @@ Shared Viewの主要な表示要素に18px未満の文字は置かない。情�
 
 ### Stage 1
 
-![Stage 1 — 会議開始](../pilot/assets/ronro-shared-view-stage-1.png)
+![Stage 1 — 会議開始](assets/legacy/ronro-shared-view-stage-1.png)
 
 現在のトピックが最初に目に入り、主要内容は短い1行の項目として読める。右側の情報は補助的で、数字や操作UIは表示されていない。
 
 ### Stage 2
 
-![Stage 2 — 議論中](../pilot/assets/ronro-shared-view-stage-2.png)
+![Stage 2 — 議論中](assets/legacy/ronro-shared-view-stage-2.png)
 
 現在のトピックを中心に、話の流れが「MVPで何を実現するか → 画像生成の扱い → MVPで何を実現するか」と戻る。Topic Returnを一覧の重複として消していない。
 
 ### Stage 3
 
-![Stage 3 — 議論が進んだ状態](../pilot/assets/ronro-shared-view-stage-3.png)
+![Stage 3 — 議論が進んだ状態](assets/legacy/ronro-shared-view-stage-3.png)
 
 最も情報量の多いケースでも現在のトピックの見出しは縮小せず、右側は各セクションの優先項目に絞っている。超過分は控えめな `＋ほかN件` として表示され、画面全体を埋めるための小さいカードは追加していない。
 
