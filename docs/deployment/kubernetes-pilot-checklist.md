@@ -15,17 +15,18 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 
 ## Resources
 
-- [ ] Namespace `discussion-map-pilot` exists.
-- [ ] API Secret `discussion-map-openai` created out-of-band.
+- [ ] Namespace `ronro-pilot` exists.
+- [ ] API Secret `ronro-openai` created out-of-band.
 - [ ] TLS Secret provisioned for the exact Pilot hostname.
-- [ ] ConfigMap shows `pilot-001`.
-- [ ] PVC `discussion-map-pilot-evaluation` is Bound.
+- [ ] ConfigMap shows candidate configuration `semantic-graph-rc4` and Analyzer output schema `v3`.
+- [ ] PVC `ronro-pilot-evaluation` is Bound.
+- [ ] PVC `ronro-pilot-audio` (10Gi nominal, separate from evaluation) is Bound; underlying node has free space.
 - [ ] Deployment has `replicas=1` and `strategy=Recreate`.
 - [ ] Pod is Ready.
 - [ ] Liveness `/healthz` is 200.
 - [ ] Readiness `/readyz` is 200.
 - [ ] Service has HTTP and WebSocket endpoints.
-- [ ] Ingress exposes the intended host.
+- [ ] Edge-cluster Ingress in `SSLHQ/staips-infra` exposes the intended host through NodePorts 30100/30101.
 
 ## HTTPS / Safari
 
@@ -44,7 +45,10 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 - [ ] Shared display is ready.
 - [ ] Room and external microphone are ready.
 - [ ] Consent text is shown.
-- [ ] Raw Audio default is not persisted.
+- [ ] Before each pilot meeting, facilitator explains recording purpose, seven-day retention and evaluator-only access; all participants explicitly consent.
+- [ ] `/session` and `/control` reject a new continuous session without that attestation.
+- [ ] Pilot PCM is private (0600 file / 0700 directory), absent from HTTP and Git; retention cleanup and gap markers are checked.
+- [ ] If recording fails, meeting continues and facilitator sees an incomplete-recording warning.
 
 ## Kubernetes three-case smoke
 
@@ -72,8 +76,8 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 
 - [ ] `git commit` SHA recorded.
 - [ ] Image tag/digest recorded.
-- [ ] Configuration version `pilot-001` recorded.
-- [ ] Prompt `analyzer-prompt-v4` recorded.
+- [ ] Configuration version `semantic-graph-rc4` recorded.
+- [ ] Prompt `analyzer-prompt-v10-action-time-horizon` recorded.
 - [ ] STT `gpt-transcribe` recorded.
 - [ ] Analyzer `gpt-5.6-luna` / reasoning `medium` recorded.
 - [ ] No Pilot has started during smoke testing.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from .errors import ReplayError
@@ -18,6 +18,7 @@ from .store import EventStore
 class ReplayResult:
     state: dict[str, Any]
     events: tuple[dict[str, Any], ...]
+    presentation: dict[str, Any] = field(default_factory=dict)
 
 
 def canonicalize_domain(value: dict[str, Any]) -> dict[str, Any]:
@@ -83,6 +84,7 @@ class ReplayRunner:
         return ReplayResult(
             state=next_state,
             events=tuple(list(result.events) + [copy.deepcopy(event)]),
+            presentation=copy.deepcopy(result.presentation),
         )
 
     def replay_events(
@@ -92,8 +94,10 @@ class ReplayRunner:
         evidence: Iterable[dict[str, Any]],
         utterances: Iterable[dict[str, Any]],
         events: Iterable[dict[str, Any]],
+        presentation: dict[str, Any] | None = None,
     ) -> ReplayResult:
         result = ReplayResult(initial_state(session_id, evidence, utterances), ())
         for event in events:
             result = self.apply_event(result, event)
+        result.presentation.update(copy.deepcopy(presentation or {}))
         return result

@@ -4,25 +4,34 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
+import uuid
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .live_audio import AudioFrameError, decode_audio_frame
+from .live_diagnostic import diagnostic
 from .errors import PrototypeError
 from .live_session import LiveSessionManager
 from .live_stt import OpenAIRealtimeTranscriptionClient, RealtimeSTTConfig, RealtimeSTTFailure
 
 try:
     from websockets.asyncio.server import Server, ServerConnection, serve
+    from websockets.exceptions import ConnectionClosed
 except ImportError:  # pragma: no cover - dependency is declared in requirements-dev.txt
     Server = Any  # type: ignore[assignment,misc]
     ServerConnection = Any  # type: ignore[assignment,misc]
     serve = None  # type: ignore[assignment]
+    class ConnectionClosed(Exception):  # type: ignore[no-redef]
+        pass
 
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+_logger = logging.getLogger(__name__)
 
 
 class LiveWebSocketGateway:
@@ -40,33 +49,55 @@ class LiveWebSocketGateway:
             return
         provider: OpenAIRealtimeTranscriptionClient | None = None
         controller_id = self._controller_id_from_connection(connection)
+        connection_id = uuid.uuid4().hex
         transport_failed = False
         try:
-            snapshot = self.manager.mark_connected(controller_id=controller_id)
+            snapshot = self.manager.mark_connected(controller_id=controller_id, connection_id=connection_id)
+            audio_offset_seconds = float(snapshot.get("live_state", {}).get("audio_end_seconds") or 0.0)
+            frame_offset = int(snapshot.get("live_state", {}).get("audio_chunk_sequence", -1)) + 1
             await connection.send(_json({"type": "runtime_snapshot", "snapshot": snapshot}))
             provider = OpenAIRealtimeTranscriptionClient(self.stt_config)
             await provider.connect()
+            diagnostic_context = getattr(provider, "diagnostic_context", None)
+            if callable(diagnostic_context):
+                self.manager.record_transport_diagnostics(diagnostic_context())
             await connection.send(_json({"type": "stt_connected", "config": self.stt_config.public_dict()}))
             if getattr(session, "mode", "one_utterance") == "continuous":
                 snapshot = self.manager.activate()
                 await connection.send(_json({"type": "live_active", "snapshot": snapshot}))
-                await self._capture_continuous(connection, provider, controller_id=controller_id)
+                await self._capture_continuous(connection, provider, controller_id=controller_id,
+                                               connection_id=connection_id,
+                                               audio_offset_seconds=audio_offset_seconds,
+                                               frame_offset=frame_offset)
             else:
                 await self._capture(connection, provider)
         except RealtimeSTTFailure as exc:
-            transport_failed = True
-            snapshot = self.manager.fail(exc.code, exc.message)
+            transport_failed = getattr(session, "mode", None) != "continuous" or session.runtime_state == "finalizing"
+            snapshot = (self.manager.fail(exc.code, exc.message) if transport_failed and self.manager.is_current_capture(connection_id) else
+                        self.manager.record_capture_interruption(exc.code, connection_id=connection_id))
             await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message, "snapshot": snapshot})
+            if not transport_failed:
+                await connection.close()
         except PrototypeError as exc:
             await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message})
+        except ConnectionClosed:
+            # A browser reconnect closes the previous WebSocket normally.
+            # Its generation is retired in finally, not treated as a provider error.
+            pass
         except (AudioFrameError, ValueError, TypeError) as exc:
-            transport_failed = True
-            snapshot = self.manager.fail("audio_transport_error", str(exc))
+            transport_failed = getattr(session, "mode", None) != "continuous" or session.runtime_state == "finalizing"
+            snapshot = (self.manager.fail("audio_transport_error", str(exc)) if transport_failed and self.manager.is_current_capture(connection_id) else
+                        self.manager.record_capture_interruption("audio_transport_error", connection_id=connection_id))
             await self._safe_send(connection, {"type": "error", "code": "audio_transport_error", "message": str(exc), "snapshot": snapshot})
+            if not transport_failed:
+                await connection.close()
         except Exception as exc:  # Transport errors must not touch the Graph.
-            transport_failed = True
-            snapshot = self.manager.fail("live_transport_error", str(exc))
+            transport_failed = getattr(session, "mode", None) != "continuous" or session.runtime_state == "finalizing"
+            snapshot = (self.manager.fail("live_transport_error", str(exc)) if transport_failed and self.manager.is_current_capture(connection_id) else
+                        self.manager.record_capture_interruption("live_transport_error", connection_id=connection_id))
             await self._safe_send(connection, {"type": "error", "code": "live_transport_error", "message": str(exc), "snapshot": snapshot})
+            if not transport_failed:
+                await connection.close()
         finally:
             try:
                 if provider is not None:
@@ -75,7 +106,7 @@ class LiveWebSocketGateway:
                 pass
             session = self.manager.current()
             if session is not None and getattr(session, "mode", "one_utterance") == "continuous":
-                if transport_failed and session.runtime_state in {"active", "starting", "finalizing"}:
+                if transport_failed and self.manager.is_current_capture(connection_id) and session.runtime_state in {"active", "starting", "finalizing"}:
                     try:
                         await asyncio.to_thread(self.manager.drain, allow_without_stt=True)
                     except Exception:
@@ -83,7 +114,7 @@ class LiveWebSocketGateway:
                 elif session.runtime_state in {"active", "starting", "finalizing"}:
                     # A browser/controller disconnect is recoverable. Keep
                     # the in-memory Session and Graph for the same controller.
-                    self.manager.mark_controller_disconnected(controller_id=controller_id)
+                    self.manager.mark_controller_disconnected(controller_id=controller_id, connection_id=connection_id)
                 await self._safe_send(connection, {"type": "runtime_snapshot", "snapshot": session.snapshot()})
             elif session is not None and session.runtime_state not in {"disconnected"}:
                 session.runtime_state = "disconnected"
@@ -102,7 +133,13 @@ class LiveWebSocketGateway:
             if message is None:
                 return
             if not isinstance(message, bytes):
-                await self._safe_send(connection, {"type": "error", "code": "unexpected_control_message", "message": "Audio WebSocket accepts binary audio frames only"})
+                control = self._parse_control_message(message)
+                if control.get("type") == "audio_diagnostics":
+                    track = control.get("track", {})
+                    snapshot = self.manager.record_audio_diagnostics(track if isinstance(track, dict) else {})
+                    await self._safe_send(connection, {"type": "audio_diagnostics_recorded", "snapshot": snapshot})
+                else:
+                    await self._safe_send(connection, {"type": "error", "code": "unexpected_control_message", "message": "Supported controls are audio_diagnostics"})
                 continue
             chunk = decode_audio_frame(message)
             snapshot = self.manager.accept_chunk(chunk)
@@ -143,7 +180,7 @@ class LiveWebSocketGateway:
                 snapshot = self.manager.process_final(
                     raw_text=str(event["text"]),
                     item_id=event.get("item_id"),
-                    provider_event=event,
+                    provider_event=self._with_transport_diagnostics(event, provider),
                 )
                 await self._safe_send(connection, {"type": "live_complete", "snapshot": snapshot})
                 return
@@ -154,12 +191,16 @@ class LiveWebSocketGateway:
         provider: OpenAIRealtimeTranscriptionClient,
         *,
         controller_id: str | None,
+        connection_id: str | None = None,
+        audio_offset_seconds: float = 0.0,
+        frame_offset: int = 0,
     ) -> None:
         """Run audio input and provider events concurrently until Drain."""
 
         provider_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         reader_done = asyncio.Event()
         commit_pending = False
+        pending_boundary_reason: str | None = None
         stop_seen = False
 
         async def read_provider() -> None:
@@ -168,17 +209,87 @@ class LiveWebSocketGateway:
                     await provider_events.put(await provider.receive_event())
             except RealtimeSTTFailure as exc:
                 await provider_events.put({"type": "stt_error", "code": exc.code, "message": exc.message})
+            except Exception as exc:
+                _logger.warning("provider_reader_interrupted %s", type(exc).__name__)
+                await provider_events.put({"type": "stt_error", "code": "provider_reader_error",
+                                           "message": "Realtime transcription connection interrupted"})
             finally:
                 reader_done.set()
 
         reader_task = asyncio.create_task(read_provider())
         try:
             while True:
+                if connection_id is not None and not self.manager.is_current_capture(connection_id):
+                    await connection.close()
+                    return
+                turns = getattr(provider, 'turns', None)
+                if turns is not None:
+                    current = self.manager.current()
+                    if current.stt_state == 'error':
+                        await self._drain_and_send(connection)
+                        return
+                    if current.stt_state == 'disconnected':
+                        await connection.close()
+                        return
+                    current.retire_committed_audio(audio_offset_seconds + turns.cursor / 24000)
+                    commit_pending = bool(turns.intents)
+                    if turns.expired(self.stt_config.timeout_seconds):
+                        await self._interrupt_capture(connection, 'provider_item_timeout',
+                                                      unresolved_items=len(turns.intents), connection_id=connection_id)
+                        return
+                    if stop_seen and current.stt_state != 'error':
+                        await self._request_continuous_commit(provider, connection, boundary_reason='session_end',
+                                                              connection_id=connection_id)
+                        commit_pending = bool(turns.intents)
+                        if not provider.has_pending_vad_completion():
+                            self.manager.mark_stt_finalization_complete()
+                diagnostic("transport_state", session=self.manager.current(), provider=provider, commit_pending=commit_pending, pending_boundary_reason=pending_boundary_reason, stop_seen=stop_seen)
                 if self.manager.consume_stop_request() and not stop_seen:
                     stop_seen = True
-                    commit_pending = await self._request_continuous_commit(provider, connection)
-                    if not commit_pending:
+                    commit_pending = await self._request_continuous_commit(
+                        provider, connection, boundary_reason="session_end", connection_id=connection_id
+                    )
+                    pending_boundary_reason = "session_end" if commit_pending else None
+                    if not commit_pending and not self._provider_has_pending_vad_completion(provider):
                         self.manager.mark_stt_finalization_complete()
+
+                if (
+                    not stop_seen
+                    and not commit_pending
+                    and self.stt_config.finalization_mode in {"bounded", "server_vad_bounded"}
+                ):
+                    current = self.manager.current()
+                    # Leading silence is retained for range accounting, but
+                    # must not make the first speech frame immediately overdue.
+                    bound_duration = (
+                        current.audio_buffer_duration_seconds() if current is not None else 0.0
+                    )
+                    if turns is not None:
+                        bound_duration = turns.meaningful_pending_seconds
+                    meaningful_audio = bool(
+                        current is not None
+                        and getattr(current, "has_meaningful_audio_buffer", lambda: False)()
+                    )
+                    provider_decision = getattr(provider, "should_commit_bounded_fallback", None)
+                    if callable(provider_decision):
+                        should_commit = bool(
+                            provider_decision(
+                                has_audio_buffer=bool(current and current.has_audio_buffer()),
+                                meaningful_audio=meaningful_audio,
+                            )
+                        )
+                    else:
+                        should_commit = meaningful_audio
+                    if (
+                        should_commit
+                        and (turns is not None or not self._provider_has_pending_vad_completion(provider))
+                        and bound_duration >= self.stt_config.periodic_commit_seconds
+                    ):
+                        diagnostic("bounded_fallback_fired", session=current, provider=provider, commit_pending=commit_pending, bounded_timer_armed=True, bounded_timer_age=bound_duration)
+                        commit_pending = await self._request_continuous_commit(
+                            provider, connection, boundary_reason="bounded_fallback", connection_id=connection_id
+                        )
+                        pending_boundary_reason = "bounded_fallback" if commit_pending else None
 
                 if stop_seen and self.manager.current() is not None:
                     current = self.manager.current()
@@ -203,7 +314,7 @@ class LiveWebSocketGateway:
                 if browser_task in done:
                     message = browser_task.result()
                     if message is None:
-                        self.manager.mark_controller_disconnected(controller_id=controller_id)
+                        self.manager.mark_controller_disconnected(controller_id=controller_id, connection_id=connection_id)
                         return
                     if isinstance(message, bytes):
                         if stop_seen:
@@ -224,20 +335,35 @@ class LiveWebSocketGateway:
                     else:
                         control = self._parse_control_message(message)
                         control_type = control.get("type")
-                        if control_type == "commit" and not stop_seen and not commit_pending:
-                            commit_pending = await self._request_continuous_commit(provider, connection)
+                        if control_type == "audio_diagnostics":
+                            track = control.get("track", {})
+                            snapshot = self.manager.record_audio_diagnostics(track if isinstance(track, dict) else {})
+                            await self._safe_send(connection, {"type": "audio_diagnostics_recorded", "snapshot": snapshot})
+                        elif control_type == "capture_failure":
+                            await self._interrupt_capture(connection, "browser_capture_failure", connection_id=connection_id)
+                            return
+                        elif control_type == "commit" and not stop_seen and not commit_pending:
+                            commit_pending = await self._request_continuous_commit(
+                                provider, connection, boundary_reason="explicit_commit", connection_id=connection_id
+                            )
+                            pending_boundary_reason = "explicit_commit" if commit_pending else None
                         elif control_type == "stop" and not stop_seen:
                             self.manager.request_stop(controller_id=controller_id)
                             stop_seen = True
-                            commit_pending = await self._request_continuous_commit(provider, connection)
-                            if not commit_pending:
+                            commit_pending = await self._request_continuous_commit(
+                                provider, connection, boundary_reason="session_end", connection_id=connection_id
+                            )
+                            pending_boundary_reason = "session_end" if commit_pending else None
+                            if not commit_pending and not self._provider_has_pending_vad_completion(provider):
                                 self.manager.mark_stt_finalization_complete()
                         elif control_type not in {"commit", "stop"}:
-                            await self._safe_send(connection, {"type": "error", "code": "unexpected_control_message", "message": "Supported controls are commit and stop"})
+                            await self._safe_send(connection, {"type": "error", "code": "unexpected_control_message", "message": "Supported controls are audio_diagnostics, capture_failure, commit and stop"})
 
                 if provider_task in done:
-                    event = provider_task.result()
+                    event = self._with_audio_offset(provider_task.result(), audio_offset_seconds,
+                                                    frame_offset=frame_offset)
                     event_type = event.get("type")
+                    diagnostic("application_handle", session=self.manager.current(), provider=provider, item_id=event.get("item_id"), event_id=event.get("event_id"), event_type=event_type, commit_pending=commit_pending, pending_boundary_reason=pending_boundary_reason, item_context=event.get('_turn'))
                     if event_type == "partial_transcript":
                         snapshot = self.manager.record_partial(str(event.get("text", "")))
                         await self._safe_send(connection, {"type": "partial_transcript", "text": event.get("text", ""), "snapshot": snapshot})
@@ -247,18 +373,81 @@ class LiveWebSocketGateway:
                         snapshot = self.manager.process_final(
                             raw_text=str(event["text"]),
                             item_id=event.get("item_id"),
-                            provider_event=event,
+                            provider_event=self._with_transport_diagnostics(event, provider),
                         )
                         await self._safe_send(connection, {"type": "final_transcript", "text": event["text"], "snapshot": snapshot})
+                        if turns is not None:
+                            turns.acknowledge(event.get('item_id'))
                         had_commit = commit_pending
                         commit_pending = False
-                        if stop_seen and had_commit:
+                        pending_boundary_reason = None
+                        if stop_seen and ((had_commit and turns is None) or not self._provider_has_pending_vad_completion(provider)):
                             self.manager.mark_stt_finalization_complete()
                     elif event_type == "stt_error":
-                        self.manager.fail(str(event.get("code", "provider_error")), str(event.get("message", "Provider error")))
-                        await self._safe_send(connection, {"type": "error", "code": event.get("code"), "message": event.get("message"), "snapshot": self.manager.snapshot()})
-                        stop_seen = True
-                        commit_pending = False
+                        code = str(event.get("code", "provider_error"))
+                        benign = event.get('_benign_empty') if turns is not None else self._is_benign_vad_empty_final(
+                            provider,
+                            code=code,
+                            commit_pending=commit_pending,
+                        )
+                        if benign:
+                            if turns is not None:
+                                turns.acknowledge(event.get('item_id'))
+                            commit_pending = False
+                            pending_boundary_reason = None
+                            current = self.manager.current()
+                            record_empty = getattr(current, "record_empty_final_ignored", None)
+                            if callable(record_empty):
+                                record_empty()
+                            if not self._provider_has_pending_vad_completion(provider):
+                                self.manager.mark_stt_finalization_complete()
+                            await self._safe_send(
+                                connection,
+                                {
+                                    "type": "empty_final_ignored",
+                                    "reason": "vad_shutdown_without_meaningful_pending_audio",
+                                    "snapshot": self.manager.snapshot(),
+                                },
+                            )
+                        elif turns is not None and self._is_recoverable_short_vad_empty(event, config=self.stt_config):
+                            # This is NOT proof of silence. The item is resolved
+                            # by the Provider but may contain missed speech.
+                            # Keep the gap visible in metrics and runtime events.
+                            turn = event['_turn']
+                            gap_seconds = turn['audio_end'] - turn['audio_start']
+                            turns.acknowledge(event.get('item_id'))
+                            current = self.manager.current()
+                            current.record_possible_evidence_gap(gap_seconds)
+                            _logger.warning("possible_stt_evidence_gap %s", _json({
+                                "item_id": event.get("item_id"),
+                                "turn": turn,
+                                "transport": event.get("_transport"),
+                            }))
+                            if stop_seen and not self._provider_has_pending_vad_completion(provider):
+                                self.manager.mark_stt_finalization_complete()
+                            await self._safe_send(connection, {
+                                "type": "stt_gap_warning",
+                                "code": "possible_untranscribed_audio",
+                                "audio_start": turn['audio_start'],
+                                "audio_end": turn['audio_end'],
+                                "snapshot": self.manager.snapshot(),
+                            })
+                        else:
+                            # Private server diagnostics only: the public
+                            # snapshot intentionally omits Provider item IDs.
+                            # Keep enough identity/range to distinguish an
+                            # empty automatic VAD item from an explicit commit.
+                            _logger.warning("unsafe_stt_event %s", _json({
+                                "code": code,
+                                "item_id": event.get("item_id"),
+                                "event_id": event.get("event_id"),
+                                "turn": event.get("_turn"),
+                                "transport": event.get("_transport"),
+                            }))
+                            await self._interrupt_capture(connection, code,
+                                unresolved_items=len(turns.intents) if turns is not None else 0,
+                                connection_id=connection_id)
+                            return
 
                 await self._send_coalesced_render(connection)
         finally:
@@ -269,22 +458,161 @@ class LiveWebSocketGateway:
             except (asyncio.CancelledError, Exception):
                 pass
 
-    async def _request_continuous_commit(self, provider: OpenAIRealtimeTranscriptionClient, connection: ServerConnection) -> bool:
+    async def _request_continuous_commit(
+        self,
+        provider: OpenAIRealtimeTranscriptionClient,
+        connection: ServerConnection,
+        *,
+        boundary_reason: str = "explicit_commit",
+        connection_id: str | None = None,
+    ) -> bool:
         session = self.manager.current()
-        if session is None or not getattr(session, "has_audio_buffer", lambda: False)():
+        if session is None or (connection_id is not None and not self.manager.is_current_capture(connection_id)):
             return False
+        has_audio_buffer = bool(getattr(session, "has_audio_buffer", lambda: False)())
+        meaningful_audio = bool(getattr(session, "has_meaningful_audio_buffer", lambda: False)())
+        if boundary_reason == "session_end":
+            provider_decision = getattr(provider, "should_commit_at_session_end", None)
+            if callable(provider_decision):
+                should_commit = bool(
+                    provider_decision(
+                        has_audio_buffer=has_audio_buffer,
+                        meaningful_audio=meaningful_audio,
+                    )
+                )
+            else:
+                should_commit = has_audio_buffer
+        elif boundary_reason == "bounded_fallback":
+            provider_decision = getattr(provider, "should_commit_bounded_fallback", None)
+            if callable(provider_decision):
+                should_commit = bool(
+                    provider_decision(
+                        has_audio_buffer=has_audio_buffer,
+                        meaningful_audio=meaningful_audio,
+                    )
+                )
+            else:
+                should_commit = meaningful_audio
+        else:
+            should_commit = has_audio_buffer
+        if not should_commit:
+            return False
+        diagnostic("commit_requested", session=session, provider=provider, reason=boundary_reason)
         try:
+            mark_boundary_reason = getattr(provider, "mark_boundary_reason", None)
+            if callable(mark_boundary_reason):
+                mark_boundary_reason(boundary_reason)
             await provider.commit()
-            await self._safe_send(connection, {"type": "stt_committing", "snapshot": self.manager.snapshot()})
+            await self._safe_send(
+                connection,
+                {
+                    "type": "stt_committing",
+                    "boundary_reason": boundary_reason,
+                    "snapshot": self.manager.snapshot(),
+                },
+            )
             return True
         except RealtimeSTTFailure as exc:
-            self.manager.fail(exc.code, exc.message)
+            if connection_id is not None and not self.manager.is_current_capture(connection_id):
+                return False
+            if getattr(session, "mode", None) == "continuous" and session.runtime_state == "active":
+                self.manager.record_capture_interruption(exc.code, connection_id=connection_id)
+            else:
+                self.manager.fail(exc.code, exc.message)
             await self._safe_send(connection, {"type": "error", "code": exc.code, "message": exc.message, "snapshot": self.manager.snapshot()})
             return False
+
+    async def _interrupt_capture(self, connection: ServerConnection, code: str,
+                                 *, unresolved_items: int = 0,
+                                 connection_id: str | None = None) -> None:
+        if connection_id is not None and not self.manager.is_current_capture(connection_id):
+            await connection.close()
+            return
+        if self.manager.current().runtime_state == "finalizing":
+            self.manager.fail(code, "Audio could not be finalized at session end")
+            await self._drain_and_send(connection)
+            return
+        snapshot = self.manager.record_capture_interruption(code, unresolved_items=unresolved_items,
+                                                            connection_id=connection_id)
+        _logger.warning("capture_interrupted %s", _json({
+            "code": code, "unresolved_items": unresolved_items,
+            "last_frame_sequence": snapshot["live_state"]["audio_chunk_sequence"],
+            "pending_audio_seconds": snapshot["live_state"]["capture_interruptions"][-1]["pending_audio_seconds"],
+        }))
+        await self._safe_send(connection, {"type": "capture_interrupted", "code": code, "snapshot": snapshot})
+        await connection.close()
+
+    @staticmethod
+    def _with_audio_offset(event: dict[str, Any], offset_seconds: float,
+                           *, frame_offset: int = 0) -> dict[str, Any]:
+        """Translate one Provider connection's local item range to Session time."""
+        turn = event.get("_turn")
+        if not isinstance(turn, dict) or (not offset_seconds and not frame_offset):
+            return event
+        shifted = dict(turn)
+        for key in ("audio_start", "audio_end"):
+            if shifted.get(key) is not None:
+                shifted[key] = round(float(shifted[key]) + offset_seconds, 6)
+        for key in ("frame_start", "frame_end"):
+            if shifted.get(key) is not None:
+                shifted[key] = int(shifted[key]) + frame_offset
+        return {**event, "_turn": shifted}
+
+    @staticmethod
+    def _is_recoverable_short_vad_empty(event: dict[str, Any], *, config: RealtimeSTTConfig) -> bool:
+        if config.empty_vad_policy != "warn_short_no_delta" or event.get("code") != "empty_final_transcript":
+            return False
+        turn = event.get('_turn')
+        if not isinstance(turn, dict):
+            return False
+        start, end = turn.get('audio_start'), turn.get('audio_end')
+        return (
+            turn.get('range_known') is True
+            and turn.get('boundary_reason') == 'server_vad'
+            and turn.get('local_commit_sequence') is None
+            and turn.get('delta_count') == 0
+            and isinstance(start, (int, float))
+            and isinstance(end, (int, float))
+            and 0 < end - start <= 3.0
+        )
+
+    @staticmethod
+    def _provider_has_pending_vad_completion(provider: OpenAIRealtimeTranscriptionClient) -> bool:
+        value = getattr(provider, "has_pending_vad_completion", None)
+        return bool(value()) if callable(value) else False
+
+    @staticmethod
+    def _is_benign_vad_empty_final(
+        provider: OpenAIRealtimeTranscriptionClient,
+        *,
+        code: str,
+        commit_pending: bool,
+    ) -> bool:
+        if code != "empty_final_transcript" or commit_pending:
+            return False
+        if not bool(getattr(provider, "vad_enabled", False)):
+            return False
+        # Automatic VAD completion can arrive after the next speech segment
+        # has already started.  The current local PCM buffer therefore cannot
+        # be used to classify that completed provider turn.  The absence of a
+        # local commit is the reliable distinction here: explicit session-end
+        # and bounded-fallback commits remain unsafe when they return empty.
+        return True
 
     async def _drain_and_send(self, connection: ServerConnection, *, allow_without_stt: bool = False) -> None:
         snapshot = await asyncio.to_thread(self.manager.drain, allow_without_stt=allow_without_stt)
         await self._safe_send(connection, {"type": "session_ended", "snapshot": snapshot})
+
+    @staticmethod
+    def _with_transport_diagnostics(
+        event: dict[str, Any],
+        provider: OpenAIRealtimeTranscriptionClient,
+    ) -> dict[str, Any]:
+        value = dict(event)
+        diagnostic_context = getattr(provider, "diagnostic_context", None)
+        if callable(diagnostic_context) and '_transport' not in value:
+            value["_transport"] = diagnostic_context()
+        return value
 
     async def _send_coalesced_render(self, connection: ServerConnection) -> None:
         snapshot = self.manager.poll_render()

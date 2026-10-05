@@ -80,7 +80,7 @@
         "kind": {"enum": ["relation"]},
         "source": {"$ref": "#/$defs/nodeRef"},
         "target": {"$ref": "#/$defs/nodeRef"},
-        "relation_type": {"enum": ["contains", "has_option", "supports", "opposes", "related_to"]},
+        "relation_type": {"enum": ["contains", "has_option", "supports", "opposes", "related_to", "discussion_provenance"]},
         "source_evidence_ids": {"$ref": "#/$defs/evidenceIds"}
       }
     },

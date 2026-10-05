@@ -197,7 +197,9 @@ class DeveloperRequestHandler(BaseHTTPRequestHandler):
                         payload = json.loads(self.rfile.read(length).decode("utf-8"))
                     mode = payload.get("mode", "one_utterance") if isinstance(payload, dict) else "one_utterance"
                     controller_id = payload.get("controller_id") if isinstance(payload, dict) else None
-                    snapshot = self.live_manager.start_mode(str(mode), controller_id=controller_id)
+                    consented = payload.get("all_participants_consented", False) if isinstance(payload, dict) else False
+                    snapshot = self.live_manager.start_mode(str(mode), controller_id=controller_id,
+                                                            all_participants_consented=consented is True)
                     snapshot["websocket_url"] = self._websocket_url(controller_id=controller_id)
                 elif self.path == "/api/live/stop":
                     length = int(self.headers.get("Content-Length", "0"))
@@ -365,6 +367,7 @@ def main() -> None:
     finally:
         if not shutdown_requested.is_set():
             live_manager.shutdown_for_termination(timeout_seconds=45.0)
+        live_manager.close()
         server.server_close()
         live_ws_server.close()
 
