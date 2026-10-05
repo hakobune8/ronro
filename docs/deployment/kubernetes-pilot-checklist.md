@@ -18,7 +18,7 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 - [ ] Namespace `ronro-pilot` exists.
 - [ ] API Secret `ronro-openai` created out-of-band.
 - [ ] TLS Secret provisioned for the exact Pilot hostname.
-- [ ] ConfigMap shows candidate configuration `semantic-graph-rc4` and Analyzer output schema `v3`.
+- [ ] ConfigMap shows `LIVE_CONFIGURATION_VERSION=pilot-audio-continuity-rc2` and Analyzer output schema `v3`.
 - [ ] PVC `ronro-pilot-evaluation` is Bound.
 - [ ] PVC `ronro-pilot-audio` (10Gi nominal, separate from evaluation) is Bound; underlying node has free space.
 - [ ] Deployment has `replicas=1` and `strategy=Recreate`.
@@ -76,7 +76,7 @@ This checklist is for the deployment smoke test and Pilot preparation. Checking 
 
 - [ ] `git commit` SHA recorded.
 - [ ] Image tag/digest recorded.
-- [ ] Configuration version `semantic-graph-rc4` recorded.
+- [ ] Configuration version `pilot-audio-continuity-rc2` recorded.
 - [ ] Prompt `analyzer-prompt-v10-action-time-horizon` recorded.
 - [ ] STT `gpt-transcribe` recorded.
 - [ ] Analyzer `gpt-5.6-luna` / reasoning `medium` recorded.

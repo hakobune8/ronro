@@ -2,6 +2,13 @@
 
 Status: **Pilot candidate deployed; this page describes the repository templates and repeatable checks, not approval to start a Pilot.** The deployment and acceptance history is recorded in [Minimal Semantic Graph Hypothesis](../evaluation/minimal-semantic-graph-hypothesis.md).
 
+## 2026-10-05 redeployment
+
+- Source: merged `main` commit `d2273be33495746df05e28afa53ee91e3f96ef6d`; candidate tag `v0.1.1-pilot-semantic-canvas-rc5`.
+- Published by [GitHub Actions run 37299811020](https://github.com/hakobune8/ronro/actions/runs/37299811020) as `ghcr.io/hakobune8/ronro@sha256:b12b9f3e24360f0690b47f98f05a9e6da27a76a60d1606189b99d8093f6998ed`. The previous running digest was `sha256:19dc636509c2215c34b4d4108fd25967094c24c05610dba168c1a334b248f77f`.
+- The application-cluster manifest changed only the Deployment image. After rollout, the Pod was 1/1 Ready with zero restarts and the running image ID matched the new digest. `/`, `/shared`, `/control`, `/session`, `/healthz`, and `/readyz` returned 200.
+- A short synthetic-audio smoke reached `ended`, retained two completed-Final Evidence items and two Nodes, applied a relation-correction Event, and drained with Queue 0/0/0, Graph/Render revision 10/10, and zero possible-Evidence-gap warnings. This is a deployment smoke, **not** Pilot approval or a real-meeting quality evaluation. The synthetic Pilot recording follows the private seven-day retention policy.
+
 This deployment packages the already-green Limited Live Prototype for Pilot #1. It does not start Pilot #1 and it does not change Analyzer, STT, Event Store, Materializer, Projection, or Session Drain behavior.
 
 ## Architecture
@@ -64,7 +71,7 @@ smoke test alone is not Pilot approval. The application-cluster resources now us
 
 ## Pilot candidate configuration
 
-The current candidate ConfigMap identifies `semantic-graph-rc4` and supplies:
+The current ConfigMap identifies `LIVE_CONFIGURATION_VERSION=pilot-audio-continuity-rc2` (the Deployment template retains the `semantic-graph-rc4` configuration label) and supplies:
 
 - STT: `gpt-transcribe`, Japanese, terminology hints enabled
 - Analyzer: `gpt-5.6-luna`, reasoning `medium`
@@ -332,7 +339,7 @@ Record these values in the Pilot artifact and release note before Pilot #1:
 
 - git commit SHA
 - image tag and image digest
-- `LIVE_CONFIGURATION_VERSION=semantic-graph-rc4`
+- `LIVE_CONFIGURATION_VERSION=pilot-audio-continuity-rc2`
 - prompt `analyzer-prompt-v10-action-time-horizon`, output schema `v3`
 - STT `gpt-transcribe`
 - Analyzer `gpt-5.6-luna`
