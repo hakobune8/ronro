@@ -1,6 +1,6 @@
 # Kubernetes Pilot Deployment
 
-Status: **Packaging complete; cluster apply and Kubernetes smoke test pending cluster access and target values.**
+Status: **Pilot candidate deployed; this page describes the repository templates and repeatable checks, not approval to start a Pilot.** The deployment and acceptance history is recorded in [Minimal Semantic Graph Hypothesis](../evaluation/minimal-semantic-graph-hypothesis.md).
 
 This deployment packages the already-green Limited Live Prototype for Pilot #1. It does not start Pilot #1 and it does not change Analyzer, STT, Event Store, Materializer, Projection, or Session Drain behavior.
 
@@ -10,12 +10,12 @@ This deployment packages the already-green Limited Live Prototype for Pilot #1. 
 Safari
   │ HTTPS / WSS
   ▼
-Ingress
-  ├─ /      → Service:http:8000
-  └─ /live  → Service:websocket:8765
+Edge Ingress (SSLHQ/staips-infra)
+  ├─ /      → application NodePort 30100 → Service:http:8000
+  └─ /live  → application NodePort 30101 → Service:websocket:8765
                     │
                     ▼
-              Discussion Map Pod
+              RONRO Pod (existing Kubernetes resource names retained)
               ├─ HTTP API / static UI
               ├─ Audio WebSocket
               ├─ gpt-transcribe Realtime client
@@ -50,25 +50,25 @@ docs/deployment/
 
 ## Prerequisites
 
-- Kubernetes access with permission to create the `discussion-map-pilot` namespace, Deployment, Service, Ingress, ConfigMap, and PVC.
+- Kubernetes access with permission to create the `ronro-pilot` namespace, Deployment, Service, ConfigMap, and PVC. The edge-cluster Ingress is managed by `SSLHQ/staips-infra`.
 - A reachable container registry and a cluster pull path for the image.
-- An ingress controller. The template uses `ingress-nginx` annotations and `ingressClassName: nginx`; change both in the pilot overlay if the cluster uses another controller.
-- A valid DNS name and an existing TLS Secret, or an approved cert-manager flow. Self-signed TLS is not the Safari Pilot default.
+- For the deployed edge topology, access to the separately managed Traefik Ingress in `SSLHQ/staips-infra`. The standalone template uses `ingress-nginx` annotations and `ingressClassName: nginx` instead.
+- A valid DNS name and TLS configuration in the edge cluster. Self-signed TLS is not the Safari Pilot default.
 - A Kubernetes Secret containing `OPENAI_API_KEY`, created out-of-band.
 - StorageClass support for a 1Gi `ReadWriteOnce` PVC.
 
-The target cluster was not available for this packaging pass. Therefore the
-cluster-specific ingress class, StorageClass, registry, TLS Secret, image pull
-permissions, rollout, and smoke test must be verified in the deployment
-environment before use.
+The `ghcr-edge` overlay pins the current candidate image by digest. Verify the
+running digest and the Pilot-specific Human gates anew before use; an earlier
+smoke test alone is not Pilot approval. The application-cluster resources now use
+`ronro-pilot`; the former `discussion-map-pilot` resources were migration sources.
 
-## Frozen Pilot configuration
+## Pilot candidate configuration
 
-The ConfigMap identifies the package as `pilot-001` and supplies the frozen values:
+The current candidate ConfigMap identifies `semantic-graph-rc4` and supplies:
 
 - STT: `gpt-transcribe`, Japanese, terminology hints enabled
 - Analyzer: `gpt-5.6-luna`, reasoning `medium`
-- Prompt: `analyzer-prompt-v4`
+- Prompt: `analyzer-prompt-v10-action-time-horizon`, output schema `v3`
 - Context: `v1`
 - Normalization: `v2`
 - Type D: `OFF`
@@ -87,7 +87,7 @@ Set the registry outside the repository. Do not put credentials in a manifest or
 
 ```sh
 export REGISTRY_HOST=registry.example.com
-export IMAGE_NAME="$REGISTRY_HOST/discussion-map-ai-facilitator"
+export IMAGE_NAME="$REGISTRY_HOST/ronro"
 export IMAGE_TAG=pilot-001
 export VCS_REF=unknown
 export BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -109,7 +109,7 @@ The image carries OCI labels for application version, git revision, and build ti
 `deploy/kubernetes/base/secret.example.yaml` is a template only and is intentionally not included in Kustomize resources. Create the Secret out-of-band:
 
 ```sh
-kubectl -n discussion-map-pilot create secret generic discussion-map-openai \
+kubectl -n ronro-pilot create secret generic ronro-openai \
   --from-literal=OPENAI_API_KEY="$OPENAI_API_KEY"
 ```
 
@@ -119,16 +119,72 @@ The API key is injected only into the backend container through `envFrom`. It is
 
 `deploy/kubernetes/base/configmap.yaml` contains non-secret runtime configuration. Model, prompt, terminology, language, timeout, configuration version, PVC paths, and presentation settings are visible by design.
 
+The Realtime STT prompt is a short generic Japanese meeting context. It is an
+audio-recognition hint only: it must not contain a demo scenario, expected
+transcript, analyzer semantics, or evaluation answers. `OPENAI_REALTIME_KEYWORDS`
+is reserved for a small terminology hint list; the Pilot candidate uses `論路`
+as the only product terminology hint.
+
+The generic code default remains `OPENAI_REALTIME_FINALIZATION_MODE=none` for
+compatibility. The validated Pilot candidate explicitly selects
+`OPENAI_REALTIME_FINALIZATION_MODE=server_vad_bounded` and
+`OPENAI_REALTIME_PERIODIC_COMMIT_SECONDS=30`. Provider `server_vad` handles
+normal turns; the bound is only a safety fallback for a long unfinalized turn.
+The current candidate measures the bound from the first meaningful frame
+in the uncommitted range, excluding leading silence but including subsequent
+pauses. Raw pending PCM duration can therefore exceed 30 seconds during silent
+preparation without requiring a commit. This accounting is part of the candidate
+image; it is not an environment override.
+Keep the `none` mode available for non-Pilot usage and experiments.
+
+`LIVE_STT_EMPTY_VAD_POLICY` defaults to `warn_short_no_delta`. The `strict`
+setting remains available. A known
+automatic Server VAD item of at most 3 seconds with no transcription deltas
+and no explicit commit can be reported as `possible_untranscribed_audio`
+without ending capture. This is **not** proof of silence. The facilitator's
+session view shows the accumulated warning; the runtime counts possible
+Evidence gaps and cannot assert Evidence loss zero when that count is nonzero. Longer,
+unknown-range, partially recognized, and explicit-commit empty completions
+remain fatal. Pilot readiness still requires a separate safety review of
+the possible gaps and the facilitator's response.
+
 ## Storage
 
-The PVC `discussion-map-pilot-evaluation` requests 1Gi with `ReadWriteOnce`. It is used for:
+The PVC `ronro-pilot-evaluation` requests 1Gi with `ReadWriteOnce`. It is used for:
 
 ```text
 /data/evaluation/live/sessions/
 /data/evaluation/live/reports/
 ```
 
-Raw audio is not persisted by default. If an Evaluation session has explicit consent for raw audio, it may be stored as an Evaluation artifact under the existing application policy; consent is not granted by the manifest.
+Pilot recording is a separate, temporary data path. The pilot manifest
+creates a 10Gi `ronro-pilot-audio` PVC mounted at `/data/pilot-audio` and sets
+`PILOT_RAW_AUDIO_ENABLED=true`. The running image must include the recording
+implementation before this manifest is applied. The server refuses a new
+continuous session unless the facilitator attests that **all participants**
+were informed and explicitly consented. The browser checkbox alone is not a
+substitute for the facilitator's actual consent process.
+
+Accepted PCM16LE mono frames (24 kHz) are written privately under
+`/data/pilot-audio/recordings/live-<id>/audio.pcm` (file mode 0600, directory
+0700). Metadata gives format, consent attestation, dates, byte count, and
+capture-interruption markers but no transcript, audio, or device ID. A gap
+marker has unknown duration: the PCM file must not be treated as continuous
+across that point. No HTTP download path is provided. Limit
+PVC/Kubernetes administrative access to evaluation personnel; the filesystem
+mode does not by itself enforce organizational access control. Do not copy
+recordings into Git, CI artifacts, public logs, or the normal evaluation PVC.
+
+Recordings expire seven days after session end; cleanup runs at startup, before
+new sessions, and every five minutes while the service is running. If the service is down
+at expiration, deletion occurs on next startup. Files from a crash before
+normal close are also eligible after seven days. Verify PVC capacity and
+available free space before rollout: 24 kHz 16-bit mono is about 173 MB/hour,
+so 10Gi holds roughly 58 hours before reserve and other overhead. A 128MiB
+reserve stops recording before the volume is full. Recording failure is
+flagged to the facilitator without ending the meeting; that recording must
+not be called complete. Standard production must set
+`PILOT_RAW_AUDIO_ENABLED=false` and omit the audio PVC.
 
 ## Deployment strategy and resources
 
@@ -144,43 +200,57 @@ No autoscaling, Redis, external Event Store, production database, service mesh, 
 
 ## HTTPS / WSS / Ingress
 
-The Service exposes two named ports. The Ingress sends `/` and all HTTP/API paths to port `8000`, and `/live` to port `8765`. The browser receives a same-origin WebSocket URL. Behind an Ingress, the application uses `X-Forwarded-Proto` and `X-Forwarded-Host` to return `wss://<pilot-host>/live`; local direct HTTP development keeps its two-port `ws://` behavior.
+The Service exposes two named ports. In the deployed `ghcr-edge` topology,
+`SSLHQ/staips-infra` owns the edge-cluster Ingress and its TLS Secret; it sends
+`/` and HTTP/API paths to NodePort 30100 and `/live` to NodePort 30101. The
+application-cluster `ghcr-edge` overlay does **not** create another Ingress.
+The browser receives a same-origin WebSocket URL. Behind an Ingress, the
+application uses `X-Forwarded-Proto` and `X-Forwarded-Host` to return
+`wss://<pilot-host>/live`; local direct HTTP development keeps its two-port
+`ws://` behavior.
 
-The template sets ingress-nginx timeouts to 1200 seconds so a 10–15 minute session is not closed by an idle proxy. Confirm the installed controller's equivalent setting before use. HTTPS is required for Safari microphone access.
+The standalone pilot template includes ingress-nginx timeouts of 1200 seconds.
+For `ghcr-edge`, confirm the separate Traefik edge-cluster configuration before
+use. HTTPS is required for Safari microphone access.
 
 Before apply, replace these placeholders in the pilot overlay or environment-specific patch:
 
-- `registry.example.invalid/discussion-map-ai-facilitator`
-- `discussion-map-pilot.example.invalid`
-- `discussion-map-pilot-tls`
+- `registry.example.invalid/ronro` (base-manifest image placeholder; the `ghcr-edge` overlay maps it to `ghcr.io/hakobune8/ronro`)
+- `ronro-pilot.example.invalid` and `ronro-pilot-tls` (standalone pilot overlay only)
 - `nginx` if the cluster uses another IngressClass
 
-Do not make the Ingress anonymous on the public Internet. Prefer VPN, internal ingress, an existing access proxy, or IP restriction.
+The `ghcr-edge` overlay deliberately omits the application-cluster Ingress. The
+public `ronro.hakobune8.com` Ingress and its TLS Secret are owned in the edge
+cluster by `SSLHQ/staips-infra`; its EndpointSlice forwards to application
+NodePorts **30100/30101**. Preserve those ports during future rollouts. Do not
+make the Ingress anonymous on the public Internet; retain the NetBird boundary.
 
 ## Build manifest and deploy
 
 Render first:
 
 ```sh
-kustomize build deploy/kubernetes/pilot > /tmp/discussion-map-pilot.yaml
+kubectl kustomize deploy/kubernetes/pilot/ghcr-edge
 ```
 
-Create the API Secret and provision the TLS Secret before applying the workload. Then apply:
+Create the API Secret in `ronro-pilot`; ensure the edge-cluster Ingress and TLS
+are ready separately before applying the workload. Then apply:
 
 ```sh
-kubectl apply -k deploy/kubernetes/pilot
-kubectl -n discussion-map-pilot rollout status deployment/discussion-map-pilot --timeout=120s
+kubectl apply -k deploy/kubernetes/pilot/ghcr-edge
+kubectl -n ronro-pilot rollout status deployment/ronro-pilot --timeout=120s
 ```
 
-The apply must be performed only after the image, hostname, IngressClass, TLS Secret, StorageClass, and any private-registry pull Secret are set for the target cluster.
+The apply must be performed only after the image, edge host/TLS, StorageClass,
+and any private-registry pull Secret are set for the target cluster.
 
 ## Verify
 
 ```sh
-kubectl -n discussion-map-pilot get pods,svc,ingress,pvc
-kubectl -n discussion-map-pilot get endpoints discussion-map-pilot
-kubectl -n discussion-map-pilot describe pod -l app.kubernetes.io/name=discussion-map-ai-facilitator
-kubectl -n discussion-map-pilot logs deployment/discussion-map-pilot --tail=100
+kubectl -n ronro-pilot get pods,svc,pvc
+kubectl -n ronro-pilot get endpoints ronro-pilot
+kubectl -n ronro-pilot describe pod -l app.kubernetes.io/name=ronro
+kubectl -n ronro-pilot logs deployment/ronro-pilot --tail=100
 ```
 
 Verify all of the following before Safari:
@@ -188,8 +258,8 @@ Verify all of the following before Safari:
 - Pod is Ready.
 - PVC is Bound.
 - Service has endpoints for both ports.
-- Ingress has the expected host and address.
-- TLS certificate is valid for the host.
+- The edge-cluster Ingress has the expected host and address.
+- The edge TLS certificate is valid for the host.
 - `GET /healthz` is 200.
 - `GET /readyz` is 200 without making an OpenAI request.
 - Backend egress to OpenAI HTTPS/WSS is permitted.
@@ -223,10 +293,10 @@ Deployment Gate PASS requires evidence loss 0, graph corruption 0, automatic con
 After a non-Pilot smoke evaluation creates one artifact, record its PVC path and checksum, then restart the Pod once and verify the same artifact is still present:
 
 ```sh
-kubectl -n discussion-map-pilot get pod -l app.kubernetes.io/name=discussion-map-ai-facilitator
-kubectl -n discussion-map-pilot delete pod -l app.kubernetes.io/name=discussion-map-ai-facilitator
-kubectl -n discussion-map-pilot rollout status deployment/discussion-map-pilot --timeout=120s
-kubectl -n discussion-map-pilot exec deploy/discussion-map-pilot -- \
+kubectl -n ronro-pilot get pod -l app.kubernetes.io/name=ronro
+kubectl -n ronro-pilot delete pod -l app.kubernetes.io/name=ronro
+kubectl -n ronro-pilot rollout status deployment/ronro-pilot --timeout=120s
+kubectl -n ronro-pilot exec deploy/ronro-pilot -- \
   find /data/evaluation/live/sessions -maxdepth 2 -type f -print
 ```
 
@@ -243,15 +313,15 @@ If the provider or browser connection is already gone, the existing runtime mark
 Record the previous image tag before rollout:
 
 ```sh
-kubectl -n discussion-map-pilot get deployment discussion-map-pilot \
+kubectl -n ronro-pilot get deployment ronro-pilot \
   -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
 ```
 
 Rollback the Deployment revision:
 
 ```sh
-kubectl -n discussion-map-pilot rollout undo deployment/discussion-map-pilot
-kubectl -n discussion-map-pilot rollout status deployment/discussion-map-pilot --timeout=120s
+kubectl -n ronro-pilot rollout undo deployment/ronro-pilot
+kubectl -n ronro-pilot rollout status deployment/ronro-pilot --timeout=120s
 ```
 
 Because the runtime is in-memory, rollback/restart is not a continuation mechanism for an active session. Use it only between sessions or after the session is safely finalized.
@@ -262,16 +332,21 @@ Record these values in the Pilot artifact and release note before Pilot #1:
 
 - git commit SHA
 - image tag and image digest
-- `LIVE_CONFIGURATION_VERSION=pilot-001`
-- prompt `analyzer-prompt-v4`
+- `LIVE_CONFIGURATION_VERSION=semantic-graph-rc4`
+- prompt `analyzer-prompt-v10-action-time-horizon`, output schema `v3`
 - STT `gpt-transcribe`
 - Analyzer `gpt-5.6-luna`
 - reasoning `medium`
 
 ## Known limitations
 
-- Current cluster access is not authorized from this workstation, so this pass could not verify cluster-specific Ingress/TLS/StorageClass/registry values.
-- Container runtime is not running locally, so an image build/push could not be executed here.
+Long continuous turns can make the bounded fallback exceed the normal live
+latency target. The validation reference was p50 9.063 seconds and p95
+13.838 seconds. Record VAD, bounded-fallback, and session-end boundary counts
+and maximum unfinalized duration during a Pilot; do not retune thresholds
+automatically during the session.
+
+- Use the live cluster and image digest for a fresh environment check; the template alone cannot establish the current Ingress/TLS/StorageClass/registry state.
 - `replicas > 1` is unsafe because state is in memory; sticky sessions are not used.
 - A Pod restart loses active Session/Queue/Worker state; only persisted Evaluation artifacts survive.
 - No production authentication, persistence, HA, autoscaling, distributed queue, or observability stack is included.

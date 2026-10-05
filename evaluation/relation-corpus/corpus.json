@@ -1,0 +1,183 @@
+{
+  "version": "relation-corpus-spike-1",
+  "purpose": "Small evaluation corpus, not training data or an adopted taxonomy",
+  "annotation_provenance": "Single author-intended controlled scenarios; no independent Human annotation yet",
+  "outcome_values": ["present", "none", "uncertain"],
+  "mapping_values": ["supports", "opposes", "not_expressible", "sequence_only", "not_applicable", "undetermined"],
+  "real_world_probes": [
+    {
+      "id": "T1",
+      "archetype": "R1 exploratory discussion",
+      "evidence_status": "UNVERIFIABLE",
+      "observed": {"finals": 53, "nodes": 38, "edges": 31, "semantic_node_edges": 0},
+      "use": "Ecological signal: within-one-Topic movement, return, and unlinked Node density; not a relation Gold Standard",
+      "limitation": "Accessible retained Graph has Node labels and Evidence IDs but not the underlying Final utterance text; do not annotate a relation from labels alone",
+      "pairs": []
+    },
+    {
+      "id": "T2",
+      "archetype": "R2 technical problem discussion",
+      "evidence_status": "UNVERIFIABLE",
+      "observed": {"retained_failed_run_nodes": 12, "retained_failed_run_edges": 11, "empty_provider_items_in_later_run": 4, "empty_provider_audio_seconds": 5.248},
+      "use": "Ecological signal: technical terminology and an Open Item in a public-sector panel; not a relation Gold Standard",
+      "limitation": "Accessible retained utterances lack text; the later four empty items cannot be presumed complete",
+      "pairs": []
+    }
+  ],
+  "controlled_cases": [
+    {
+      "id": "R1",
+      "archetype": "exploratory discussion",
+      "setting": "市立図書館の利用検討会。午後の利用と周知方法を話す。",
+      "evidence": [
+        {"id": "r1-e1", "speaker": "進行役", "text": "新しい図書館は夕方の利用が伸びていません。今日は使いにくさがどこにあるか考えたいです。"},
+        {"id": "r1-e2", "speaker": "利用者", "text": "夕方の話なら、部活帰りの生徒は寄りたいのですが、駐輪場が早く閉まるそうです。"},
+        {"id": "r1-e3", "speaker": "司書", "text": "その例は大事ですね。試験前には自習席も夕方に埋まるので、生徒の利用時間を分けて見たいです。"},
+        {"id": "r1-e4", "speaker": "施設担当", "text": "駐輪場の閉場時刻を延ばせるかは、警備の契約を確認しないと分かりません。"},
+        {"id": "r1-e5", "speaker": "広報担当", "text": "別件ですが、休日イベントの案内は紙だけでなく地域の掲示板にも出したいです。"},
+        {"id": "r1-e6", "speaker": "進行役", "text": "いったん夕方利用の話に戻ります。駐輪場と自習席は分けて調べましょう。"}
+      ],
+      "nodes": [
+        {"id": "r1-n1", "type": "concern", "label": "新図書館の夕方利用が伸びていない", "evidence_ids": ["r1-e1"]},
+        {"id": "r1-n2", "type": "idea", "label": "駐輪場の閉場が部活帰りの利用を妨げる可能性", "evidence_ids": ["r1-e2"]},
+        {"id": "r1-n3", "type": "idea", "label": "試験前の自習席利用は夕方に集中する", "evidence_ids": ["r1-e3"]},
+        {"id": "r1-n4", "type": "open_item", "label": "駐輪場の閉場時刻を延ばせるか", "evidence_ids": ["r1-e4"], "status": "active"},
+        {"id": "r1-n5", "type": "idea", "label": "休日イベントの案内を地域掲示板にも出す", "evidence_ids": ["r1-e5"]}
+      ],
+      "topic_activity": ["夕方利用", "休日イベントの周知", "夕方利用への回帰"],
+      "presentation_probe": {"live_context_nodes": ["r1-n1", "r1-n2", "r1-n3", "r1-n4"], "final_entry_nodes": ["r1-n1", "r1-n5"], "note": "発言で別件とされた周知案を、夕方利用の子にしない"},
+      "candidate_pairs": [
+        {"id": "r1-p1", "source": "r1-n1", "target": "r1-n2", "outcome": "present", "description": "夕方利用の課題を駐輪場の具体例で掘り下げた", "evidence_ids": ["r1-e1", "r1-e2"], "existing_mapping": "not_expressible"},
+        {"id": "r1-p2", "source": "r1-n2", "target": "r1-n3", "outcome": "uncertain", "description": "両方とも生徒の夕方利用に関わるが、駐輪場と自習席を直接つなぐ発言はない", "evidence_ids": ["r1-e2", "r1-e3"], "existing_mapping": "undetermined"},
+        {"id": "r1-p3", "source": "r1-n2", "target": "r1-n4", "outcome": "present", "description": "駐輪場の話から実行可能性の未解決の問いが生じた", "evidence_ids": ["r1-e2", "r1-e4"], "existing_mapping": "not_expressible"},
+        {"id": "r1-p4", "source": "r1-n4", "target": "r1-n5", "outcome": "none", "description": "別件として移っただけで意味上の接続は示されない", "evidence_ids": ["r1-e4", "r1-e5"], "existing_mapping": "sequence_only"},
+        {"id": "r1-p5", "source": "r1-n1", "target": "r1-n5", "outcome": "none", "description": "同じ図書館会議の中の別の入口", "evidence_ids": ["r1-e1", "r1-e5"], "existing_mapping": "not_applicable"},
+        {"id": "r1-p6", "source": "r1-n1", "target": "r1-n4", "outcome": "uncertain", "description": "夕方利用全体の問いか、駐輪場だけの問いかはこの発言量では曖昧", "evidence_ids": ["r1-e1", "r1-e4"], "existing_mapping": "undetermined"}
+      ]
+    },
+    {
+      "id": "R2",
+      "archetype": "technical problem discussion",
+      "setting": "橋梁点検の担当者会議。漏水の観測と調査順序を決める前の確認。",
+      "evidence": [
+        {"id": "r2-e1", "speaker": "点検担当", "text": "東側の伸縮装置に、雨の翌日だけ漏水痕が出ています。先月の写真にはありません。"},
+        {"id": "r2-e2", "speaker": "維持担当", "text": "近くの排水口には落葉が詰まっています。ただ、それで漏水したとまでは言えません。"},
+        {"id": "r2-e3", "speaker": "設計担当", "text": "継ぎ目のシール劣化もあり得ます。排水口だけを原因と決めず、両方を確認したいです。"},
+        {"id": "r2-e4", "speaker": "進行役", "text": "では、次回の現地確認では排水口の清掃前後とシールの状態を別々に記録しましょう。"},
+        {"id": "r2-e5", "speaker": "別の点検担当", "text": "別橋の支承には腐食が出ています。こちらは漏水箇所とは別に報告します。"},
+        {"id": "r2-e6", "speaker": "維持担当", "text": "漏水の件に戻ると、写真の撮影位置を揃えておかないと前後比較が難しいです。"}
+      ],
+      "nodes": [
+        {"id": "r2-n1", "type": "concern", "label": "東側伸縮装置に雨後の漏水痕", "evidence_ids": ["r2-e1"]},
+        {"id": "r2-n2", "type": "idea", "label": "近傍排水口に落葉の詰まりを観測、漏水原因とは未確定", "evidence_ids": ["r2-e2"]},
+        {"id": "r2-n3", "type": "idea", "label": "シール劣化も漏水要因の可能性", "evidence_ids": ["r2-e3"]},
+        {"id": "r2-n4", "type": "option", "label": "排水口の清掃前後とシール状態を分けて記録する", "evidence_ids": ["r2-e4"]},
+        {"id": "r2-n5", "type": "concern", "label": "別橋の支承に腐食", "evidence_ids": ["r2-e5"]},
+        {"id": "r2-n6", "type": "idea", "label": "漏水写真の撮影位置を揃えて比較する", "evidence_ids": ["r2-e6"]}
+      ],
+      "topic_activity": ["伸縮装置の漏水", "別橋の支承腐食", "漏水への回帰"],
+      "presentation_probe": {"live_context_nodes": ["r2-n1", "r2-n2", "r2-n3", "r2-n6"], "final_entry_nodes": ["r2-n1", "r2-n5"], "note": "別橋の腐食は独立した案件。漏水原因は確定しない"},
+      "candidate_pairs": [
+        {"id": "r2-p1", "source": "r2-n1", "target": "r2-n2", "outcome": "present", "description": "漏水箇所の近くで観測された条件。ただし原因とは未確定", "evidence_ids": ["r2-e1", "r2-e2"], "existing_mapping": "not_expressible"},
+        {"id": "r2-p2", "source": "r2-n2", "target": "r2-n3", "outcome": "present", "description": "原因候補を一つに絞らず、別の可能性を並べた", "evidence_ids": ["r2-e2", "r2-e3"], "existing_mapping": "not_expressible"},
+        {"id": "r2-p3", "source": "r2-n1", "target": "r2-n4", "outcome": "present", "description": "漏水の原因を確かめるための調査方法を示した", "evidence_ids": ["r2-e1", "r2-e4"], "existing_mapping": "not_expressible"},
+        {"id": "r2-p4", "source": "r2-n4", "target": "r2-n5", "outcome": "none", "description": "別橋の腐食は別の検討対象", "evidence_ids": ["r2-e4", "r2-e5"], "existing_mapping": "sequence_only"},
+        {"id": "r2-p5", "source": "r2-n5", "target": "r2-n6", "outcome": "none", "description": "漏水へ話が戻っただけで腐食との意味関係はない", "evidence_ids": ["r2-e5", "r2-e6"], "existing_mapping": "sequence_only"},
+        {"id": "r2-p6", "source": "r2-n2", "target": "r2-n1", "outcome": "uncertain", "description": "落葉詰まりが漏水を起こしたという因果は確認されていない", "evidence_ids": ["r2-e1", "r2-e2"], "existing_mapping": "undetermined"}
+      ]
+    },
+    {
+      "id": "R3",
+      "archetype": "option comparison",
+      "setting": "自治体の浸水情報伝達会議。住民への通知経路を比較する。",
+      "evidence": [
+        {"id": "r3-e1", "speaker": "防災担当", "text": "避難情報が高齢の住民まで届いていない地区があります。通知経路を見直したいです。"},
+        {"id": "r3-e2", "speaker": "情報担当", "text": "一案はSMSです。携帯番号の登録が必要ですが、アプリを開かなくても通知できます。"},
+        {"id": "r3-e3", "speaker": "地域担当", "text": "もう一案は地区の防災アプリです。地図を載せられますが、利用者はまだ少ないです。"},
+        {"id": "r3-e4", "speaker": "防災担当", "text": "SMSなら通知に気づいてもらいやすい点は賛成です。ただし登録の手間は別に考える必要があります。"},
+        {"id": "r3-e5", "speaker": "福祉担当", "text": "アプリだけに頼る案には反対です。現状の利用者数では対象地区をカバーできません。"},
+        {"id": "r3-e6", "speaker": "進行役", "text": "今日はSMSかアプリかを決めず、到達率と登録作業を比較した資料を次回見ましょう。"}
+      ],
+      "nodes": [
+        {"id": "r3-n1", "type": "concern", "label": "避難情報が一部の高齢住民に届かない", "evidence_ids": ["r3-e1"]},
+        {"id": "r3-n2", "type": "option", "label": "SMSで避難情報を通知する", "evidence_ids": ["r3-e2"]},
+        {"id": "r3-n3", "type": "option", "label": "地区の防災アプリで避難情報を通知する", "evidence_ids": ["r3-e3"]},
+        {"id": "r3-n4", "type": "idea", "label": "SMSはアプリ起動なしで通知に気づける", "evidence_ids": ["r3-e4"]},
+        {"id": "r3-n5", "type": "concern", "label": "アプリ単独では利用者数が足りない", "evidence_ids": ["r3-e5"]},
+        {"id": "r3-n6", "type": "open_item", "label": "到達率と登録作業の比較後に通知経路を選ぶ", "evidence_ids": ["r3-e6"], "status": "active"}
+      ],
+      "topic_activity": ["通知経路の比較", "選定は持ち越し"],
+      "presentation_probe": {"live_context_nodes": ["r3-n1", "r3-n2", "r3-n3", "r3-n6"], "final_entry_nodes": ["r3-n1"], "note": "二案と持ち越しを同時に見せ、選定済みにしない"},
+      "candidate_pairs": [
+        {"id": "r3-p1", "source": "r3-n1", "target": "r3-n2", "outcome": "present", "description": "届かないという課題に対してSMSを選択肢として出した", "evidence_ids": ["r3-e1", "r3-e2"], "existing_mapping": "not_expressible"},
+        {"id": "r3-p2", "source": "r3-n1", "target": "r3-n3", "outcome": "present", "description": "同じ課題に対して防災アプリを別の選択肢として出した", "evidence_ids": ["r3-e1", "r3-e3"], "existing_mapping": "not_expressible"},
+        {"id": "r3-p3", "source": "r3-n4", "target": "r3-n2", "outcome": "present", "description": "気づきやすさを根拠にSMS案を支持した", "evidence_ids": ["r3-e2", "r3-e4"], "existing_mapping": "supports"},
+        {"id": "r3-p4", "source": "r3-n5", "target": "r3-n3", "outcome": "present", "description": "利用者の少なさを根拠にアプリ単独案に反対した", "evidence_ids": ["r3-e3", "r3-e5"], "existing_mapping": "opposes"},
+        {"id": "r3-p5", "source": "r3-n2", "target": "r3-n3", "outcome": "present", "description": "二つの通知経路を比較対象として並べたが、互いに反対する命題ではない", "evidence_ids": ["r3-e2", "r3-e3", "r3-e6"], "existing_mapping": "not_expressible"},
+        {"id": "r3-p6", "source": "r3-n4", "target": "r3-n5", "outcome": "none", "description": "一方はSMSの利点、他方はアプリの弱点であり、直接の反論関係ではない", "evidence_ids": ["r3-e4", "r3-e5"], "existing_mapping": "not_applicable"},
+        {"id": "r3-p7", "source": "r3-n6", "target": "r3-n2", "outcome": "uncertain", "description": "持ち越しの問いがSMSだけを指すとは断定できない", "evidence_ids": ["r3-e2", "r3-e6"], "existing_mapping": "undetermined"}
+      ]
+    },
+    {
+      "id": "R4",
+      "archetype": "decision-making",
+      "setting": "避難所の水確保に関する市の調整会議。複数案を検討し確認操作を行う。",
+      "evidence": [
+        {"id": "r4-e1", "speaker": "防災担当", "text": "三つの避難所で初日の飲料水が不足します。追加の手当てが必要です。"},
+        {"id": "r4-e2", "speaker": "備蓄担当", "text": "既存倉庫の在庫を避難所へ再配置する案なら、明日から動かせます。"},
+        {"id": "r4-e3", "speaker": "施設担当", "text": "給水車を借りる案もありますが、到着は二日後の見込みです。"},
+        {"id": "r4-e4", "speaker": "防災担当", "text": "初日の不足への対応としては、在庫の再配置が早いので、その案を支持します。"},
+        {"id": "r4-e5", "speaker": "進行役", "text": "では、今回は既存倉庫の在庫を再配置する案を決定候補として出します。異論がなければこの内容で確認します。"},
+        {"id": "r4-e6", "speaker": "参加者", "text": "異論ありません。"},
+        {"id": "r4-h1", "speaker": "Human UI", "text": "進行役が候補Decisionの内容を確認して確定操作した", "kind": "human_command"}
+      ],
+      "nodes": [
+        {"id": "r4-n1", "type": "concern", "label": "三避難所で初日の飲料水が不足", "evidence_ids": ["r4-e1"]},
+        {"id": "r4-n2", "type": "option", "label": "既存倉庫の水を再配置する", "evidence_ids": ["r4-e2"]},
+        {"id": "r4-n3", "type": "option", "label": "給水車を借りる", "evidence_ids": ["r4-e3"]},
+        {"id": "r4-n4", "type": "idea", "label": "初日の不足には再配置が早い", "evidence_ids": ["r4-e4"]},
+        {"id": "r4-n5", "type": "decision", "label": "既存倉庫の水を三避難所に再配置する", "evidence_ids": ["r4-e5", "r4-e6"], "initial_status": "candidate", "confirmed_by": "r4-h1"}
+      ],
+      "topic_activity": ["水不足", "代替案検討", "候補", "Human確定"],
+      "presentation_probe": {"live_context_nodes": ["r4-n1", "r4-n2", "r4-n4", "r4-n5"], "final_entry_nodes": ["r4-n1"], "note": "同じDecision NodeがHuman操作でcandidateからconfirmedになる"},
+      "candidate_pairs": [
+        {"id": "r4-p1", "source": "r4-n1", "target": "r4-n2", "outcome": "present", "description": "初日の水不足に対する再配置案", "evidence_ids": ["r4-e1", "r4-e2"], "existing_mapping": "not_expressible"},
+        {"id": "r4-p2", "source": "r4-n1", "target": "r4-n3", "outcome": "present", "description": "同じ不足に対する給水車案", "evidence_ids": ["r4-e1", "r4-e3"], "existing_mapping": "not_expressible"},
+        {"id": "r4-p3", "source": "r4-n4", "target": "r4-n2", "outcome": "present", "description": "初日の速さを根拠に再配置案を支持した", "evidence_ids": ["r4-e2", "r4-e4"], "existing_mapping": "supports"},
+        {"id": "r4-p4", "source": "r4-n2", "target": "r4-n5", "outcome": "present", "description": "再配置という選択肢がDecision候補の内容として採られた", "evidence_ids": ["r4-e2", "r4-e5"], "existing_mapping": "not_expressible"},
+        {"id": "r4-p5", "source": "r4-n3", "target": "r4-n5", "outcome": "none", "description": "給水車は検討されたが今回のDecisionの内容ではない", "evidence_ids": ["r4-e3", "r4-e5"], "existing_mapping": "not_applicable"},
+        {"id": "r4-p6", "source": "r4-n1", "target": "r4-n5", "outcome": "uncertain", "description": "再配置が初日の不足を実際に解消したかは未検証で、決定だけでは解決済みといえない", "evidence_ids": ["r4-e1", "r4-e5"], "existing_mapping": "undetermined"}
+      ]
+    },
+    {
+      "id": "R5",
+      "archetype": "execution planning",
+      "setting": "橋梁点検様式の導入準備会議。確定済み方針と未解決の移行作業を扱う。",
+      "evidence": [
+        {"id": "r5-h0", "speaker": "Human UI", "text": "前回会議で点検様式を統一するDecisionを確認済み", "kind": "human_command"},
+        {"id": "r5-e1", "speaker": "進行役", "text": "前回確認した点検様式の統一に沿って、今日は移行作業を詰めましょう。"},
+        {"id": "r5-e2", "speaker": "記録担当", "text": "旧様式からの転記漏れをどう検出するかは、まだ決まっていません。"},
+        {"id": "r5-e3", "speaker": "調整担当・田中", "text": "新様式の入力手順書は田中が2026年10月15日までに作ります。"},
+        {"id": "r5-e4", "speaker": "記録担当・佐藤", "text": "転記漏れの件は、佐藤が対象橋梁の一覧を作って、次回の会議で確認します。期限の日付はまだ決めていません。"},
+        {"id": "r5-e5", "speaker": "施設担当", "text": "別件として、庁舎の会議室予約の方法も見直したいです。"}
+      ],
+      "nodes": [
+        {"id": "r5-n1", "type": "decision", "label": "橋梁点検の様式を統一する", "evidence_ids": ["r5-e1"], "status": "confirmed", "confirmed_by": "r5-h0"},
+        {"id": "r5-n2", "type": "open_item", "label": "旧様式からの転記漏れをどう検出するか", "evidence_ids": ["r5-e2"], "status": "active"},
+        {"id": "r5-n3", "type": "action", "label": "新様式の入力手順書を作る", "evidence_ids": ["r5-e3"], "owner": "田中", "due": "2026-10-15"},
+        {"id": "r5-n4", "type": "action", "label": "対象橋梁の一覧を作り次回確認する", "evidence_ids": ["r5-e4"], "owner": "佐藤", "due": null},
+        {"id": "r5-n5", "type": "idea", "label": "庁舎の会議室予約方法を見直す", "evidence_ids": ["r5-e5"]}
+      ],
+      "topic_activity": ["点検様式の移行", "庁舎会議室の別件"],
+      "presentation_probe": {"live_context_nodes": ["r5-n1", "r5-n2", "r5-n4", "r5-n5"], "final_entry_nodes": ["r5-n1", "r5-n5"], "note": "Actionの由来は実行状態と別。会議室予約は独立入口で、直近の焦点となり得る"},
+      "candidate_pairs": [
+        {"id": "r5-p1", "source": "r5-n1", "target": "r5-n3", "outcome": "present", "description": "統一方針の実施に向けて手順書作成が生じた", "evidence_ids": ["r5-e1", "r5-e3"], "existing_mapping": "not_expressible"},
+        {"id": "r5-p2", "source": "r5-n2", "target": "r5-n4", "outcome": "present", "description": "転記漏れの確認に向けた一覧作成の作業", "evidence_ids": ["r5-e2", "r5-e4"], "existing_mapping": "not_expressible"},
+        {"id": "r5-p3", "source": "r5-n3", "target": "r5-n4", "outcome": "none", "description": "同じ移行作業中の別Actionで、互いが生む作業ではない", "evidence_ids": ["r5-e3", "r5-e4"], "existing_mapping": "not_applicable"},
+        {"id": "r5-p4", "source": "r5-n1", "target": "r5-n5", "outcome": "none", "description": "会議室予約は明示的な別件", "evidence_ids": ["r5-e1", "r5-e5"], "existing_mapping": "not_applicable"},
+        {"id": "r5-p5", "source": "r5-n1", "target": "r5-n2", "outcome": "uncertain", "description": "転記漏れの問いは様式移行に関わるが、Decisionそのものから生じたかまでは明示されない", "evidence_ids": ["r5-e1", "r5-e2"], "existing_mapping": "undetermined"},
+        {"id": "r5-p6", "source": "r5-n2", "target": "r5-n3", "outcome": "none", "description": "手順書作成は転記漏れ検出を解決するとは述べていない", "evidence_ids": ["r5-e2", "r5-e3"], "existing_mapping": "not_applicable"}
+      ]
+    }
+  ]
+}

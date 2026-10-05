@@ -57,7 +57,9 @@ class SharedViewTests(unittest.TestCase):
             "font-size: 22px",
             "font-size: 20px",
             "font-size: 18px",
-            "slice(0, 6)",
+            "shared.slots.map",
+            "font-size: 40px",
+            "確定事項",
             "＋ほか${remaining}件",
             "topic-more",
         ):
@@ -81,6 +83,39 @@ class SharedViewTests(unittest.TestCase):
                 self.assertIn("決定候補", body)
                 self.assertNotIn("決まりそうなこと", body)
                 self.assertNotIn("Discussion Map", body)
+        finally:
+            current = manager.current()
+            if current is not None:
+                current.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_primary_control_and_mobile_routes_have_separate_responsibilities(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas")
+        app = DeveloperPrototypeApp(ROOT / "evaluation" / "fixtures", ROOT / "schemas")
+        server = create_server(app, "127.0.0.1", 0, live_manager=manager, live_ws_port=18767)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        try:
+            for path in ("/", "/shared"):
+                with urlopen(f"http://{host}:{port}{path}", timeout=2) as response:
+                    body = response.read().decode("utf-8")
+                    self.assertEqual(response.status, 200)
+                    self.assertIn("論点図", body)
+                    self.assertNotIn("Start Continuous", body)
+                    self.assertNotIn("<button", body)
+            with urlopen(f"http://{host}:{port}/control", timeout=2) as response:
+                body = response.read().decode("utf-8")
+                self.assertEqual(response.status, 200)
+                self.assertIn("Start Continuous", body)
+            with urlopen(f"http://{host}:{port}/session", timeout=2) as response:
+                body = response.read().decode("utf-8")
+                self.assertEqual(response.status, 200)
+                self.assertIn("会議をはじめる", body)
+                self.assertIn("getUserMedia", body)
+                self.assertNotIn("Start Continuous", body)
         finally:
             current = manager.current()
             if current is not None:
