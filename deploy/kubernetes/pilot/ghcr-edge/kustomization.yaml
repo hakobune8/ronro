@@ -9,7 +9,7 @@ resources:
 images:
   - name: registry.example.invalid/ronro
     newName: ghcr.io/hakobune8/ronro
-    digest: sha256:19dc636509c2215c34b4d4108fd25967094c24c05610dba168c1a334b248f77f
+    digest: sha256:b12b9f3e24360f0690b47f98f05a9e6da27a76a60d1606189b99d8093f6998ed
 
 patches:
   - path: deployment-patch.yaml
