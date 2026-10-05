@@ -15,6 +15,8 @@ Live Pilot #1の前に、共有画面がProduct RDの中心価値である「議
 7. `prototype/web/index.html` と既存のProjection / Live API
 8. `docs/pilot/assets/` の既存UI Screenshot
 
+6の旧名ガイドは当時の参照先として記録した。互換ファイルは後に廃止され、現在の参加者向け資料は [`ronro-live-pilot-guide.md`](../pilot/ronro-live-pilot-guide.md) である。
+
 ## 結論
 
 現行の`/`画面は、Developer UIとしては必要な機能を備えている。しかしShared Displayとして見ると、Product Visionを完全には維持していない。

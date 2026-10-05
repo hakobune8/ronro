@@ -93,3 +93,7 @@ Pilot #1では、参加者向けSurfaceとmetadataだけを論路へ揃え、既
 ## 旧画面画像の整理（2026-10-05）
 
 旧Shared View・Focused Flow・Discussion Mapの画像は、評価記録からの参照を維持したまま `docs/evaluation/assets/legacy/` へ移した。現行Pilot用の画面画像は `docs/pilot/assets/ronro-semantic-canvas-*.png` とし、[現行Guide](../pilot/ronro-live-pilot-guide.md)を入口とする。これは過去の画面・命名判断を変更するものではない。
+
+## 旧名ガイド互換パスの終了（2026-10-05）
+
+同一内容で維持していた `discussion-map-live-pilot-guide.md` とPDFは、利用者の承認により削除した。参加者へ配布する正規の資料は [RONROライブパイロットガイド](../pilot/ronro-live-pilot-guide.md) とそのPDFのみとする。上記「File and Historical Policy」は当時の方針として残し、過去の名称変更経緯は書き換えない。

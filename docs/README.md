@@ -16,4 +16,4 @@
 
 [MVP要件](requirements/discussion-map-ai-facilitator-mvp.md)、[UX RFC](rfc/0003-discussion-map-ux-and-layout.md)、[評価記録](evaluation/)は、各時点の判断を追える資料です。旧作業名や、現在とは異なる画面・設定が記録されていても、履歴として保持します。現行設定を確認する際は、これらの過去資料ではなく、コード・[`deploy/kubernetes/base/configmap.yaml`](../deploy/kubernetes/base/configmap.yaml)・上記の現行案内を参照してください。
 
-Kubernetesの現行アプリケーション名は `ronro-pilot` です。旧 `discussion-map-pilot` は移行元の記録にだけ残します。一方、互換ファイル名や内部シンボルは参照を壊さないため維持しており、製品名と同一にする目的で一括置換しません。
+Kubernetesの現行アプリケーション名は `ronro-pilot` です。旧 `discussion-map-pilot` は移行元の記録にだけ残します。旧名の参加者向けPilotガイド互換ファイルは廃止し、上記の `ronro-live-pilot-guide` を唯一の配布先とします。その他の歴史的なファイル名や内部シンボルは、製品名と同一にする目的で一括置換しません。
