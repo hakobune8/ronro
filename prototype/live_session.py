@@ -816,11 +816,13 @@ class LiveSessionManager:
                 return self._decorate_snapshot_locked(session.snapshot(), owner)
             self._stop_requested = False
         # There is no Provider connection left to answer a session-end commit.
-        # Pending audio was already recorded as an uncertain gap at disconnect.
-        session.mark_stt_finalization_complete()
-        ended = session.drain(allow_without_stt=True)
-        with self._lock:
-            return self._decorate_snapshot_locked(ended, owner)
+        # A prior disconnect may have left an unresolved Provider turn. Do not
+        # turn that uncertainty into a clean "ended" merely because Queue is 0.
+        if session.audio_chunk_sequence >= 0:
+            session.mark_finalization_transport_lost()
+        else:
+            session.mark_stt_finalization_complete()
+        return self.drain(allow_without_stt=True)
 
     def consume_stop_request(self) -> bool:
         with self._lock:
@@ -853,13 +855,20 @@ class LiveSessionManager:
             self._active_connection_id = None
             self._controller_last_seen_at = utc_now()
             session = self._session
+            finalizing = isinstance(session, LiveContinuousSession) and session.runtime_state == "finalizing"
             if isinstance(session, LiveContinuousSession):
                 if session.runtime_state == "active" and session.stt_state != "disconnected":
                     session.record_capture_interruption("browser_websocket_disconnected")
                     if self._pilot_recorder is not None:
                         self._pilot_recorder.note_interruption("browser_websocket_disconnected")
+                if finalizing:
+                    session.mark_finalization_transport_lost()
                 session.mark_transport_disconnected()
-            return self._decorate_snapshot_locked(self.snapshot(), owner)
+            if not finalizing:
+                return self._decorate_snapshot_locked(self.snapshot(), owner)
+        # The Provider cannot complete a turn after this socket closes. Drain
+        # the Queue, preserve the gap warning, and leave no stuck finalizing UI.
+        return self.drain(allow_without_stt=True)
 
     def activate(self) -> dict[str, Any]:
         with self._lock:

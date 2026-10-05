@@ -175,6 +175,18 @@
       return frame;
     }
 
+    function captureResumeCursor(snapshot) {
+      const live = snapshot?.live_state;
+      const lastSequence = Number(live?.audio_chunk_sequence ?? -1);
+      const audioEnd = Number(live?.audio_end_seconds ?? 0);
+      if (!live || (lastSequence >= 0 && live.audio_end_seconds == null) ||
+          !Number.isSafeInteger(lastSequence) || lastSequence < -1 ||
+          !Number.isFinite(audioEnd) || audioEnd < 0) {
+        throw new Error('音声の再開位置を確認できません。送信せずに接続を確認してください。');
+      }
+      return { sequence: lastSequence + 1, sentSamples: Math.round(audioEnd * TARGET_RATE) };
+    }
+
     function handlePcm(samples, sourceRate) {
       if (!socket || socket.readyState !== WebSocket.OPEN) return;
       const converted = resample(samples, sourceRate, TARGET_RATE);
@@ -197,16 +209,18 @@
       chunkSequence = 0;
     }
 
-    async function startCaptureGraph() {
+    async function startCaptureGraph(resumeSnapshot, expectedSocket) {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('このブラウザではマイクを利用できません');
+      const cursor = captureResumeCursor(resumeSnapshot);
+      chunkSequence = cursor.sequence;
+      sentSamples = cursor.sentSamples;
       if (!stream) {
         stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       }
-      // A reconnect continues the same Session. Rebase the browser framing
-      // from the server's accepted sequence instead of restarting at zero.
-      const live = latestSnapshot?.live_state || {};
-      chunkSequence = Math.max(0, Number(live.audio_chunk_sequence ?? -1) + 1);
-      sentSamples = Math.max(0, Math.round(Number(live.audio_end_seconds || 0) * TARGET_RATE));
+      if (socket !== expectedSocket || expectedSocket.readyState !== WebSocket.OPEN) {
+        await stopCapture();
+        return;
+      }
       const track = stream.getAudioTracks()[0];
       if (track && socket?.readyState === WebSocket.OPEN) {
         const settings = track.getSettings ? track.getSettings() : {};
@@ -227,6 +241,10 @@
       context = new AudioContext();
       await context.resume();
       await context.audioWorklet.addModule('/static/live-audio-worklet.js');
+      if (socket !== expectedSocket || expectedSocket.readyState !== WebSocket.OPEN) {
+        await stopCapture();
+        return;
+      }
       source = context.createMediaStreamSource(stream);
       worklet = new AudioWorkletNode(context, 'discussion-map-capture', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
       worklet.port.onmessage = (event) => {
@@ -349,25 +367,30 @@
     function connectSocket(url) {
       if (socket) return;
       socket = new WebSocket(url);
+      const connectionSocket = socket;
+      let handshakeSnapshot = null;
+      let captureStarted = false;
       socket.binaryType = 'arraybuffer';
-      socket.onopen = async () => {
-        try {
-          await startCaptureGraph();
-          await refresh();
-        } catch (error) {
-          desiredActive = false;
-          await stopCapture();
-          setNotice(error.message, true);
-          // Microphone permission/device failures must not end the meeting.
-          // Keep the Session and Graph available for an explicit retry.
-          if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'capture_failure' }));
-          socket?.close();
-        }
-      };
+      socket.onopen = () => setNotice('音声接続と再開位置を確認しています。', false);
       socket.onmessage = (message) => {
+        if (socket !== connectionSocket) return;
         try {
           const event = JSON.parse(message.data);
           if (event.snapshot) render(event.snapshot);
+          if (event.type === 'runtime_snapshot') handshakeSnapshot = event.snapshot;
+          if (event.type === 'stt_connected' && !captureStarted) {
+            captureStarted = true;
+            void startCaptureGraph(handshakeSnapshot, connectionSocket).then(refresh).catch(async (error) => {
+              desiredActive = false;
+              await stopCapture();
+              setNotice(error.message, true);
+              // A device failure leaves the meeting available for explicit retry.
+              if (socket === connectionSocket && connectionSocket.readyState === WebSocket.OPEN) {
+                connectionSocket.send(JSON.stringify({ type: 'capture_failure' }));
+                connectionSocket.close();
+              }
+            });
+          }
           if (event.type === 'error') setNotice(event.message || '音声接続でエラーが発生しました。', true);
           if (event.type === 'capture_interrupted') {
             setNotice('音声接続を再開しています。この間の発話は記録できていない可能性があります。', true);
@@ -378,14 +401,15 @@
             const gapCount = event.snapshot?.live_state?.metrics?.possible_evidence_gap_count || 0;
             setNotice(gapCount ? `会議を終了しました。音声認識できなかった可能性のある短い区間が${gapCount}件あります。` :
               '会議を終了しました。共有画面には最後の論点図が表示されています。', Boolean(gapCount));
-            socket?.close();
+            connectionSocket.close();
           }
         } catch (_) {
           setNotice('音声接続からの応答を読み取れませんでした。', true);
         }
       };
-      socket.onerror = () => setNotice('音声接続を確認しています。', true);
+      socket.onerror = () => { if (socket === connectionSocket) setNotice('音声接続を確認しています。', true); };
       socket.onclose = async () => {
+        if (socket !== connectionSocket) return;
         await stopCapture();
         socket = null;
         if (desiredActive) scheduleReconnect();

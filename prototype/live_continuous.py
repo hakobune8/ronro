@@ -343,6 +343,33 @@ class LiveContinuousSession:
             if self.runtime_state == "finalizing":
                 self.stt_state = "finalized"
 
+    def mark_finalization_transport_lost(self) -> None:
+        """Resolve a disconnected stop without claiming uncommitted audio was finalized."""
+
+        with self._lock:
+            if self.runtime_state != "finalizing" or self.stt_finalization_complete:
+                return
+            pending_seconds = self.audio_buffer_duration_seconds()
+            self._capture_interruptions.append({
+                "code": "finalization_transport_lost",
+                "at": utc_now(),
+                "last_frame_sequence": self.audio_chunk_sequence,
+                "pending_audio_seconds": round(pending_seconds, 3),
+                "unresolved_items": None,
+                "possible_evidence_gap": True,
+                "gap_duration_unknown": True,
+            })
+            self._stt_failure_count += 1
+            self._transport_failure_count += 1
+            self._possible_evidence_gap_count += 1
+            self._possible_evidence_gap_seconds += pending_seconds
+            self._forced_incomplete = True
+            self.error = {"code": "finalization_transport_lost",
+                          "message": "Audio finalization lost its Provider connection"}
+            self.transport_connected = False
+            self.stt_finalization_complete = True
+            self.stt_state = "finalized"
+
     def mark_provider_failure(self, code: str, message: str) -> None:
         with self._lock:
             self.error = {"code": code, "message": message}

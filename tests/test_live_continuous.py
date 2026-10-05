@@ -333,6 +333,49 @@ class LiveContinuousSessionTests(unittest.TestCase):
         self.assertEqual(len(state["capture_interruptions"]), 1)
         manager.current().close()
 
+    def test_socket_close_during_http_stop_drains_incomplete_instead_of_hanging(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas", analyzer_factory=lambda: ContinuousAnalyzer())
+        manager.start_mode("continuous", controller_id="smoke-controller")
+        manager.mark_connected(controller_id="smoke-controller", connection_id="smoke-ws")
+        manager.activate()
+        manager.accept_chunk(AudioChunk(0, 0.0, b"\x20\x00" * 2400))
+        stopping = manager.request_stop(controller_id="smoke-controller")
+        self.assertEqual(stopping["live_state"]["runtime_state"], "finalizing")
+        ended = manager.mark_controller_disconnected(controller_id="smoke-controller", connection_id="smoke-ws")
+        state = ended["live_state"]
+        self.assertEqual(state["runtime_state"], "ended_with_incomplete_processing")
+        self.assertEqual(state["error"]["code"], "finalization_transport_lost")
+        self.assertGreater(state["metrics"]["possible_evidence_gap_count"], 0)
+        self.assertEqual((state["queue"]["pending"], state["queue"]["processing"], state["queue"]["failed"]),
+                         (0, 0, 0))
+        self.assertEqual(state["graph_revision"], state["rendered_revision"])
+        self.assertEqual(manager.current().runtime_state, "ended_with_incomplete_processing")
+        manager.current().close()
+
+    def test_http_stop_after_prior_disconnect_does_not_report_clean_end(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas", analyzer_factory=lambda: ContinuousAnalyzer())
+        manager.start_mode("continuous", controller_id="smoke-controller")
+        manager.mark_connected(controller_id="smoke-controller", connection_id="smoke-ws")
+        manager.activate()
+        manager.accept_chunk(AudioChunk(0, 0.0, b"\x20\x00" * 2400))
+        manager.mark_controller_disconnected(controller_id="smoke-controller", connection_id="smoke-ws")
+        ended = manager.request_stop(controller_id="smoke-controller")
+        self.assertEqual(ended["live_state"]["runtime_state"], "ended_with_incomplete_processing")
+        self.assertEqual(ended["live_state"]["error"]["code"], "finalization_transport_lost")
+        manager.current().close()
+
+    def test_socket_close_after_provider_finalized_still_ends_cleanly(self) -> None:
+        manager = LiveSessionManager(schema_dir=ROOT / "schemas", analyzer_factory=lambda: ContinuousAnalyzer())
+        manager.start_mode("continuous", controller_id="smoke-controller")
+        manager.mark_connected(controller_id="smoke-controller", connection_id="smoke-ws")
+        manager.activate()
+        manager.request_stop(controller_id="smoke-controller")
+        manager.mark_stt_finalization_complete()
+        ended = manager.mark_controller_disconnected(controller_id="smoke-controller", connection_id="smoke-ws")
+        self.assertEqual(ended["live_state"]["runtime_state"], "ended")
+        self.assertEqual(ended["live_state"]["metrics"]["possible_evidence_gap_count"], 0)
+        manager.current().close()
+
     def test_reconnected_provider_item_ranges_are_session_relative(self) -> None:
         raw = {'type': 'final_transcript', '_turn': {'range_known': True,
                'audio_start': 0.2, 'audio_end': 0.8, 'frame_start': 2, 'frame_end': 7}}
