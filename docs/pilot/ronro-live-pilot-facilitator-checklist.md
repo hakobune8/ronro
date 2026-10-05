@@ -36,6 +36,8 @@
 
 Semantic Canvas候補は本番URLへdigest固定で反映済み。本番Live APIを通した短い合成日本語音声では、Final 2件、論点2件、Human結線訂正1件、Queue 0/0/0、Drain `ended`、Graph/Rendered revision一致を確認した。これは短い合成テストであり、実会議や60分運用の保証ではない。
 
+2026-10-05に本番 `/control` の録音同意欄の初期表示と音声再接続位置を修正したrc4を反映した。合成音声フレームは意図的な切断・再接続の前後で連番 `0 → 1` のまま受理された。この切断試験は欠落可能性を記録して `ended_with_incomplete_processing` となり、正常な会議の成功例とは数えない。別の通常合成テストではFinal 2件、Human結線訂正1件、Queue 0/0/0、Drain `ended` を再確認した。録音同意なしに開始APIを呼ばないブラウザ試験と310件の既存テストも通過した。
+
 終了要求と音声接続断が重なった場合は、証拠欠落の可能性を記録して `ended_with_incomplete_processing` に到達することを別の合成テストで確認した。`ended` と誤記録しない。検証後、Live状態を `idle` に戻した。
 
 現在のSemantic Canvasを使う実画面について、3m・5mからのHuman確認と、進行役の実機での開始・訂正・終了練習は未完了。両方の成功を確認するまではPilot開始可と宣言しない。以前のFocused Flowに対する距離確認は、新Canvasの確認の代わりにならない。
