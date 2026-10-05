@@ -1,9 +1,9 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: discussion-map-pilot
+  name: ronro-pilot
   labels:
-    app.kubernetes.io/name: discussion-map-ai-facilitator
+    app.kubernetes.io/name: ronro
   annotations:
     # These annotations are for ingress-nginx. Set ingressClassName and
     # annotations in the pilot overlay to match the installed controller.
@@ -15,23 +15,23 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - discussion-map-pilot.example.invalid
-      secretName: discussion-map-pilot-tls
+        - ronro-pilot.example.invalid
+      secretName: ronro-pilot-tls
   rules:
-    - host: discussion-map-pilot.example.invalid
+    - host: ronro-pilot.example.invalid
       http:
         paths:
           - path: /live
             pathType: Prefix
             backend:
               service:
-                name: discussion-map-pilot
+                name: ronro-pilot
                 port:
                   name: websocket
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: discussion-map-pilot
+                name: ronro-pilot
                 port:
                   name: http

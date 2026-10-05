@@ -28,6 +28,7 @@ secret*.yaml
 # initial public package until provenance/re-distribution review is complete.
 evaluation/live/preflight/
 evaluation/live/sessions/
+evaluation/live/recordings/
 evaluation/live/*real*.json
 evaluation/30min/
 evaluation/real-analyzer/
@@ -42,3 +43,11 @@ evaluation/**/*.mp3
 evaluation/stt/
 evaluation/runs/
 evaluation/rescored/
+
+# Local evaluation notes from real playback / facilitator rehearsal.
+docs/evaluation/live-session-*.md
+docs/evaluation/session-entry-mobile-control-review.md
+
+# Evaluation-only official-playback loopback runner output and dependencies
+evaluation/real-world/t1a-auto/runtime/
+evaluation/real-world/t1a-auto/node_modules/

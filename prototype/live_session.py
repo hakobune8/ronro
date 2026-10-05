@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import logging
 import os
 import threading
 import time
@@ -25,6 +26,7 @@ from .live_continuous import LiveContinuousSession
 from .live_evaluation import LiveEvaluationSession
 from .live_queue import LiveAnalyzerRuntime, QueueError
 from .materializer import initial_state
+from .pilot_audio import PilotAudioRecorder, purge_expired
 from .real_analyzer import RealAnalyzer
 from .replay import ReplayRunner
 from .schema import SchemaValidator
@@ -88,6 +90,26 @@ def _live_evaluation_configuration() -> dict[str, Any]:
         "render_coalescing_seconds": _env_float("RENDER_COALESCING_SECONDS", 2.0),
         "configuration_version": os.getenv("LIVE_CONFIGURATION_VERSION", "live-eval-v1"),
     }
+
+
+LEGACY_CONTROLLER_ID = "legacy-control"
+MAX_CONTROLLER_ID_LENGTH = 128
+
+
+def normalize_controller_id(value: Any | None) -> str:
+    """Normalize a runtime-only browser instance identifier.
+
+    This identifier is deliberately not an authentication credential.  It is
+    used only to prevent two local controllers from racing the same in-memory
+    Live Session.
+    """
+
+    if value is None or not str(value).strip():
+        return LEGACY_CONTROLLER_ID
+    controller_id = str(value).strip()
+    if len(controller_id) > MAX_CONTROLLER_ID_LENGTH:
+        raise PrototypeError("controller_id_invalid", "Controller instance identifier is too long")
+    return controller_id
 
 
 class LiveSessionStateError(RuntimeError):
@@ -161,8 +183,8 @@ class LiveOneUtteranceSession:
         return RealAnalyzer.from_environment(
             schema_validator=self.schema_validator,
             meeting_goal=self.goal,
-            prompt_version="analyzer-prompt-v4",
-            output_schema_version="v2",
+            prompt_version=os.getenv("PROMPT_VERSION", "analyzer-prompt-v4"),
+            output_schema_version=os.getenv("REAL_ANALYZER_OUTPUT_SCHEMA_VERSION", "v2"),
         )
 
     def _session_document(self) -> dict[str, Any]:
@@ -406,7 +428,7 @@ class LiveOneUtteranceSession:
 
     def snapshot(self) -> dict[str, Any]:
         graph = self.state["graph"]
-        map_value = map_projection(self.state, self.events, self.layout)
+        map_value = map_projection(self.state, self.events, self.layout, self._queue_runtime.result.presentation)
         queue_snapshot = self._queue_runtime.queue.snapshot()
         return {
             "live": True,
@@ -422,6 +444,7 @@ class LiveOneUtteranceSession:
                 "normalized_utterance": copy.deepcopy(self.normalized_utterance),
                 "generated_events": copy.deepcopy(self.generated_events),
                 "analysis_errors": copy.deepcopy(self.analysis_errors),
+                "correction_clarifications": copy.deepcopy(self._queue_runtime.snapshot()["correction_clarifications"]),
                 "error": copy.deepcopy(self.error),
                 "graph_revision": graph["revision"],
                 "map_updated": self.map_updated,
@@ -498,15 +521,97 @@ class LiveSessionManager:
         self._session: LiveOneUtteranceSession | None = None
         self._stop_requested = False
         self._shutting_down = False
+        self._controller_id: str | None = None
+        self._controller_connected = False
+        self._active_connection_id: str | None = None
+        self._controller_last_seen_at: str | None = None
         schema_path = Path(schema_dir)
         self._evaluation_root = Path(evaluation_root) if evaluation_root is not None else schema_path.parent / "evaluation" / "live" / "sessions"
         self._evaluation_report_root = Path(evaluation_report_root) if evaluation_report_root is not None else schema_path.parent / "docs" / "evaluation"
         self._evaluation: LiveEvaluationSession | None = None
+        self._pilot_recording_enabled = os.getenv("PILOT_RAW_AUDIO_ENABLED", "false").lower() == "true"
+        self._pilot_audio_root = Path(os.getenv("PILOT_AUDIO_ROOT", str(self._evaluation_root.parent / "recordings")))
+        self._pilot_recorder: PilotAudioRecorder | None = None
+        self._pilot_recording_state = "off"
+        self._pilot_recording_error: str | None = None
+        self._pilot_cleanup_stop = threading.Event()
+        if self._pilot_recording_enabled:
+            purge_expired(self._pilot_audio_root)
+            threading.Thread(target=self._pilot_cleanup_loop, name="pilot-audio-retention", daemon=True).start()
+
+    def _pilot_cleanup_loop(self) -> None:
+        while not self._pilot_cleanup_stop.wait(300):
+            try:
+                with self._lock:
+                    active_id = self._session.session_id if self._pilot_recorder is not None and self._session is not None else None
+                purge_expired(self._pilot_audio_root, exclude_session_id=active_id)
+            except OSError:
+                logging.getLogger(__name__).exception("Pilot recording retention cleanup failed")
+
+    def _close_pilot_recording_locked(self, state: str = "ended") -> None:
+        recorder = self._pilot_recorder
+        self._pilot_recorder = None
+        if recorder is not None:
+            try:
+                recorder.close(state=state)
+                self._pilot_recording_state = state
+            except OSError:
+                self._pilot_recording_state = "incomplete"
+                self._pilot_recording_error = "recording_finalize_failed"
+                logging.getLogger(__name__).exception("Pilot recording finalization failed")
+
+    def close(self) -> None:
+        """Flush private recording during orderly process shutdown."""
+        self._pilot_cleanup_stop.set()
+        with self._lock:
+            self._close_pilot_recording_locked("incomplete" if self._session is not None and self._session.runtime_state not in {"ended", "ended_with_incomplete_processing"} else "ended")
 
     def start(self) -> dict[str, Any]:
         return self.start_mode("one_utterance")
 
-    def start_mode(self, mode: str = "one_utterance") -> dict[str, Any]:
+    def _controller_snapshot_locked(self, controller_id: Any | None = None) -> dict[str, Any]:
+        requester = normalize_controller_id(controller_id) if controller_id is not None else None
+        if self._controller_id is None:
+            status = "available"
+        elif requester == self._controller_id:
+            status = "owned_by_this_controller"
+        else:
+            status = "owned_by_other"
+        return {
+            "claimed": self._controller_id is not None,
+            "status": status,
+            "connected": self._controller_connected,
+            "last_seen_at": self._controller_last_seen_at,
+        }
+
+    def _decorate_snapshot_locked(
+        self,
+        snapshot: dict[str, Any],
+        controller_id: Any | None = None,
+    ) -> dict[str, Any]:
+        live_state = snapshot.setdefault("live_state", {})
+        live_state["controller"] = self._controller_snapshot_locked(controller_id)
+        if self._pilot_recorder is not None and live_state.get("runtime_state") in {"ended", "ended_with_incomplete_processing", "failed"}:
+            self._close_pilot_recording_locked("ended" if live_state["runtime_state"] == "ended" else "incomplete")
+        live_state["pilot_audio"] = {
+            "enabled": self._pilot_recording_enabled,
+            "consent_required": self._pilot_recording_enabled,
+            "state": self._pilot_recording_state,
+            "error": self._pilot_recording_error,
+            "retention_days": 7 if self._pilot_recording_enabled else None,
+        }
+        return snapshot
+
+    def _claim_controller_locked(self, controller_id: Any | None) -> str:
+        candidate = normalize_controller_id(controller_id)
+        if self._controller_id is None:
+            self._controller_id = candidate
+        elif self._controller_id != candidate:
+            raise PrototypeError("live_controller_owned", "別の端末で会議を操作中です")
+        return candidate
+
+    def start_mode(self, mode: str = "one_utterance", *, controller_id: Any | None = None,
+                   all_participants_consented: bool = False) -> dict[str, Any]:
         if mode not in {"one_utterance", "continuous"}:
             raise PrototypeError("live_mode_invalid", f"Unsupported Live mode: {mode}")
         with self._lock:
@@ -520,36 +625,62 @@ class LiveSessionManager:
             }:
                 # Start is idempotent while a session is active; do not
                 # create a second microphone, worker, or STT connection.
-                return self._session.snapshot()
+                owner = self._claim_controller_locked(controller_id)
+                return self._decorate_snapshot_locked(self._session.snapshot(), owner)
+            if self._pilot_recording_enabled and mode == "continuous" and all_participants_consented is not True:
+                raise PrototypeError("pilot_audio_consent_required", "録音・7日間保存について参加者全員の同意を確認してください")
             if self._session is not None:
                 self._session.close()
+            self._close_pilot_recording_locked()
+            if self._pilot_recording_enabled and mode == "continuous":
+                purge_expired(self._pilot_audio_root)
+            owner = normalize_controller_id(controller_id)
             session_id = f"live-{uuid.uuid4().hex[:12]}"
-            if mode == "continuous":
-                render_interval_seconds = _env_float("RENDER_COALESCING_SECONDS", 2.0)
-                drain_timeout_seconds = _env_float("DRAIN_TIMEOUT_SECONDS", 30.0)
-                self._session = LiveContinuousSession(
-                    session_id=session_id,
-                    schema_validator=self.validator,
-                    replay_runner=self.replay_runner,
-                    analyzer=(self.analyzer_factory() if self.analyzer_factory is not None else RealAnalyzer.from_environment(
+            recorder = None
+            if self._pilot_recording_enabled and mode == "continuous":
+                try:
+                    recorder = PilotAudioRecorder(self._pilot_audio_root, session_id)
+                except OSError as exc:
+                    logging.getLogger(__name__).error("Pilot recording unavailable: %s", type(exc).__name__)
+                    raise PrototypeError("pilot_audio_unavailable", "録音保存先を利用できないため開始できません") from exc
+            try:
+                if mode == "continuous":
+                    render_interval_seconds = _env_float("RENDER_COALESCING_SECONDS", 2.0)
+                    drain_timeout_seconds = _env_float("DRAIN_TIMEOUT_SECONDS", 30.0)
+                    self._session = LiveContinuousSession(
+                        session_id=session_id,
                         schema_validator=self.validator,
-                        meeting_goal="論路の論点図を会議中に理解する",
-                        prompt_version="analyzer-prompt-v4",
-                        output_schema_version="v2",
-                    )),
-                    analyzer_factory=self.analyzer_factory,
-                    render_interval_seconds=render_interval_seconds,
-                    drain_timeout_seconds=drain_timeout_seconds,
-                )
-            else:
-                self._session = LiveOneUtteranceSession(
-                    session_id=session_id,
-                    schema_validator=self.validator,
-                    replay_runner=self.replay_runner,
-                    analyzer_factory=self.analyzer_factory,
-                )
+                        replay_runner=self.replay_runner,
+                        analyzer=(self.analyzer_factory() if self.analyzer_factory is not None else RealAnalyzer.from_environment(
+                            schema_validator=self.validator,
+                            meeting_goal="論路の論点図を会議中に理解する",
+                            prompt_version=os.getenv("PROMPT_VERSION", "analyzer-prompt-v4"),
+                            output_schema_version=os.getenv("REAL_ANALYZER_OUTPUT_SCHEMA_VERSION", "v2"),
+                        )),
+                        analyzer_factory=self.analyzer_factory,
+                        render_interval_seconds=render_interval_seconds,
+                        drain_timeout_seconds=drain_timeout_seconds,
+                    )
+                else:
+                    self._session = LiveOneUtteranceSession(
+                        session_id=session_id,
+                        schema_validator=self.validator,
+                        replay_runner=self.replay_runner,
+                        analyzer_factory=self.analyzer_factory,
+                    )
+            except BaseException:
+                if recorder is not None:
+                    recorder.close(state="incomplete")
+                raise
             self._stop_requested = False
-            return self._session.snapshot()
+            self._controller_id = owner
+            self._controller_connected = False
+            self._active_connection_id = None
+            self._controller_last_seen_at = utc_now()
+            self._pilot_recorder = recorder
+            self._pilot_recording_state = "recording" if recorder is not None else "off"
+            self._pilot_recording_error = None
+            return self._decorate_snapshot_locked(self._session.snapshot(), owner)
 
     def shutdown_for_termination(self, *, timeout_seconds: float = 45.0) -> dict[str, Any] | None:
         """Reject new sessions and give an active session a bounded drain window."""
@@ -591,6 +722,9 @@ class LiveSessionManager:
             return self._session
 
     def snapshot(self) -> dict[str, Any]:
+        return self.snapshot_for_controller(None)
+
+    def snapshot_for_controller(self, controller_id: Any | None) -> dict[str, Any]:
         with self._lock:
             if self._session is None:
                 snapshot = {"live": True, "live_state": {"runtime_state": "idle", "mode": None}}
@@ -598,7 +732,7 @@ class LiveSessionManager:
                 snapshot = self._session.snapshot()
             if self._evaluation is not None:
                 snapshot["evaluation"] = self._evaluation.snapshot()
-            return snapshot
+            return self._decorate_snapshot_locked(snapshot, controller_id)
 
     def start_evaluation(self, metadata: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Start an evaluation observer session; this never starts Live Audio."""
@@ -669,13 +803,24 @@ class LiveSessionManager:
             raise PrototypeError("evaluation_missing", "No Live Evaluation session is active")
         return self._evaluation
 
-    def request_stop(self) -> dict[str, Any]:
+    def request_stop(self, *, controller_id: Any | None = None) -> dict[str, Any]:
         with self._lock:
             if self._session is None:
                 raise PrototypeError("live_session_missing", "No Live session is active")
+            owner = self._claim_controller_locked(controller_id)
             self._stop_requested = True
             self._session.begin_stop()
-            return self._session.snapshot()
+            session = self._session
+            disconnected = isinstance(session, LiveContinuousSession) and not session.transport_connected
+            if not disconnected:
+                return self._decorate_snapshot_locked(session.snapshot(), owner)
+            self._stop_requested = False
+        # There is no Provider connection left to answer a session-end commit.
+        # Pending audio was already recorded as an uncertain gap at disconnect.
+        session.mark_stt_finalization_complete()
+        ended = session.drain(allow_without_stt=True)
+        with self._lock:
+            return self._decorate_snapshot_locked(ended, owner)
 
     def consume_stop_request(self) -> bool:
         with self._lock:
@@ -683,78 +828,150 @@ class LiveSessionManager:
             self._stop_requested = False
             return requested
 
-    def mark_connected(self) -> dict[str, Any]:
+    def mark_connected(self, *, controller_id: Any | None = None,
+                       connection_id: str | None = None) -> dict[str, Any]:
         with self._lock:
             session = self._require()
+            owner = self._claim_controller_locked(controller_id)
             session.mark_connected()
-            return session.snapshot()
+            self._active_connection_id = connection_id or uuid.uuid4().hex
+            self._controller_connected = True
+            self._controller_last_seen_at = utc_now()
+            return self._decorate_snapshot_locked(session.snapshot(), owner)
+
+    def is_current_capture(self, connection_id: str) -> bool:
+        with self._lock:
+            return self._active_connection_id == connection_id
+
+    def mark_controller_disconnected(self, *, controller_id: Any | None = None,
+                                     connection_id: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            owner = normalize_controller_id(controller_id)
+            if self._controller_id != owner or (connection_id is not None and connection_id != self._active_connection_id):
+                return self._decorate_snapshot_locked(self.snapshot(), controller_id)
+            self._controller_connected = False
+            self._active_connection_id = None
+            self._controller_last_seen_at = utc_now()
+            session = self._session
+            if isinstance(session, LiveContinuousSession):
+                if session.runtime_state == "active" and session.stt_state != "disconnected":
+                    session.record_capture_interruption("browser_websocket_disconnected")
+                    if self._pilot_recorder is not None:
+                        self._pilot_recorder.note_interruption("browser_websocket_disconnected")
+                session.mark_transport_disconnected()
+            return self._decorate_snapshot_locked(self.snapshot(), owner)
 
     def activate(self) -> dict[str, Any]:
         with self._lock:
             session = self._require()
             if not isinstance(session, LiveContinuousSession):
-                return session.snapshot()
+                return self._decorate_snapshot_locked(session.snapshot())
             session.activate()
-            return session.snapshot()
+            return self._decorate_snapshot_locked(session.snapshot())
 
     def accept_chunk(self, chunk: AudioChunk) -> dict[str, Any]:
         with self._lock:
             session = self._require()
             session.accept_audio_chunk(chunk)
-            return session.snapshot()
+            if self._pilot_recorder is not None:
+                try:
+                    self._pilot_recorder.append(chunk)
+                except OSError as exc:
+                    logging.getLogger(__name__).error("Pilot recording interrupted: %s", type(exc).__name__)
+                    self._pilot_recording_error = "recording_write_failed"
+                    self._close_pilot_recording_locked("incomplete")
+            return self._decorate_snapshot_locked(session.snapshot())
+
+    def record_audio_diagnostics(self, metadata: Mapping[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            session = self._require()
+            recorder = getattr(session, "record_audio_diagnostics", None)
+            if recorder is not None:
+                recorder(metadata)
+            return self._decorate_snapshot_locked(session.snapshot())
+
+    def record_transport_diagnostics(self, metadata: Mapping[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            session = self._require()
+            recorder = getattr(session, "record_transport_diagnostics", None)
+            if recorder is not None:
+                recorder(metadata)
+            return self._decorate_snapshot_locked(session.snapshot())
 
     def record_partial(self, text: str) -> dict[str, Any]:
         with self._lock:
             session = self._require()
             session.record_partial(text)
-            return session.snapshot()
+            return self._decorate_snapshot_locked(session.snapshot())
 
     def process_final(self, **kwargs: Any) -> dict[str, Any]:
         with self._lock:
             session = self._require()
-            return session.process_final_transcript(**kwargs)
+            return self._decorate_snapshot_locked(session.process_final_transcript(**kwargs))
 
     def mark_stt_finalization_complete(self) -> dict[str, Any]:
         with self._lock:
             session = self._require()
             if isinstance(session, LiveContinuousSession):
                 session.mark_stt_finalization_complete()
-            return session.snapshot()
+            return self._decorate_snapshot_locked(session.snapshot())
 
     def poll_render(self) -> dict[str, Any] | None:
         with self._lock:
             session = self._session
             if not isinstance(session, LiveContinuousSession):
                 return None
-            return session.maybe_render()
+            snapshot = session.maybe_render()
+            return self._decorate_snapshot_locked(snapshot) if snapshot is not None else None
 
     def drain(self, *, timeout_seconds: float | None = None, allow_without_stt: bool = False) -> dict[str, Any]:
         with self._lock:
             session = self._require()
             if not isinstance(session, LiveContinuousSession):
-                return session.snapshot()
-        return session.drain(timeout_seconds=timeout_seconds, allow_without_stt=allow_without_stt)
+                return self._decorate_snapshot_locked(session.snapshot())
+        result = session.drain(timeout_seconds=timeout_seconds, allow_without_stt=allow_without_stt)
+        with self._lock:
+            if result.get("live_state", {}).get("runtime_state") in {"ended", "ended_with_incomplete_processing", "failed"}:
+                self._close_pilot_recording_locked("ended" if result["live_state"]["runtime_state"] == "ended" else "incomplete")
+            return self._decorate_snapshot_locked(result)
 
     def fail(self, code: str, message: str) -> dict[str, Any]:
         with self._lock:
             session = self._require()
             session.mark_provider_failure(code, message)
-            return session.snapshot()
+            return self._decorate_snapshot_locked(session.snapshot())
 
-    def retry(self) -> dict[str, Any]:
+    def record_capture_interruption(self, code: str, *, unresolved_items: int = 0,
+                                    connection_id: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            if connection_id is not None and connection_id != self._active_connection_id:
+                return self.snapshot()
+            session = self._require()
+            if not isinstance(session, LiveContinuousSession):
+                return self.fail(code, "Capture interrupted")
+            session.record_capture_interruption(code, unresolved_items=unresolved_items)
+            if self._pilot_recorder is not None:
+                self._pilot_recorder.note_interruption(code)
+            return self._decorate_snapshot_locked(session.snapshot())
+
+    def retry(self, *, controller_id: Any | None = None) -> dict[str, Any]:
         with self._lock:
             session = self._require()
+            owner = self._claim_controller_locked(controller_id)
             if isinstance(session, LiveContinuousSession):
                 raise PrototypeError(
                     "live_retry_unsupported",
                     "Continuous Session retry is disabled; retry is available in the L3 developer flow",
                 )
-            return session.retry_analyzer()
+            return self._decorate_snapshot_locked(session.retry_analyzer(), owner)
 
     def execute_command(self, command: Mapping[str, Any]) -> dict[str, Any]:
         with self._lock:
             session = self._require()
-            return session.execute_command(command)
+            owner = self._claim_controller_locked(command.get("controller_id"))
+            result = session.execute_command({key: value for key, value in command.items() if key != "controller_id"})
+            return {"event": result["event"],
+                    "snapshot": self._decorate_snapshot_locked(result["snapshot"], owner)}
 
     def _require(self) -> LiveOneUtteranceSession:
         if self._session is None:
