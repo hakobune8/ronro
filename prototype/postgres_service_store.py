@@ -253,11 +253,57 @@ class PostgresServiceStore:
                    JOIN service_session AS s ON s.session_id = v.session_id
                    WHERE v.session_id = %s AND v.token_digest = %s
                      AND v.revoked_at IS NULL AND v.expires_at > now()
-                     AND s.service_state = 'open'""",
+                     AND s.service_state = 'open'
+                   FOR SHARE OF v, s""",
                 (session_id, digest),
             ).fetchone()
         if row is None:
             raise ServiceStoreError("session_not_found", "Session not found")
+
+    def load_live_canvas_source(self, session_id: str, token: str) -> ReplayResult:
+        """Read a live Canvas with display-only authority in one locked transaction.
+
+        This deliberately returns no separate Evidence/Transcript or owner
+        metadata. The caller may project only the participant-facing Canvas.
+        """
+
+        if not isinstance(token, str) or not 32 <= len(token) <= 128 or not token.isascii():
+            raise ServiceStoreError("session_not_found", "Session not found")
+        digest = hashlib.sha256(token.encode("ascii")).digest()
+        with self._transaction() as connection:
+            row = connection.execute(
+                """SELECT s.graph_revision FROM service_view_credential AS v
+                   JOIN service_session AS s ON s.session_id = v.session_id
+                   WHERE v.session_id = %s AND v.token_digest = %s
+                     AND v.revoked_at IS NULL AND v.expires_at > now()
+                     AND s.service_state = 'open'
+                   FOR SHARE OF v, s""",
+                (session_id, digest),
+            ).fetchone()
+            if row is None:
+                raise ServiceStoreError("session_not_found", "Session not found")
+            result = self._replay_locked(connection, session_id)
+            if row["graph_revision"] != result.state["graph"]["revision"]:
+                raise ServiceStoreError("replay_mismatch", "Event stream revision differs from Session")
+            return result
+
+    def load_owner_canvas_source(
+        self, session_id: str, owner_user_id: str,
+    ) -> tuple[ReplayResult, dict[str, Any]]:
+        """Authorize owner and read Session state/Canvas under the same lock."""
+
+        with self._transaction() as connection:
+            row = self._require_owner_locked(connection, session_id, owner_user_id)
+            result = self._replay_locked(connection, session_id)
+            if row["graph_revision"] != result.state["graph"]["revision"]:
+                raise ServiceStoreError("replay_mismatch", "Event stream revision differs from Session")
+            return result, {
+                "state": str(row["service_state"]),
+                "capture_state": str(row["capture_state"]),
+                "version": int(row["version"]),
+                "graph_revision": int(row["graph_revision"]),
+                "final_revision": int(row["final_revision"]) if row["final_revision"] is not None else None,
+            }
 
     def revoke_view_credential(
         self, session_id: str, owner_user_id: str, grant_id: str,

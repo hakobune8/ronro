@@ -62,6 +62,10 @@ class ServiceAuthRequestHandler(BaseHTTPRequestHandler):
             "origin_rejected": 403,
             "csrf_rejected": 403,
             "account_disabled": 403,
+            "account_unavailable": 403,
+            "session_not_found": 404,
+            "session_deleted": 410,
+            "replay_mismatch": 503,
             "oidc_exchange_failed": 502,
             "oidc_jwks_unavailable": 502,
         }.get(exc.code, 400)
@@ -147,6 +151,8 @@ def create_service_auth_server(
 ) -> ThreadingHTTPServer:
     """Candidate test entrypoint; never mounted on the Pilot server."""
 
+    if host not in {"127.0.0.1", "::1"}:
+        raise ValueError("Service authentication candidate may bind only to loopback")
     handler = type(
         "BoundServiceAuthRequestHandler", (ServiceAuthRequestHandler,),
         {"identity": identity, "oidc": oidc},
