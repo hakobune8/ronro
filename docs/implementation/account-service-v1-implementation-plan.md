@@ -61,18 +61,18 @@ P1の保存方式検証とP5の鍵/削除試験は一つの設計依存として
 | 段階 | 現在の進捗 | 未達の受入れ条件 |
 | --- | --- | --- |
 | P0 | 基準固定済み。 | なし。 |
-| P1 | 暗号化PostgreSQL Store、versioned migration、原子受理・replay、Final相関、lease付きWorkerを合成データで検証。OpenBao専用KV v2領域へのCAS=0作成/読出しアダプタと、HTTPS/CA/ローテーション可能なtokenファイルからの接続設定を合成HTTPで検証したが、実mount/policy接続・破棄は未実施。 | 永続Key Registryの実接続と7日削除証明、認証済みLive経路、監督付きWorker、配備資格・復元・性能実証。 |
+| P1 | 暗号化PostgreSQL Store、versioned migration、原子受理・replay、Final相関、lease付きWorkerを合成データで検証。OpenBao専用KV v2領域へのCAS=0作成/読出しアダプタと、HTTPS/CA/ローテーション可能なtokenファイルからの接続設定を合成HTTPで検証したが、実mount/policy接続・破棄は未実施。Worker監督とHTTP/WSSのloopback合成候補を追加。 | 永続Key Registryの実接続と7日削除証明、認証済みLive公開経路、監督付きWorkerの配備・復元・性能実証。 |
 | P2 | 所有者照合とSession限定・短命・取消可能なShared View表示資格をDB境界で検証。既存ZITADELにRONRO専用Project/Web Clientを登録し、Human確認のうえCode + S256 PKCE / `none`・固定Callbackを選択（[Identity ADR](account-service-v1-identity-adr.md)）。合成RS256 ID Token、同一ブラウザ結合・一回限り認可試行、HMAC化主体/Session、複数Tabで使えるCSRF、失効可能なWeb Session、会議ownerのread/mutate/WSS境界をPostgreSQLで検証。分離したloopback HTTP候補でログイン→Callback→Session→Logout、Owner + CSRFによる新規会議作成、ownerのSession/Canvas読出し、表示資格のCanvas限定読出しとowner限定発行・取消を合成データで試験。別portのloopback Service音声WSS候補でOwner/Cookie/Origin、別owner拒否、接続中のWeb Session失効を合成DBで試験。 | 実ZITADEL認証・Token交換、永続identity keyとその復旧/ローテーション、公開音声WSS route接続、別ディスプレイpairing/更新、退会、評価API隔離、別端末/実IdP統合試験。新しい候補は公開経路に未接続。 |
 | P3 | 永続Capture状態、操作Key/CAS、接続generation、休憩と取込み不能区間、フレーム連番／時計、Provider item→Final/Evidenceの相関を合成DBで検証。loopbackのOwner限定HTTP／音声WSSで開始・休憩・再開、同一Socketの停止確認、入力中End意図→停止→Drain、停止未確認時の欠落記録と不完全終了を合成検証。DB接続leaseで別Gateway競合・旧世代をフェンス。DB期限と公平選択を持つDrain Supervisor候補は、Job/item解決後の固定revisionと期限時の部分終了を合成検証。 | 実Browser UIの終了操作と実ProviderのEnd-to-End、Supervisorの配備／監視、Provider受領の証明、実複数Pod配置・Pod/Provider障害復旧、4会議での継続性。Gatewayはloopback限定で配備可能な完成版ではない。 |
 | P4 | Session間の公平Job claimと、PostgreSQL advisory lockによる原子的な新規Session Admissionを合成データで検証。 | 4会議×2時間超、実運用での容量計測、配備更新・rollback。 |
 | P5 | Session別暗号化の基礎、終了受理時の`ended_at`と7日後`expires_at`の原子記録、期限欠落Sessionの検出を合成データで検証。所有者照合済み固定revisionの読出し、同じCanvas座標に基づく印刷用概要とCanonical詳細のPDFを合成データで生成・描画検証。loopback専用HTTP候補で終了済みSessionのOwner限定PDF取得を試験（no-store、表示資格では不可）。所有者削除要求／期限到来を先にアクセス遮断するDB Job、合成鍵Registryでの鍵破棄確認後のDB cascade削除、失敗時の再試行を追加。 | 実認証済み公開HTTP配信、非公開PDF保存、退会連動、OpenBao実環境での鍵破棄とバックアップ復元不能性、全保存先照合、7日以内の履行実証。OpenBao側のmount/policy/snapshot運用変更はこの段階のRONRO側接続実装に含めない。OpenBaoアダプタは安全に鍵破棄を証明できないため削除成功を返さず、Jobは遮断状態で再試行する。PDF生成・期限記録・合成削除試験だけではサービス公開や7日削除を保証しない。 |
-| P6 | 各段階の安全テストを継続。 | 監視/Alert/Runbook、承認監査、脅威レビュー、Human/負荷/Pilot受入れ。 |
+| P6 | 各段階の安全テストを継続。Workerの安全なerror codeと内容なし集計カウンタ、一次対応Runbookの候補を追加。 | 通知先と実Alert/Runbook演習、承認監査、脅威レビュー、Human/負荷/Pilot受入れ。 |
 
 P2/P5の退会候補では、本人認証・Origin/CSRF確認後、アカウント資格の失効と所有Sessionのアクセス遮断／削除Job登録を同一DBトランザクションで行う。認証後に遅れて届いた新規会議作成は、同じユーザー行をトランザクション内でロックして再確認する。退会応答の通信失敗後に同じCookieで再送できるよう、本人ID・会議ID・内容を含まない24時間の受領記録を残す。これは削除完了の証明ではなく、再送への`deleting`応答に限る。所有者を復号できない会議がある場合、退会を部分確定せず失敗させる。異常時の運用復旧、実OpenBao鍵破棄、バックアップ検証が済むまで退会・7日削除を本番提供済みと扱わない。
 
 P5の期限到来削除は7日満了を待たず、その15分前から削除Jobを開始する候補に変更した。P6の内容なし集計カウンタと暫定対応表は[運用観測・一次対応](account-service-v1-operational-runbook.md)に記録した。通知先・当番・実鍵／バックアップの検証は未実装であり、カウンタと文書だけで7日削除や運用受入れを達成したとは扱わない。
 
-P1/P3/P6のWorker監督候補は、複数Analyzer・Drain・削除・認証期限掃除を独立したループで稼働させ、1ループの例外が他を止めない。ログはcomponent名と安全なerror codeのみとし、Analyzer Jobの失敗を自動で成功扱い／無条件再試行しない。停止時には処理中のWorkerが残れば「停止済み」と報告しない。これはローカルSupervisor部品と合成テストであり、公開Serviceの起動経路、通知、複数Pod配置・Pod故障復旧の検証には進んでいない。
+P1/P3/P6のWorker監督候補は、複数Analyzer・Drain・削除・認証期限掃除を独立したループで稼働させ、1ループの例外が他を止めない。ログはcomponent名と安全なerror codeのみとし、Analyzer Jobの失敗を自動で成功扱い／無条件再試行しない。停止時には処理中のWorkerが残れば「停止済み」と報告しない。認証HTTP・音声WSS・Workerをまとめた`ServiceCandidateRuntime`もloopback限定で追加し、待受ポート競合・Worker起動失敗時の後始末と繰返し停止の判定を合成テストで確認した。Pilotの起動経路からは参照しない。これはローカル候補の構成検証であり、公開Serviceの起動経路、通知、複数Pod配置・Pod故障復旧の検証には進んでいない。
 
 この表は実装済み範囲と未達ゲートを分けるためのもの。未達の段階を完了と解釈しない。
 
