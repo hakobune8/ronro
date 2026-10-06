@@ -2,8 +2,7 @@
 
 This does not replace the Pilot ``/live`` route. The candidate carries PCM
 only in memory and records a frame receipt before sending it to STT. It is
-not deployment-ready: cross-process capture leasing, pause/end Drain, and
-real-Provider recovery remain separate P2/P3 gates.
+not deployment-ready: real-browser, real-Provider, and Pod recovery gates remain.
 """
 
 from __future__ import annotations
@@ -42,11 +41,7 @@ _AUDIO_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/audio\Z"
 
 
 class ServiceAudioGateway:
-    """Authenticate every socket and recheck revocation during capture.
-
-    The in-process occupancy guard is intentionally not a distributed lease;
-    this local candidate must not be exposed through a multi-replica ingress.
-    """
+    """Authenticate every socket and hold a durable, renewable Capture lease."""
 
     def __init__(
         self, identity: ServiceIdentityStore, content: PostgresServiceStore,
@@ -120,6 +115,7 @@ class ServiceAudioGateway:
                 self.access.audio_websocket, session_id=session_id,
                 cookie_token=token, origin=origin,
             )
+            await asyncio.to_thread(self.content.recover_expired_capture_lease, session_id)
             snapshot = await asyncio.to_thread(self.content.capture_snapshot, session_id, owner)
             if (snapshot["generation"] != generation
                     or snapshot["state"] not in {"resuming", "reconnecting"}):
@@ -135,9 +131,32 @@ class ServiceAudioGateway:
         provider: Any = None
         connection_id = uuid.uuid4().hex
         reader_task: asyncio.Task | None = None
+        lease_task: asyncio.Task | None = None
+        claimed = False
         try:
+            await asyncio.to_thread(
+                self.content.acquire_capture_lease,
+                session_id, generation=generation, connection_id=connection_id,
+            )
+            claimed = True
+
+            async def renew_lease() -> None:
+                while True:
+                    await asyncio.sleep(5)
+                    await asyncio.to_thread(
+                        self.content.renew_capture_lease,
+                        session_id, generation=generation, connection_id=connection_id,
+                    )
+
+            lease_task = asyncio.create_task(renew_lease())
+
+            def ensure_lease_healthy() -> None:
+                if lease_task is not None and lease_task.done():
+                    lease_task.result()
+
             provider = self.provider_factory(self.stt_config)
             await provider.connect()
+            ensure_lease_healthy()
             # Authentication or the Capture generation may have changed while
             # the Provider connection was being established.
             await asyncio.to_thread(
@@ -147,6 +166,7 @@ class ServiceAudioGateway:
             await asyncio.to_thread(
                 self.content.acknowledge_capture_transition,
                 session_id, generation=generation, event="connected",
+                connection_id=connection_id,
             )
             ingestor = ServiceRealtimeItemIngestor(
                 self.content, session_id=session_id, generation=generation,
@@ -170,6 +190,11 @@ class ServiceAudioGateway:
                     })
 
             async def handle_provider(event: dict[str, Any]) -> None:
+                ensure_lease_healthy()
+                await asyncio.to_thread(
+                    self.content.renew_capture_lease,
+                    session_id, generation=generation, connection_id=connection_id,
+                )
                 if (event.get("type") == "stt_error"
                         and event.get("raw_type") != "conversation.item.input_audio_transcription.completed"):
                     raise ServiceStoreError("provider_connection_interrupted", "Provider interrupted")
@@ -201,10 +226,15 @@ class ServiceAudioGateway:
                         meaningful_audio=True,
                     ):
                         return False
+                    await asyncio.to_thread(
+                        self.content.renew_capture_lease,
+                        session_id, generation=generation, connection_id=connection_id,
+                    )
                     provider.mark_boundary_reason("pause")
                     await provider.commit()
                 deadline = time.monotonic() + self.stt_config.timeout_seconds
                 while turns.pending() or provider.has_pending_vad_completion():
+                    ensure_lease_healthy()
                     await asyncio.to_thread(
                         self.access.audio_websocket, session_id=session_id,
                         cookie_token=token, origin=origin,
@@ -229,6 +259,7 @@ class ServiceAudioGateway:
             reader_task = asyncio.create_task(read_provider())
             pause_deadline: float | None = None
             while True:
+                ensure_lease_healthy()
                 # Recheck the cookie and owner as well as generation, even in
                 # long silence; revocation must not wait for another frame.
                 await asyncio.to_thread(
@@ -269,6 +300,7 @@ class ServiceAudioGateway:
                         actual = await asyncio.to_thread(
                             self.content.capture_stream_tail,
                             session_id, generation=generation, connection_id=connection_id,
+                            require_lease=True,
                         )
                         if expected != actual:
                             raise ServiceStoreError(
@@ -280,7 +312,7 @@ class ServiceAudioGateway:
                         receipt = await asyncio.to_thread(
                             self.content.record_capture_frame_receipt,
                             session_id, generation=generation,
-                            connection_id=connection_id, chunk=chunk,
+                            connection_id=connection_id, chunk=chunk, require_lease=True,
                         )
                         if receipt["created"]:
                             try:
@@ -307,6 +339,7 @@ class ServiceAudioGateway:
                         await asyncio.to_thread(
                             self.content.acknowledge_capture_transition,
                             session_id, generation=generation, event="paused",
+                            connection_id=connection_id,
                         )
                         await connection.send(json.dumps({
                             "type": "capture_paused", "generation": generation,
@@ -320,6 +353,10 @@ class ServiceAudioGateway:
                             has_audio_buffer=turns.samples > turns.cursor,
                             meaningful_audio=True,
                         )):
+                    await asyncio.to_thread(
+                        self.content.renew_capture_lease,
+                        session_id, generation=generation, connection_id=connection_id,
+                    )
                     provider.mark_boundary_reason("bounded_fallback")
                     await provider.commit()
         except ConnectionClosed:
@@ -333,6 +370,9 @@ class ServiceAudioGateway:
             # the WebSocket server log. The generation is fenced below.
             pass
         finally:
+            if lease_task is not None:
+                lease_task.cancel()
+                await asyncio.gather(lease_task, return_exceptions=True)
             if reader_task is not None:
                 reader_task.cancel()
                 await asyncio.gather(reader_task, return_exceptions=True)
@@ -343,10 +383,12 @@ class ServiceAudioGateway:
                     pass
             try:
                 snapshot = await asyncio.to_thread(self.content.capture_snapshot, session_id, owner)
-                if snapshot["generation"] == generation and snapshot["state"] in {"listening", "resuming", "pausing"}:
+                if (claimed and snapshot["generation"] == generation
+                        and snapshot["state"] in {"listening", "resuming", "pausing"}):
                     await asyncio.to_thread(
                         self.content.acknowledge_capture_transition,
                         session_id, generation=generation, event="disconnected",
+                        connection_id=connection_id,
                     )
             except ServiceStoreError:
                 pass

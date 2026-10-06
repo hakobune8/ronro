@@ -288,7 +288,14 @@ class ServiceAudioTransportTests(unittest.IsolatedAsyncioTestCase):
                    FROM service_capture_interval WHERE session_id = %s""",
                 (self.session_id,),
             ).fetchone()
+            lease_count = connection.execute(
+                "SELECT COUNT(*) FROM service_capture_connection_lease WHERE session_id = %s",
+                (self.session_id,),
+            ).fetchone()[0]
         self.assertEqual(row, ("provider_append_unverified", 0, 0))
+        self.assertEqual(lease_count, 0)
+        async with await self._connect(url=self.url.replace("generation=1", "generation=2")) as retry:
+            self.assertEqual(json.loads(await retry.recv())["type"], "capture_ready")
 
     async def test_provider_connection_failure_releases_starting_generation(self):
         class FailingConnect(SyntheticProvider):
@@ -301,6 +308,70 @@ class ServiceAudioTransportTests(unittest.IsolatedAsyncioTestCase):
         snapshot = self.content.capture_snapshot(self.session_id, self.owner)
         self.assertEqual(snapshot["state"], "reconnecting")
         self.assertEqual(snapshot["generation"], 2)
+
+    async def test_second_gateway_cannot_claim_same_generation_before_first_ready(self):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class SlowConnect(SyntheticProvider):
+            async def connect(self):
+                entered.set()
+                await release.wait()
+
+        self.gateway.provider_factory = lambda config: SlowConnect(config)
+        other_providers = []
+
+        def other_factory(config):
+            provider = SyntheticProvider(config)
+            other_providers.append(provider)
+            return provider
+
+        other_gateway = ServiceAudioGateway(
+            self.identity, self.content, stt_config=self.gateway.stt_config,
+            provider_factory=other_factory,
+        )
+        other_server = await serve_service_audio_candidate(other_gateway)
+        other_port = other_server.sockets[0].getsockname()[1]
+        first_port = self.server.sockets[0].getsockname()[1]
+        other_url = self.url.replace(f":{first_port}/", f":{other_port}/", 1)
+        try:
+            async with await self._connect() as first:
+                await asyncio.wait_for(entered.wait(), timeout=3)
+                async with await self._connect(url=other_url) as second:
+                    await asyncio.wait_for(second.wait_closed(), timeout=3)
+                    self.assertEqual(second.close_code, 1000)
+                self.assertEqual(other_providers, [])
+                release.set()
+                self.assertEqual(json.loads(await asyncio.wait_for(first.recv(), 3))["type"],
+                                 "capture_ready")
+        finally:
+            release.set()
+            other_server.close()
+            await other_server.wait_closed()
+
+    async def test_expired_lease_rejects_frame_and_next_connect_records_gap(self):
+        async with await self._connect() as socket:
+            self.assertEqual(json.loads(await socket.recv())["type"], "capture_ready")
+            with psycopg.connect(TEST_DSN) as connection:
+                connection.execute(
+                    """UPDATE service_capture_connection_lease
+                       SET expires_at = now() - interval '1 second' WHERE session_id = %s""",
+                    (self.session_id,),
+                )
+            await socket.send(encode_audio_frame(AudioChunk(0, 0.0, b"\x01\x00" * 2400)))
+            await asyncio.wait_for(socket.wait_closed(), timeout=3)
+        self.assertEqual(self.providers[0].turns.samples, 0)
+        async with await self._connect() as retry:
+            await asyncio.wait_for(retry.wait_closed(), timeout=3)
+        snapshot = self.content.capture_snapshot(self.session_id, self.owner)
+        self.assertEqual((snapshot["state"], snapshot["generation"]), ("reconnecting", 2))
+        with psycopg.connect(TEST_DSN) as connection:
+            reason = connection.execute(
+                """SELECT reason_code FROM service_capture_interval
+                   WHERE session_id = %s ORDER BY interval_id DESC LIMIT 1""",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertEqual(reason, "capture_lease_expired")
 
     async def test_pause_does_not_claim_clean_state_with_unresolved_provider_item(self):
         class StalledProvider(SyntheticProvider):

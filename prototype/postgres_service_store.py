@@ -334,8 +334,123 @@ class PostgresServiceStore:
                 self._require_owner_locked(connection, session_id, owner_user_id)
             )
 
+    @staticmethod
+    def _capture_lease_locked(
+        connection: psycopg.Connection, session_id: str, generation: int, digest: bytes,
+    ) -> None:
+        lease = connection.execute(
+            """SELECT generation, connection_digest, expires_at > now() AS live
+               FROM service_capture_connection_lease WHERE session_id = %s""",
+            (session_id,),
+        ).fetchone()
+        if (lease is None or lease["generation"] != generation
+                or bytes(lease["connection_digest"]) != digest or not lease["live"]):
+            raise ServiceStoreError("capture_lease_lost", "Capture connection lease is unavailable")
+
+    def acquire_capture_lease(
+        self, session_id: str, *, generation: int, connection_id: str,
+        lease_seconds: int = 30,
+    ) -> None:
+        """Claim the sole cross-process socket before contacting the Provider.
+
+        An expired incumbent is never replaced within its generation: the
+        uncertain interval is recorded and the browser must reconnect using
+        the next generation. This also fences a late old Pod.
+        """
+
+        if (type(generation) is not int or generation < 1 or not connection_id
+                or type(lease_seconds) is not int or not 2 <= lease_seconds <= 300):
+            raise ServiceStoreError("capture_lease_invalid", "Invalid Capture lease")
+        digest = self.codec.blind_capture_connection_id(session_id, connection_id)
+        failure: str | None = None
+        with self._transaction() as connection:
+            row = self._lock_session(connection, session_id)
+            if row["service_state"] != "open" or row["capture_generation"] != generation:
+                raise ServiceStoreError("stale_capture_generation", "Capture generation changed")
+            incumbent = connection.execute(
+                """SELECT generation, expires_at > now() AS live
+                   FROM service_capture_connection_lease
+                   WHERE session_id = %s""", (session_id,),
+            ).fetchone()
+            if incumbent is not None and incumbent["generation"] != generation:
+                # A prior discontinuity already fenced this socket. Its old
+                # lease cannot occupy the new Capture generation.
+                connection.execute(
+                    "DELETE FROM service_capture_connection_lease WHERE session_id = %s",
+                    (session_id,),
+                )
+                incumbent = None
+            if incumbent is not None and incumbent["live"]:
+                raise ServiceStoreError("capture_lease_occupied", "Capture is already connected")
+            if incumbent is not None:
+                connection.execute(
+                    "DELETE FROM service_capture_connection_lease WHERE session_id = %s",
+                    (session_id,),
+                )
+                if row["capture_state"] in {"listening", "resuming", "pausing", "reconnecting"}:
+                    self._mark_capture_discontinuity_locked(
+                        connection, session_id, row, "capture_lease_expired",
+                    )
+                failure = "capture_lease_expired"
+            elif row["capture_state"] not in {"resuming", "reconnecting"}:
+                raise ServiceStoreError("capture_transition_invalid", "Capture is not ready")
+            else:
+                connection.execute(
+                    """INSERT INTO service_capture_connection_lease
+                       (session_id, generation, connection_digest, expires_at)
+                       VALUES (%s, %s, %s, now() + %s * interval '1 second')""",
+                    (session_id, generation, digest, lease_seconds),
+                )
+        if failure is not None:
+            raise ServiceStoreError(failure, "Capture connection expired; reconnect required")
+
+    def recover_expired_capture_lease(self, session_id: str) -> bool:
+        """Fence a vanished Pod before another socket reads the Capture state."""
+
+        with self._transaction() as connection:
+            row = self._lock_session(connection, session_id)
+            lease = connection.execute(
+                """SELECT generation, expires_at <= now() AS expired
+                   FROM service_capture_connection_lease WHERE session_id = %s""",
+                (session_id,),
+            ).fetchone()
+            if lease is None or not lease["expired"]:
+                return False
+            connection.execute(
+                "DELETE FROM service_capture_connection_lease WHERE session_id = %s",
+                (session_id,),
+            )
+            if (row["service_state"] == "open"
+                    and row["capture_generation"] == lease["generation"]
+                    and row["capture_state"] in {"resuming", "listening", "pausing", "reconnecting"}):
+                self._mark_capture_discontinuity_locked(
+                    connection, session_id, row, "capture_lease_expired",
+                )
+            return True
+
+    def renew_capture_lease(
+        self, session_id: str, *, generation: int, connection_id: str,
+        lease_seconds: int = 30,
+    ) -> None:
+        if type(lease_seconds) is not int or not 2 <= lease_seconds <= 300:
+            raise ServiceStoreError("capture_lease_invalid", "Invalid Capture lease")
+        digest = self.codec.blind_capture_connection_id(session_id, connection_id)
+        with self._transaction() as connection:
+            row = self._lock_session(connection, session_id)
+            if (row["service_state"] != "open" or row["capture_generation"] != generation
+                    or row["capture_state"] not in {"resuming", "listening", "pausing", "reconnecting"}):
+                raise ServiceStoreError("capture_lease_lost", "Capture generation changed")
+            self._capture_lease_locked(connection, session_id, generation, digest)
+            connection.execute(
+                """UPDATE service_capture_connection_lease
+                   SET expires_at = now() + %s * interval '1 second', updated_at = now()
+                   WHERE session_id = %s""",
+                (lease_seconds, session_id),
+            )
+
     def capture_stream_tail(
         self, session_id: str, *, generation: int, connection_id: str,
+        require_lease: bool = False,
     ) -> int:
         """Verify the last accepted frame for a same-socket stop handshake."""
 
@@ -347,6 +462,8 @@ class PostgresServiceStore:
             if (row["service_state"] != "open" or row["capture_generation"] != generation
                     or row["capture_state"] != "pausing"):
                 raise ServiceStoreError("capture_transition_invalid", "Capture is not pausing")
+            if require_lease:
+                self._capture_lease_locked(connection, session_id, generation, digest)
             stream = connection.execute(
                 """SELECT connection_digest, last_sequence FROM service_capture_stream
                    WHERE session_id = %s AND generation = %s""",
@@ -447,6 +564,7 @@ class PostgresServiceStore:
 
     def acknowledge_capture_transition(
         self, session_id: str, *, generation: int, event: str,
+        connection_id: str | None = None,
     ) -> dict[str, Any]:
         """Trusted gateway acknowledgement; never expose this as an unauthenticated API."""
 
@@ -458,6 +576,9 @@ class PostgresServiceStore:
                 raise ServiceStoreError("session_closed", "Capture has ended")
             if type(generation) is not int or generation != row["capture_generation"]:
                 raise ServiceStoreError("stale_capture_generation", "Capture generation changed")
+            if connection_id is not None:
+                digest = self.codec.blind_capture_connection_id(session_id, connection_id)
+                self._capture_lease_locked(connection, session_id, generation, digest)
             state = row["capture_state"]
             if event == "connected" and state == "listening":
                 return self._capture_snapshot(row)
@@ -507,6 +628,11 @@ class PostgresServiceStore:
                    capture_generation = %s, version = %s WHERE session_id = %s""",
                 (next_state, next_generation, version, session_id),
             )
+            if connection_id is not None and event in {"paused", "disconnected"}:
+                connection.execute(
+                    "DELETE FROM service_capture_connection_lease WHERE session_id = %s",
+                    (session_id,),
+                )
             return {"state": next_state, "generation": next_generation, "version": version}
 
     def request_finalizing(
@@ -602,10 +728,15 @@ class PostgresServiceStore:
                version = version + 1 WHERE session_id = %s""",
             (session_id,),
         )
+        connection.execute(
+            """DELETE FROM service_capture_connection_lease
+               WHERE session_id = %s AND generation = %s""",
+            (session_id, row["capture_generation"]),
+        )
 
     def record_capture_frame_receipt(
         self, session_id: str, *, generation: int, connection_id: str,
-        chunk: AudioChunk,
+        chunk: AudioChunk, require_lease: bool = False,
     ) -> dict[str, Any]:
         """Persist a received frame's metadata before Provider append.
 
@@ -644,6 +775,8 @@ class PostgresServiceStore:
                 raise ServiceStoreError("stale_capture_generation", "Capture generation changed")
             if row["capture_state"] not in {"listening", "pausing"}:
                 raise ServiceStoreError("capture_not_listening", "Capture is not accepting PCM")
+            if require_lease:
+                self._capture_lease_locked(connection, session_id, generation, connection_digest)
             stream = connection.execute(
                 """SELECT * FROM service_capture_stream
                    WHERE session_id = %s AND generation = %s FOR UPDATE""",

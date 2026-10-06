@@ -85,6 +85,88 @@ class PostgresServiceStoreTests(unittest.TestCase):
                                  b"\x01\x00" * 2400),
             )
 
+    def test_capture_lease_is_cross_store_and_expiry_fences_old_audio(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-lease", expected_version=0,
+        )
+        other_process = PostgresServiceStore(
+            TEST_DSN, self.validator, self.registry, allow_test_key_registry=True,
+        )
+        self.store.acquire_capture_lease(
+            self.session_id, generation=1, connection_id="socket-one",
+        )
+        with self.assertRaises(ServiceStoreError) as occupied:
+            other_process.acquire_capture_lease(
+                self.session_id, generation=1, connection_id="socket-two",
+            )
+        self.assertEqual(occupied.exception.code, "capture_lease_occupied")
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected", connection_id="socket-one",
+        )
+        self.store.record_capture_frame_receipt(
+            self.session_id, generation=1, connection_id="socket-one",
+            chunk=AudioChunk(0, 0.0, b"\x01\x00" * 2400), require_lease=True,
+        )
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                """UPDATE service_capture_connection_lease SET expires_at = now() - interval '1 second'
+                   WHERE session_id = %s""", (self.session_id,),
+            )
+        self.assertTrue(other_process.recover_expired_capture_lease(self.session_id))
+        self.assertEqual(self.store.capture_snapshot(self.session_id, "synthetic-owner")["state"],
+                         "reconnecting")
+        self.assertEqual(self.store.capture_snapshot(self.session_id, "synthetic-owner")["generation"],
+                         2)
+        with self.assertRaises(ServiceStoreError) as stale:
+            self.store.record_capture_frame_receipt(
+                self.session_id, generation=1, connection_id="socket-one",
+                chunk=AudioChunk(1, 0.1, b"\x01\x00" * 2400), require_lease=True,
+            )
+        self.assertEqual(stale.exception.code, "stale_capture_generation")
+        other_process.acquire_capture_lease(
+            self.session_id, generation=2, connection_id="socket-two",
+        )
+        other_process.acknowledge_capture_transition(
+            self.session_id, generation=2, event="connected", connection_id="socket-two",
+        )
+        with self.assertRaises(ServiceStoreError):
+            self.store.acknowledge_capture_transition(
+                self.session_id, generation=1, event="disconnected", connection_id="socket-one",
+            )
+        with psycopg.connect(TEST_DSN) as connection:
+            reason = connection.execute(
+                """SELECT reason_code FROM service_capture_interval
+                   WHERE session_id = %s ORDER BY interval_id DESC LIMIT 1""",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertEqual(reason, "capture_lease_expired")
+
+    def test_capture_lease_renews_during_silence_and_releases_atomically(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-lease", expected_version=0,
+        )
+        self.store.acquire_capture_lease(
+            self.session_id, generation=1, connection_id="quiet-socket", lease_seconds=30,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected", connection_id="quiet-socket",
+        )
+        self.store.renew_capture_lease(
+            self.session_id, generation=1, connection_id="quiet-socket", lease_seconds=30,
+        )
+        self.assertFalse(self.store.recover_expired_capture_lease(self.session_id))
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="disconnected", connection_id="quiet-socket",
+        )
+        with psycopg.connect(TEST_DSN) as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM service_capture_connection_lease WHERE session_id = %s",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
     def test_encrypted_rows_and_reopen_replay(self):
         evidence, utterance = self._final()
         self.store.accept_final(
@@ -694,7 +776,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
             "0005_capture_transitions.sql", "0006_capture_frame_receipts.sql",
             "0007_provider_item_lifecycle.sql", "0008_session_retention.sql",
             "0009_service_identity.sql",
-            "0010_oidc_browser_binding.sql",
+            "0010_oidc_browser_binding.sql", "0011_capture_connection_lease.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 
