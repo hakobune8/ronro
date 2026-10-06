@@ -69,6 +69,29 @@ class ServiceAudioGateway:
         return values[0] if values else None
 
     @staticmethod
+    def _stop_sequence(message: str) -> int:
+        if len(message) > 256:
+            raise ServiceStoreError("audio_stop_invalid", "Invalid Capture stop control")
+        try:
+            def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                value: dict[str, Any] = {}
+                for key, item in pairs:
+                    if key in value:
+                        raise ValueError("Duplicate stop control field")
+                    value[key] = item
+                return value
+
+            control = json.loads(message, object_pairs_hook=unique)
+        except (ValueError, TypeError) as exc:
+            raise ServiceStoreError("audio_stop_invalid", "Invalid Capture stop control") from exc
+        if (not isinstance(control, dict) or set(control) != {"type", "last_sequence"}
+                or control["type"] != "capture_stop"
+                or type(control["last_sequence"]) is not int
+                or control["last_sequence"] < -1):
+            raise ServiceStoreError("audio_stop_invalid", "Invalid Capture stop control")
+        return control["last_sequence"]
+
+    @staticmethod
     def _request_identity(connection: ServerConnection) -> tuple[str, int, str | None, str | None]:
         request = connection.request
         parsed = urlsplit(request.path)
@@ -204,6 +227,7 @@ class ServiceAudioGateway:
                 return True
 
             reader_task = asyncio.create_task(read_provider())
+            pause_deadline: float | None = None
             while True:
                 # Recheck the cookie and owner as well as generation, even in
                 # long silence; revocation must not wait for another frame.
@@ -214,53 +238,80 @@ class ServiceAudioGateway:
                 snapshot = await asyncio.to_thread(self.content.capture_snapshot, session_id, owner)
                 if snapshot["generation"] != generation:
                     break
+                if snapshot["state"] not in {"listening", "pausing"}:
+                    break
                 if snapshot["state"] == "pausing":
-                    if await settle_pause():
-                        await asyncio.to_thread(
-                            self.content.acknowledge_capture_transition,
-                            session_id, generation=generation, event="paused",
-                        )
-                    break
-                if snapshot["state"] != "listening":
-                    break
+                    if pause_deadline is None:
+                        pause_deadline = time.monotonic() + self.stt_config.timeout_seconds
+                    if time.monotonic() >= pause_deadline:
+                        break
+                else:
+                    pause_deadline = None
                 browser_task = asyncio.create_task(connection.recv())
                 event_task = asyncio.create_task(provider_events.get())
                 done, pending = await asyncio.wait(
-                    {browser_task, event_task}, timeout=0.2,
+                    {browser_task, event_task},
+                    timeout=(min(0.2, max(0.0, pause_deadline - time.monotonic()))
+                             if pause_deadline is not None else 0.2),
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 for task in pending:
                     task.cancel()
                 if pending:
                     await asyncio.gather(*pending, return_exceptions=True)
+                stop_requested = False
                 if browser_task in done:
                     message = browser_task.result()
-                    if not isinstance(message, bytes):
-                        raise ServiceStoreError("audio_frame_invalid", "Binary PCM frame required")
-                    chunk = decode_audio_frame(message)
-                    receipt = await asyncio.to_thread(
-                        self.content.record_capture_frame_receipt,
-                        session_id, generation=generation,
-                        connection_id=connection_id, chunk=chunk,
-                    )
-                    if receipt["created"]:
-                        try:
-                            await provider.append_audio(chunk.pcm16le)
-                        except Exception as exc:
-                            await asyncio.to_thread(
-                                self.content.record_provider_append_uncertain,
-                                session_id, generation=generation,
-                                connection_id=connection_id, frame_sequence=chunk.sequence,
+                    if isinstance(message, str):
+                        if snapshot["state"] != "pausing":
+                            raise ServiceStoreError("audio_stop_invalid", "Capture is not pausing")
+                        expected = self._stop_sequence(message)
+                        actual = await asyncio.to_thread(
+                            self.content.capture_stream_tail,
+                            session_id, generation=generation, connection_id=connection_id,
+                        )
+                        if expected != actual:
+                            raise ServiceStoreError(
+                                "audio_stop_sequence_mismatch", "Capture stop does not match frames"
                             )
-                            raise RealtimeSTTFailure(
-                                "provider_append_unverified", "Provider audio append was not verified"
-                            ) from exc
-                    await connection.send(json.dumps({
-                        "type": "frame_received", "sequence": chunk.sequence,
-                        "created": receipt["created"],
-                    }))
+                        stop_requested = True
+                    elif isinstance(message, bytes):
+                        chunk = decode_audio_frame(message)
+                        receipt = await asyncio.to_thread(
+                            self.content.record_capture_frame_receipt,
+                            session_id, generation=generation,
+                            connection_id=connection_id, chunk=chunk,
+                        )
+                        if receipt["created"]:
+                            try:
+                                await provider.append_audio(chunk.pcm16le)
+                            except Exception as exc:
+                                await asyncio.to_thread(
+                                    self.content.record_provider_append_uncertain,
+                                    session_id, generation=generation,
+                                    connection_id=connection_id, frame_sequence=chunk.sequence,
+                                )
+                                raise RealtimeSTTFailure(
+                                    "provider_append_unverified", "Provider audio append was not verified"
+                                ) from exc
+                        await connection.send(json.dumps({
+                            "type": "frame_received", "sequence": chunk.sequence,
+                            "created": receipt["created"],
+                        }))
+                    else:
+                        raise ServiceStoreError("audio_frame_invalid", "Invalid Capture message")
                 if event_task in done:
                     await handle_provider(event_task.result())
+                if stop_requested:
+                    if await settle_pause():
+                        await asyncio.to_thread(
+                            self.content.acknowledge_capture_transition,
+                            session_id, generation=generation, event="paused",
+                        )
+                        await connection.send(json.dumps({
+                            "type": "capture_paused", "generation": generation,
+                        }))
+                    break
                 turns = getattr(provider, "turns", None)
                 if (turns is not None
                         and self.stt_config.finalization_mode in {"bounded", "server_vad_bounded"}

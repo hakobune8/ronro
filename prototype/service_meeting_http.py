@@ -1,7 +1,9 @@
 """Loopback-only owner and live-display routes for Account Service v1.
 
 This is not a deployed Service entrypoint. It cannot accept audio or delete
-content. The content adapter rejects the ephemeral test registry unless
+content. The end route requires an already stopped Capture and only ticks
+Drain once; background supervision and active-audio stop remain separate.
+The content adapter rejects the ephemeral test registry unless
 explicitly opted in for synthetic tests.
 """
 
@@ -28,6 +30,7 @@ from .service_oidc import ServiceOidcClient
 _SESSION_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})(/canvas)?\Z")
 _PDF_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/final\.pdf\Z")
 _CAPTURE_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/capture\Z")
+_END_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/end\Z")
 _ISSUE_VIEW_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/view-credentials\Z")
 _REVOKE_VIEW_PATH = re.compile(
     r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/view-credentials/([0-9a-fA-F-]{36})\Z"
@@ -91,6 +94,29 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlsplit(self.path)
+        end = _END_PATH.fullmatch(parsed.path) if not parsed.query else None
+        if end is not None:
+            try:
+                owner = self._mutating_owner(require_empty_body=False)
+                payload = self._json_input(512)
+                if set(payload) != {"operation_key", "expected_version"}:
+                    raise ServiceStoreError("request_invalid", "End request fields invalid")
+                requested = self.content.request_finalizing(
+                    end.group(1), owner,
+                    operation_key=payload["operation_key"],
+                    expected_version=payload["expected_version"],
+                )
+                outcome = self.content.complete_drain_if_ready(end.group(1))
+                response = {"request": requested, "drain": outcome}
+                self._send(
+                    202 if outcome["state"] == "finalizing" else 200,
+                    json.dumps(response, separators=(",", ":")).encode("ascii"),
+                )
+            except ServiceStoreError as exc:
+                self._error(exc)
+            except Exception:
+                self._send(503, b'{"error":{"code":"service_unavailable"}}')
+            return
         capture = _CAPTURE_PATH.fullmatch(parsed.path) if not parsed.query else None
         if capture is not None:
             try:
@@ -224,7 +250,7 @@ def create_service_meeting_server(
     identity: ServiceIdentityStore, oidc: ServiceOidcClient,
     content: PostgresServiceStore, *, host: str = "127.0.0.1", port: int = 0,
 ) -> ThreadingHTTPServer:
-    """Compose auth and read-only routes; loopback is an enforced boundary."""
+    """Compose candidate owner/display routes; enforce loopback binding."""
 
     if host not in {"127.0.0.1", "::1"}:
         raise ValueError("Service meeting candidate may bind only to loopback")

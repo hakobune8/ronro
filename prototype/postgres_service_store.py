@@ -334,6 +334,30 @@ class PostgresServiceStore:
                 self._require_owner_locked(connection, session_id, owner_user_id)
             )
 
+    def capture_stream_tail(
+        self, session_id: str, *, generation: int, connection_id: str,
+    ) -> int:
+        """Verify the last accepted frame for a same-socket stop handshake."""
+
+        if type(generation) is not int or generation < 1 or not connection_id:
+            raise ServiceStoreError("audio_frame_invalid", "Invalid Capture stream identity")
+        digest = self.codec.blind_capture_connection_id(session_id, connection_id)
+        with self._transaction() as connection:
+            row = self._lock_session(connection, session_id)
+            if (row["service_state"] != "open" or row["capture_generation"] != generation
+                    or row["capture_state"] != "pausing"):
+                raise ServiceStoreError("capture_transition_invalid", "Capture is not pausing")
+            stream = connection.execute(
+                """SELECT connection_digest, last_sequence FROM service_capture_stream
+                   WHERE session_id = %s AND generation = %s""",
+                (session_id, generation),
+            ).fetchone()
+            if stream is None:
+                return -1
+            if bytes(stream["connection_digest"]) != digest:
+                raise ServiceStoreError("audio_connection_changed", "Capture connection changed")
+            return int(stream["last_sequence"])
+
     def request_capture_transition(
         self, session_id: str, owner_user_id: str, *, action: str,
         operation_key: str, expected_version: int,
@@ -485,6 +509,67 @@ class PostgresServiceStore:
             )
             return {"state": next_state, "generation": next_generation, "version": version}
 
+    def request_finalizing(
+        self, session_id: str, owner_user_id: str, *,
+        operation_key: str, expected_version: int,
+    ) -> dict[str, Any]:
+        """Fence intake after a confirmed pause or disconnected Capture.
+
+        A live socket has not acknowledged its last Browser frame merely
+        because an HTTP request arrived. Active Capture therefore must first
+        reach a safe stop protocol; this candidate refuses to guess.
+        """
+
+        if (not isinstance(operation_key, str) or not 1 <= len(operation_key) <= 128
+                or not operation_key.isascii() or not operation_key.isprintable()):
+            raise ServiceStoreError("capture_request_invalid", "Invalid end operation")
+        if type(expected_version) is not int or expected_version < 0:
+            raise ServiceStoreError("capture_version_invalid", "Invalid Session version")
+        with self._transaction() as connection:
+            row = self._require_owner_locked(connection, session_id, owner_user_id)
+            replay = self._replay_locked(connection, session_id)
+            prior = next(
+                (item for item in reversed(replay.events)
+                 if item["event_type"] == "session_finalizing"), None,
+            )
+            if prior is not None:
+                if prior.get("correlation_id") != operation_key:
+                    raise ServiceStoreError("operation_key_conflict", "End operation differs")
+                return {
+                    "state": str(row["service_state"] if row["service_state"] != "open"
+                                 else row["capture_state"]),
+                    "version": int(row["version"]),
+                    "graph_revision": int(row["graph_revision"]),
+                }
+            self._require_open(row)
+            if row["version"] != expected_version:
+                raise ServiceStoreError("version_mismatch", "Session version changed")
+            if row["capture_state"] not in {"paused", "reconnecting"}:
+                raise ServiceStoreError(
+                    "capture_transition_invalid", "Stop audio before ending the Session"
+                )
+            evidence_count = connection.execute(
+                """SELECT COALESCE(MAX(utterance_sequence), 0) AS value
+                   FROM service_evidence WHERE session_id = %s""",
+                (session_id,),
+            ).fetchone()["value"]
+            end_request = {
+                "event_id": str(uuid.uuid4()), "session_id": session_id,
+                "sequence": len(replay.events) + 1,
+                "event_type": "session_finalizing",
+                "occurred_at": dt.datetime.now(dt.timezone.utc).isoformat(
+                    timespec="milliseconds"
+                ).replace("+00:00", "Z"),
+                "actor": "system", "source_evidence_ids": [],
+                "correlation_id": operation_key,
+                "payload": {"last_evidence_sequence": int(evidence_count)},
+            }
+            result = self._append_locked(connection, session_id, [end_request])
+            return {
+                "state": "finalizing", "version": int(row["version"]) + 1,
+                "graph_revision": int(result.state["graph"]["revision"]),
+            }
+
     @staticmethod
     def _mark_capture_discontinuity_locked(
         connection: psycopg.Connection, session_id: str, row: dict[str, Any],
@@ -557,7 +642,7 @@ class PostgresServiceStore:
                 raise ServiceStoreError("capture_not_listening", "Capture is not accepting PCM")
             if generation != row["capture_generation"]:
                 raise ServiceStoreError("stale_capture_generation", "Capture generation changed")
-            if row["capture_state"] != "listening":
+            if row["capture_state"] not in {"listening", "pausing"}:
                 raise ServiceStoreError("capture_not_listening", "Capture is not accepting PCM")
             stream = connection.execute(
                 """SELECT * FROM service_capture_stream
@@ -646,7 +731,7 @@ class PostgresServiceStore:
         with self._transaction() as connection:
             row = self._lock_session(connection, session_id)
             if (row["service_state"] != "open" or row["capture_generation"] != generation
-                    or row["capture_state"] != "listening"):
+                    or row["capture_state"] not in {"listening", "pausing"}):
                 raise ServiceStoreError("stale_capture_generation", "Capture generation changed")
             stream = connection.execute(
                 """SELECT connection_digest, last_sequence FROM service_capture_stream
@@ -1313,58 +1398,133 @@ class PostgresServiceStore:
             result.presentation.update(delta)
             return result
 
+    def _finalize_locked(
+        self, connection: psycopg.Connection, session_id: str,
+        session: dict[str, Any], end_event: dict[str, Any], *, incomplete: bool,
+    ) -> int:
+        if session["service_state"] in {"ended", "ended_incomplete"}:
+            return int(session["final_revision"])
+        self._require_open(session)
+        if session["capture_state"] != "finalizing":
+            raise ServiceStoreError("session_not_finalizing", "Session has not stopped intake")
+        unresolved = connection.execute(
+            """SELECT COUNT(*) AS value FROM service_job
+               WHERE session_id = %s AND state != 'completed'""",
+            (session_id,),
+        ).fetchone()["value"]
+        if unresolved and not incomplete:
+            raise ServiceStoreError("unresolved_jobs", "Cannot claim complete Drain with unresolved Jobs")
+        unresolved_items = connection.execute(
+            """SELECT COUNT(*) AS value FROM service_provider_item
+               WHERE session_id = %s AND status != 'evidence_accepted'""",
+            (session_id,),
+        ).fetchone()["value"]
+        if unresolved_items and not incomplete:
+            raise ServiceStoreError(
+                "unresolved_provider_items", "Cannot claim complete Drain with unresolved Provider items"
+            )
+        capture_gaps = connection.execute(
+            """SELECT COUNT(*) AS value FROM service_capture_interval
+               WHERE session_id = %s AND kind = 'capture_unavailable'""",
+            (session_id,),
+        ).fetchone()["value"]
+        if capture_gaps and not incomplete:
+            raise ServiceStoreError(
+                "capture_incomplete", "Cannot claim complete Drain with possible audio loss"
+            )
+        if end_event.get("event_type") != "session_ended":
+            raise ServiceStoreError("end_event_invalid", "Finalization requires session_ended")
+        payload = end_event.get("payload", {})
+        if payload.get("final_graph_revision") != session["graph_revision"]:
+            raise ServiceStoreError("revision_mismatch", "End Event must name pre-end revision")
+        if (payload.get("drain_status") == "complete") == incomplete:
+            raise ServiceStoreError("drain_status_mismatch", "Drain status conflicts with unresolved state")
+        if bool(payload.get("pending_analysis")) != bool(unresolved):
+            raise ServiceStoreError("pending_analysis_mismatch", "End Event must reflect unresolved Jobs")
+        result = self._append_locked(connection, session_id, [end_event])
+        revision = int(result.state["graph"]["revision"])
+        connection.execute(
+            """UPDATE service_session SET service_state = %s,
+               capture_state = %s, final_revision = %s, version = version + 1,
+               ended_at = now(), expires_at = now() + interval '7 days'
+               WHERE session_id = %s""",
+            ("ended_incomplete" if incomplete else "ended",
+             "ended_incomplete" if incomplete else "ended", revision, session_id),
+        )
+        return revision
+
     def finalize(
         self, session_id: str, end_event: dict[str, Any], *, incomplete: bool = False
     ) -> int:
         with self._transaction() as connection:
             session = self._lock_session(connection, session_id)
-            if session["service_state"] != "open":
-                return int(session["final_revision"])
-            unresolved = connection.execute(
+            return self._finalize_locked(
+                connection, session_id, session, end_event, incomplete=incomplete,
+            )
+
+    def complete_drain_if_ready(
+        self, session_id: str, *, deadline_elapsed: bool = False,
+    ) -> dict[str, Any]:
+        """Trusted worker tick: freeze only when settled, or explicitly partial.
+
+        The caller decides the bounded drain deadline. This method never
+        infers that silence, an HTTP end request, or a timeout means complete.
+        """
+
+        if type(deadline_elapsed) is not bool:
+            raise ServiceStoreError("drain_request_invalid", "Invalid Drain deadline state")
+        with self._transaction() as connection:
+            session = self._lock_session(connection, session_id)
+            if session["service_state"] in {"ended", "ended_incomplete"}:
+                return {
+                    "state": str(session["service_state"]),
+                    "final_revision": int(session["final_revision"]),
+                }
+            self._require_open(session)
+            if session["capture_state"] != "finalizing":
+                raise ServiceStoreError("session_not_finalizing", "Session has not stopped intake")
+            pending_jobs = int(connection.execute(
                 """SELECT COUNT(*) AS value FROM service_job
                    WHERE session_id = %s AND state != 'completed'""",
                 (session_id,),
-            ).fetchone()["value"]
-            if unresolved and not incomplete:
-                raise ServiceStoreError("unresolved_jobs", "Cannot claim complete Drain with unresolved Jobs")
-            unresolved_items = connection.execute(
+            ).fetchone()["value"])
+            pending_items = int(connection.execute(
                 """SELECT COUNT(*) AS value FROM service_provider_item
                    WHERE session_id = %s AND status != 'evidence_accepted'""",
                 (session_id,),
-            ).fetchone()["value"]
-            if unresolved_items and not incomplete:
-                raise ServiceStoreError(
-                    "unresolved_provider_items", "Cannot claim complete Drain with unresolved Provider items"
-                )
-            capture_gaps = connection.execute(
+            ).fetchone()["value"])
+            if (pending_jobs or pending_items) and not deadline_elapsed:
+                return {"state": "finalizing", "pending_jobs": pending_jobs,
+                        "pending_items": pending_items}
+            gaps = int(connection.execute(
                 """SELECT COUNT(*) AS value FROM service_capture_interval
                    WHERE session_id = %s AND kind = 'capture_unavailable'""",
                 (session_id,),
-            ).fetchone()["value"]
-            if capture_gaps and not incomplete:
-                raise ServiceStoreError(
-                    "capture_incomplete", "Cannot claim complete Drain with possible audio loss"
-                )
-            if end_event.get("event_type") != "session_ended":
-                raise ServiceStoreError("end_event_invalid", "Finalization requires session_ended")
-            payload = end_event.get("payload", {})
-            if payload.get("final_graph_revision") != session["graph_revision"]:
-                raise ServiceStoreError("revision_mismatch", "End Event must name pre-end revision")
-            if (payload.get("drain_status") == "complete") == incomplete:
-                raise ServiceStoreError("drain_status_mismatch", "Drain status conflicts with unresolved state")
-            if bool(payload.get("pending_analysis")) != bool(unresolved):
-                raise ServiceStoreError("pending_analysis_mismatch", "End Event must reflect unresolved Jobs")
-            result = self._append_locked(connection, session_id, [end_event])
-            revision = int(result.state["graph"]["revision"])
-            connection.execute(
-                """UPDATE service_session SET service_state = %s,
-                   capture_state = %s, final_revision = %s, version = version + 1,
-                   ended_at = now(), expires_at = now() + interval '7 days'
+            ).fetchone()["value"])
+            incomplete = bool(pending_jobs or pending_items or gaps)
+            last_sequence = int(connection.execute(
+                """SELECT COALESCE(MAX(sequence), 0) AS value FROM service_event
                    WHERE session_id = %s""",
-                ("ended_incomplete" if incomplete else "ended",
-                 "ended_incomplete" if incomplete else "ended", revision, session_id),
+                (session_id,),
+            ).fetchone()["value"])
+            end_event = {
+                "event_id": str(uuid.uuid4()), "session_id": session_id,
+                "sequence": last_sequence + 1, "event_type": "session_ended",
+                "occurred_at": dt.datetime.now(dt.timezone.utc).isoformat(
+                    timespec="milliseconds"
+                ).replace("+00:00", "Z"),
+                "actor": "system", "source_evidence_ids": [],
+                "payload": {
+                    "drain_status": "partial" if incomplete else "complete",
+                    "final_graph_revision": int(session["graph_revision"]),
+                    "pending_analysis": bool(pending_jobs),
+                },
+            }
+            revision = self._finalize_locked(
+                connection, session_id, session, end_event, incomplete=incomplete,
             )
-            return revision
+            return {"state": "ended_incomplete" if incomplete else "ended",
+                    "final_revision": revision}
 
     def retention_deadline(self, session_id: str, owner_user_id: str) -> dt.datetime:
         """Read the accepted deadline for a verified owner; no deletion here."""

@@ -175,6 +175,10 @@ class ServiceAudioTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.session_id, self.owner, action="pause",
                 operation_key="synthetic-pause", expected_version=snapshot["version"],
             )
+            await socket.send(json.dumps({"type": "capture_stop", "last_sequence": 0}))
+            self.assertEqual(json.loads(await socket.recv()), {
+                "type": "capture_paused", "generation": 1,
+            })
             await asyncio.wait_for(socket.wait_closed(), timeout=3)
         self.assertEqual(self.content.capture_snapshot(self.session_id, self.owner)["state"], "paused")
 
@@ -190,6 +194,8 @@ class ServiceAudioTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.session_id, self.owner, action="pause",
                 operation_key="pause-once", expected_version=first["version"],
             )
+            await socket.send(json.dumps({"type": "capture_stop", "last_sequence": 0}))
+            self.assertEqual(json.loads(await socket.recv())["type"], "capture_paused")
             await asyncio.wait_for(socket.wait_closed(), timeout=3)
         paused = self.content.capture_snapshot(self.session_id, self.owner)
         self.assertEqual(paused["state"], "paused")
@@ -320,10 +326,65 @@ class ServiceAudioTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.session_id, self.owner, action="pause",
                 operation_key="pause-unresolved", expected_version=snapshot["version"],
             )
+            await socket.send(json.dumps({"type": "capture_stop", "last_sequence": 0}))
             await asyncio.wait_for(socket.wait_closed(), timeout=3)
         snapshot = self.content.capture_snapshot(self.session_id, self.owner)
         self.assertEqual(snapshot["state"], "reconnecting")
         self.assertEqual(snapshot["generation"], 2)
+
+    async def test_pause_without_verified_stop_cannot_become_paused(self):
+        async with await self._connect() as socket:
+            self.assertEqual(json.loads(await socket.recv())["type"], "capture_ready")
+            snapshot = self.content.capture_snapshot(self.session_id, self.owner)
+            self.content.request_capture_transition(
+                self.session_id, self.owner, action="pause",
+                operation_key="pause-without-stop", expected_version=snapshot["version"],
+            )
+            await asyncio.wait_for(socket.wait_closed(), timeout=3)
+        snapshot = self.content.capture_snapshot(self.session_id, self.owner)
+        self.assertEqual(snapshot["state"], "reconnecting")
+        with psycopg.connect(TEST_DSN) as connection:
+            count = connection.execute(
+                """SELECT COUNT(*) FROM service_capture_interval
+                   WHERE session_id = %s AND kind = 'capture_unavailable'""",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertGreaterEqual(count, 1)
+
+    async def test_pause_rejects_mismatched_last_frame_and_does_not_end_cleanly(self):
+        async with await self._connect() as socket:
+            self.assertEqual(json.loads(await socket.recv())["type"], "capture_ready")
+            await socket.send(encode_audio_frame(AudioChunk(0, 0.0, b"\x01\x00" * 2400)))
+            self.assertEqual(json.loads(await socket.recv())["type"], "frame_received")
+            self.assertEqual(json.loads(await socket.recv())["type"], "final_accepted")
+            snapshot = self.content.capture_snapshot(self.session_id, self.owner)
+            self.content.request_capture_transition(
+                self.session_id, self.owner, action="pause",
+                operation_key="pause-wrong-tail", expected_version=snapshot["version"],
+            )
+            await socket.send(json.dumps({"type": "capture_stop", "last_sequence": 1}))
+            await asyncio.wait_for(socket.wait_closed(), timeout=3)
+        self.assertEqual(self.content.capture_snapshot(self.session_id, self.owner)["state"],
+                         "reconnecting")
+
+    async def test_frames_queued_after_http_pause_are_accepted_before_stop_control(self):
+        async with await self._connect() as socket:
+            self.assertEqual(json.loads(await socket.recv())["type"], "capture_ready")
+            snapshot = self.content.capture_snapshot(self.session_id, self.owner)
+            self.content.request_capture_transition(
+                self.session_id, self.owner, action="pause",
+                operation_key="pause-before-last-frame", expected_version=snapshot["version"],
+            )
+            await socket.send(encode_audio_frame(AudioChunk(0, 0.0, b"\x01\x00" * 2400)))
+            await socket.send(json.dumps({"type": "capture_stop", "last_sequence": 0}))
+            received = [json.loads(await socket.recv()) for _ in range(3)]
+            self.assertEqual([item["type"] for item in received], [
+                "frame_received", "final_accepted", "capture_paused",
+            ])
+            await asyncio.wait_for(socket.wait_closed(), timeout=3)
+        self.assertEqual(self.content.capture_snapshot(self.session_id, self.owner)["state"],
+                         "paused")
+        self.assertEqual(len(self.content.replay(self.session_id).state["evidence"]), 1)
 
 
 if __name__ == "__main__":

@@ -522,6 +522,154 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.assertEqual(replay.state["session"]["status"], "ended")
         self.assertTrue(any(item["kind"] == "capture_unavailable" for item in intervals))
 
+    def test_final_revision_cannot_be_fixed_before_intake_stops(self):
+        premature = event(self.session_id, 3, "session_ended", {
+            "drain_status": "complete", "final_graph_revision": 2,
+            "pending_analysis": False,
+        })
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.finalize(self.session_id, premature)
+        self.assertEqual(caught.exception.code, "session_not_finalizing")
+        self.assertEqual(len(self.store.replay(self.session_id).events), 2)
+
+    def test_owner_end_waits_for_analyzer_then_freezes_one_revision(self):
+        self._final()
+        start = self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="begin-for-end", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=start["generation"], event="connected",
+        )
+        listening = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.request_finalizing(
+                self.session_id, "synthetic-owner", operation_key="end-once",
+                expected_version=listening["version"],
+            )
+        self.assertEqual(caught.exception.code, "capture_transition_invalid")
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="pause",
+            operation_key="pause-for-end", expected_version=listening["version"],
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=start["generation"], event="paused",
+        )
+        paused = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.request_finalizing(
+                self.session_id, "another-owner", operation_key="end-once",
+                expected_version=paused["version"],
+            )
+        self.assertEqual(caught.exception.code, "session_not_found")
+        requested = self.store.request_finalizing(
+            self.session_id, "synthetic-owner", operation_key="end-once",
+            expected_version=paused["version"],
+        )
+        self.assertEqual(requested["state"], "finalizing")
+        self.assertEqual(self.store.request_finalizing(
+            self.session_id, "synthetic-owner", operation_key="end-once",
+            expected_version=paused["version"],
+        ), requested)
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.request_finalizing(
+                self.session_id, "synthetic-owner", operation_key="different-end",
+                expected_version=paused["version"],
+            )
+        self.assertEqual(caught.exception.code, "operation_key_conflict")
+        waiting = self.store.complete_drain_if_ready(self.session_id)
+        self.assertEqual(waiting, {"state": "finalizing", "pending_jobs": 1,
+                                   "pending_items": 0})
+        ServiceAnalyzerWorker(self.store, LabelAnalyzer()).process_one(session_id=self.session_id)
+        completed = self.store.complete_drain_if_ready(self.session_id)
+        self.assertEqual(completed["state"], "ended")
+        self.assertEqual(self.store.complete_drain_if_ready(self.session_id), completed)
+        self.assertEqual(self.store.request_finalizing(
+            self.session_id, "synthetic-owner", operation_key="end-once",
+            expected_version=paused["version"],
+        )["state"], "ended")
+        replay = self.store.replay(self.session_id)
+        self.assertEqual(len([item for item in replay.events
+                              if item["event_type"] == "session_ended"]), 1)
+        self.assertEqual(replay.events[-1]["payload"]["drain_status"], "complete")
+        self.assertEqual(completed["final_revision"], replay.state["graph"]["revision"])
+
+    def test_reconnecting_end_preserves_gap_and_timeout_is_explicitly_partial(self):
+        self._received_audio_frames(count=1)
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="disconnected",
+        )
+        version = self.store.capture_snapshot(self.session_id, "synthetic-owner")["version"]
+        self.assertEqual(self.store.request_finalizing(
+            self.session_id, "synthetic-owner", operation_key="end-disconnected",
+            expected_version=version,
+        )["state"], "finalizing")
+        completed = self.store.complete_drain_if_ready(self.session_id)
+        self.assertEqual(completed["state"], "ended_incomplete")
+        self.assertEqual(self.store.replay(self.session_id).events[-1]["payload"]["drain_status"],
+                         "partial")
+
+    def test_unresolved_job_requires_explicit_deadline_for_partial_end(self):
+        self._final()
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="begin-timeout", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        listening = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="pause",
+            operation_key="pause-timeout", expected_version=listening["version"],
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="paused",
+        )
+        paused = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        self.store.request_finalizing(
+            self.session_id, "synthetic-owner", operation_key="end-timeout",
+            expected_version=paused["version"],
+        )
+        self.assertEqual(self.store.complete_drain_if_ready(self.session_id)["state"],
+                         "finalizing")
+        ended = self.store.complete_drain_if_ready(self.session_id, deadline_elapsed=True)
+        self.assertEqual(ended["state"], "ended_incomplete")
+        self.assertTrue(self.store.replay(self.session_id).events[-1]["payload"]["pending_analysis"])
+        self.assertIsNone(self.store.claim_job(session_id=self.session_id))
+
+    def test_unresolved_provider_item_blocks_complete_drain_until_deadline(self):
+        self._received_audio_frames(count=1)
+        strict = self._strict_provider_store()
+        self.assertEqual(strict.record_provider_commit(
+            self.session_id, connection_id="synthetic-provider-connection",
+            item_id="item-pending-end", event_id="commit-pending-end", generation=1,
+            frame_start=0, frame_end=0,
+            audio_start_seconds=0.0, audio_end_seconds=0.1,
+        ), "committed")
+        listening = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="pause",
+            operation_key="pause-pending-item", expected_version=listening["version"],
+        )
+        # This trusted Store acknowledgement simulates a recovered transport;
+        # the Gateway itself will not acknowledge a still-pending item.
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="paused",
+        )
+        paused = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        strict.request_finalizing(
+            self.session_id, "synthetic-owner", operation_key="end-pending-item",
+            expected_version=paused["version"],
+        )
+        self.assertEqual(strict.complete_drain_if_ready(self.session_id), {
+            "state": "finalizing", "pending_jobs": 0, "pending_items": 1,
+        })
+        ended = strict.complete_drain_if_ready(self.session_id, deadline_elapsed=True)
+        self.assertEqual(ended["state"], "ended_incomplete")
+        self.assertEqual(strict.replay(self.session_id).events[-1]["payload"]["drain_status"],
+                         "partial")
+
     def test_invalid_first_event_rolls_back_database_session(self):
         sid = f"test-invalid-{uuid.uuid4()}"
         self.created_sessions.append(sid)
