@@ -42,6 +42,7 @@ class PostgresServiceStore:
         key_registry: SessionKeyRegistry,
         *,
         allow_test_key_registry: bool = False,
+        require_provider_items: bool = True,
     ) -> None:
         if isinstance(key_registry, InMemoryTestKeyRegistry) and not allow_test_key_registry:
             raise ServiceStoreError("unsafe_key_registry", "Ephemeral keys cannot back a live service")
@@ -51,6 +52,22 @@ class PostgresServiceStore:
         self.runner = ReplayRunner(schema_validator)
         self.codec = SessionEnvelopeCodec(key_registry)
         self.key_registry = key_registry
+        self.require_provider_items = require_provider_items
+
+    def _provider_item_digest(
+        self, session_id: str, connection_id: str, item_id: str,
+    ) -> bytes:
+        identity = json.dumps(
+            [connection_id, item_id], ensure_ascii=False, separators=(",", ":")
+        )
+        return self.codec.blind_provider_item_id(session_id, identity)
+
+    def _provider_event_digest(
+        self, session_id: str, connection_id: str, event_id: str,
+    ) -> bytes:
+        return self.codec.blind_provider_item_id(
+            session_id, f"event:{connection_id}:{event_id}"
+        )
 
     @contextmanager
     def _transaction(self) -> Iterator[psycopg.Connection]:
@@ -625,6 +642,180 @@ class PostgresServiceStore:
                 (session_id, job_id, evidence["id"], contract_version),
             )
 
+    def record_provider_commit(
+        self, session_id: str, *, connection_id: str, item_id: str,
+        event_id: str, generation: int, frame_start: int | None,
+        frame_end: int | None, audio_start_seconds: float | None = None,
+        audio_end_seconds: float | None = None,
+        previous_item_id: str | None = None,
+    ) -> str:
+        """Bind a Provider item to a local range without claiming Evidence.
+
+        Unknown or unverified coverage is retained as an unresolved item.
+        Provider item IDs and event IDs are stored only as keyed digests.
+        """
+
+        if (not isinstance(connection_id, str) or not connection_id
+                or not isinstance(item_id, str) or not item_id
+                or not isinstance(event_id, str) or not event_id
+                or (previous_item_id is not None and (
+                    not isinstance(previous_item_id, str) or not previous_item_id))
+                or previous_item_id == item_id
+                or type(generation) is not int or generation < 1):
+            raise ServiceStoreError("provider_identity_invalid", "Provider commit identity is required")
+        if ((frame_start is None) != (frame_end is None)
+                or (frame_start is not None and (
+                    type(frame_start) is not int or type(frame_end) is not int
+                    or frame_start < 0 or frame_end < frame_start))):
+            raise ServiceStoreError("provider_frame_range_invalid", "Invalid Provider frame range")
+        if ((audio_start_seconds is None) != (audio_end_seconds is None)
+                or (audio_start_seconds is not None and (
+                    isinstance(audio_start_seconds, bool)
+                    or isinstance(audio_end_seconds, bool)
+                    or not isinstance(audio_start_seconds, (int, float))
+                    or not isinstance(audio_end_seconds, (int, float))
+                    or not math.isfinite(audio_start_seconds)
+                    or not math.isfinite(audio_end_seconds)
+                    or audio_start_seconds < 0
+                    or audio_end_seconds < audio_start_seconds))):
+            raise ServiceStoreError("provider_audio_range_invalid", "Invalid Provider audio range")
+        digest = self._provider_item_digest(session_id, connection_id, item_id)
+        connection_digest = self.codec.blind_capture_connection_id(session_id, connection_id)
+        commit_digest = self._provider_event_digest(session_id, connection_id, event_id)
+        previous_digest = (
+            self._provider_item_digest(session_id, connection_id, previous_item_id)
+            if previous_item_id else None
+        )
+        with self._transaction() as connection:
+            session = self._lock_session(connection, session_id)
+            self._require_open(session)
+            stream = connection.execute(
+                """SELECT last_sequence, accepted_samples FROM service_capture_stream
+                   WHERE session_id = %s AND generation = %s""",
+                (session_id, generation),
+            ).fetchone()
+            coverage_known = (
+                stream is not None and frame_start is not None
+                and frame_end <= stream["last_sequence"]
+                and audio_start_seconds is not None
+                and audio_end_seconds * 24000 <= stream["accepted_samples"] + 1
+            )
+            existing = connection.execute(
+                """SELECT * FROM service_provider_item
+                   WHERE session_id = %s AND item_digest = %s FOR UPDATE""",
+                (session_id, digest),
+            ).fetchone()
+            if existing is not None and existing["committed_event_digest"] is not None:
+                if (bytes(existing["committed_event_digest"]) != commit_digest
+                        or existing["generation"] != generation
+                        or existing["frame_start"] != frame_start
+                        or existing["frame_end"] != frame_end
+                        or existing["audio_start_seconds"] != audio_start_seconds
+                        or existing["audio_end_seconds"] != audio_end_seconds
+                        or (bytes(existing["previous_item_digest"])
+                            if existing["previous_item_digest"] is not None else None)
+                            != previous_digest):
+                    raise ServiceStoreError("provider_commit_conflict", "Provider item commit changed")
+                return str(existing["status"])
+            completed_length = existing["transcript_length"] if existing else None
+            status = (
+                "coverage_unknown" if not coverage_known else
+                "committed" if completed_length is None else
+                "empty" if completed_length == 0 else "transcribed"
+            )
+            if existing is None:
+                connection.execute(
+                    """INSERT INTO service_provider_item
+                       (session_id, item_digest, provider_connection_digest, generation,
+                        committed_event_digest, previous_item_digest, frame_start, frame_end,
+                        audio_start_seconds, audio_end_seconds, status)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (session_id, digest, connection_digest, generation,
+                     commit_digest, previous_digest, frame_start, frame_end,
+                     audio_start_seconds, audio_end_seconds, status),
+                )
+            else:
+                connection.execute(
+                    """UPDATE service_provider_item SET generation = %s,
+                       committed_event_digest = %s, previous_item_digest = %s,
+                       frame_start = %s, frame_end = %s,
+                       audio_start_seconds = %s, audio_end_seconds = %s, status = %s
+                       WHERE session_id = %s AND item_digest = %s""",
+                    (generation, commit_digest, previous_digest, frame_start,
+                     frame_end, audio_start_seconds, audio_end_seconds, status,
+                     session_id, digest),
+                )
+            return status
+
+    def record_provider_completion(
+        self, session_id: str, *, connection_id: str, item_id: str,
+        event_id: str, transcript: str,
+    ) -> str:
+        """Record item-specific completion without storing transcript text."""
+
+        if (not isinstance(connection_id, str) or not connection_id
+                or not isinstance(item_id, str) or not item_id
+                or not isinstance(event_id, str) or not event_id
+                or not isinstance(transcript, str)):
+            raise ServiceStoreError("provider_completion_invalid", "Invalid Provider completion")
+        transcript_length = len(transcript.strip())
+        transcript_digest = self.codec.blind_provider_transcript(session_id, transcript)
+        digest = self._provider_item_digest(session_id, connection_id, item_id)
+        event_digest = self._provider_event_digest(session_id, connection_id, event_id)
+        connection_digest = self.codec.blind_capture_connection_id(session_id, connection_id)
+        with self._transaction() as connection:
+            session = self._lock_session(connection, session_id)
+            self._require_open(session)
+            existing = connection.execute(
+                """SELECT * FROM service_provider_item
+                   WHERE session_id = %s AND item_digest = %s FOR UPDATE""",
+                (session_id, digest),
+            ).fetchone()
+            if existing is None:
+                connection.execute(
+                    """INSERT INTO service_provider_item
+                       (session_id, item_digest, provider_connection_digest,
+                        completed_event_digest, transcript_length, transcript_digest,
+                        status, completed_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, 'unmatched_completion', now())""",
+                    (session_id, digest, connection_digest, event_digest,
+                     transcript_length, transcript_digest),
+                )
+                return "unmatched_completion"
+            if existing["completed_event_digest"] is not None:
+                if (bytes(existing["completed_event_digest"]) != event_digest
+                        or existing["transcript_length"] != transcript_length
+                        or bytes(existing["transcript_digest"]) != transcript_digest):
+                    raise ServiceStoreError("provider_completion_conflict", "Provider item completed twice")
+                return str(existing["status"])
+            status = (
+                "coverage_unknown" if existing["status"] == "coverage_unknown"
+                else "empty" if transcript_length == 0 else "transcribed"
+            )
+            connection.execute(
+                """UPDATE service_provider_item SET completed_event_digest = %s,
+                   transcript_length = %s, transcript_digest = %s,
+                   status = %s, completed_at = now()
+                   WHERE session_id = %s AND item_digest = %s""",
+                (event_digest, transcript_length, transcript_digest,
+                 status, session_id, digest),
+            )
+            return status
+
+    def provider_item_status(
+        self, session_id: str, *, connection_id: str, item_id: str,
+    ) -> str:
+        digest = self._provider_item_digest(session_id, connection_id, item_id)
+        with self._transaction() as connection:
+            row = connection.execute(
+                """SELECT status FROM service_provider_item
+                   WHERE session_id = %s AND item_digest = %s""",
+                (session_id, digest),
+            ).fetchone()
+        if row is None:
+            raise ServiceStoreError("provider_item_not_found", "Provider item not found")
+        return str(row["status"])
+
     def accept_provider_final(
         self,
         session_id: str,
@@ -656,16 +847,23 @@ class PostgresServiceStore:
             raise ServiceStoreError("final_invalid", "Final transcript and normalization are required")
         raw_text = raw_text.strip()
         normalized_text = normalized_text.strip()
-        provider_identity = json.dumps(
-            [audio_connection_id, provider_item_id], ensure_ascii=False, separators=(",", ":")
+        digest = self._provider_item_digest(
+            session_id, audio_connection_id, provider_item_id
         )
-        digest = self.codec.blind_provider_item_id(session_id, provider_identity)
         suffix = digest.hex()
         evidence_id = f"service-evidence:{suffix}"
         utterance_id = f"service-utterance:{suffix}"
         job_id = f"service-job:{suffix}"
         with self._transaction() as connection:
             session = self._lock_session(connection, session_id)
+            item = connection.execute(
+                """SELECT status, evidence_id, previous_item_digest, transcript_digest
+                   FROM service_provider_item
+                   WHERE session_id = %s AND item_digest = %s FOR UPDATE""",
+                (session_id, digest),
+            ).fetchone()
+            if self.require_provider_items and item is None:
+                raise ServiceStoreError("provider_item_untracked", "Provider item lifecycle is missing")
             existing = connection.execute(
                 """SELECT e.evidence_id, e.utterance_sequence, e.evidence_cipher,
                           e.utterance_cipher, j.job_id, j.contract_version
@@ -685,6 +883,11 @@ class PostgresServiceStore:
                         or prior_utterance["text"] != normalized_text
                         or existing["contract_version"] != contract_version):
                     raise ServiceStoreError("duplicate_final", "Provider item has conflicting Evidence")
+                if self.require_provider_items and (
+                    item["status"] != "evidence_accepted"
+                    or item["evidence_id"] != existing["evidence_id"]
+                ):
+                    raise ServiceStoreError("provider_item_unresolved", "Provider item and Evidence disagree")
                 return {
                     "evidence_id": existing["evidence_id"],
                     "utterance_id": prior_utterance["id"],
@@ -693,8 +896,24 @@ class PostgresServiceStore:
                     "created": False,
                 }
             self._require_open(session)
-            if session["intake_closed"]:
-                raise ServiceStoreError("session_finalizing", "Cannot accept new Final after intake stopped")
+            if item is not None and item["status"] != "transcribed":
+                raise ServiceStoreError("provider_item_unresolved", "Provider item is not safely transcribed")
+            if item is not None and bytes(item["transcript_digest"]) != (
+                self.codec.blind_provider_transcript(session_id, raw_text)
+            ):
+                raise ServiceStoreError("provider_transcript_mismatch", "Final does not match completed item")
+            if item is not None and item["previous_item_digest"] is not None:
+                predecessor = connection.execute(
+                    """SELECT status FROM service_provider_item
+                       WHERE session_id = %s AND item_digest = %s""",
+                    (session_id, item["previous_item_digest"]),
+                ).fetchone()
+                if predecessor is None or predecessor["status"] != "evidence_accepted":
+                    raise ServiceStoreError(
+                        "provider_predecessor_pending", "Earlier Provider item is unresolved"
+                    )
+            if session["intake_closed"] and item is None:
+                raise ServiceStoreError("session_finalizing", "Untracked Final after intake stopped")
             latest = connection.execute(
                 """SELECT sequence, event_cipher FROM service_event
                    WHERE session_id = %s ORDER BY sequence DESC LIMIT 1""",
@@ -705,8 +924,6 @@ class PostgresServiceStore:
             latest_event = self.codec.decrypt_json(
                 session_id, "event", str(latest["sequence"]), latest["event_cipher"]
             )
-            if latest_event["event_type"] == "session_finalizing":
-                raise ServiceStoreError("session_finalizing", "Cannot accept new Final after intake stopped")
             if latest_event["event_type"] == "session_created":
                 raise ServiceStoreError("session_not_started", "Canonical Session is not active")
             last = connection.execute(
@@ -740,6 +957,13 @@ class PostgresServiceStore:
                    VALUES (%s, %s, %s, %s)""",
                 (session_id, job_id, evidence_id, contract_version),
             )
+            if item is not None:
+                connection.execute(
+                    """UPDATE service_provider_item
+                       SET status = 'evidence_accepted', evidence_id = %s
+                       WHERE session_id = %s AND item_digest = %s""",
+                    (evidence_id, session_id, digest),
+                )
             return {
                 "evidence_id": evidence_id, "utterance_id": utterance_id,
                 "job_id": job_id, "sequence": sequence, "created": True,
@@ -1007,6 +1231,15 @@ class PostgresServiceStore:
             ).fetchone()["value"]
             if unresolved and not incomplete:
                 raise ServiceStoreError("unresolved_jobs", "Cannot claim complete Drain with unresolved Jobs")
+            unresolved_items = connection.execute(
+                """SELECT COUNT(*) AS value FROM service_provider_item
+                   WHERE session_id = %s AND status != 'evidence_accepted'""",
+                (session_id,),
+            ).fetchone()["value"]
+            if unresolved_items and not incomplete:
+                raise ServiceStoreError(
+                    "unresolved_provider_items", "Cannot claim complete Drain with unresolved Provider items"
+                )
             if end_event.get("event_type") != "session_ended":
                 raise ServiceStoreError("end_event_invalid", "Finalization requires session_ended")
             payload = end_event.get("payload", {})

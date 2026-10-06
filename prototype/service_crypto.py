@@ -107,6 +107,15 @@ class SessionEnvelopeCodec:
             hashlib.sha256,
         )
 
+    def blind_provider_transcript(self, session_id: str, transcript: str) -> bytes:
+        """Bind a completed transcript without persisting its plaintext here."""
+        return hmac.digest(
+            self.registry.get_key(session_id),
+            self._aad(session_id, "provider-transcript", "content")
+            + transcript.strip().encode("utf-8"),
+            hashlib.sha256,
+        )
+
     def blind_capture_connection_id(self, session_id: str, connection_id: str) -> bytes:
         if not connection_id:
             raise ServiceCryptoError("capture_connection_invalid")

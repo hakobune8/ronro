@@ -36,6 +36,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.registry = InMemoryTestKeyRegistry()
         self.store = PostgresServiceStore(
             TEST_DSN, self.validator, self.registry, allow_test_key_registry=True,
+            require_provider_items=False,
         )
         self.store.migrate()
         self.store.create_session(self.session_id, "synthetic-owner")
@@ -58,6 +59,28 @@ class PostgresServiceStoreTests(unittest.TestCase):
             contract_version="v1", provider_item_id=provider_item_id,
         )
         return evidence, utterance
+
+    def _strict_provider_store(self):
+        return PostgresServiceStore(
+            TEST_DSN, self.validator, self.registry,
+            allow_test_key_registry=True, require_provider_items=True,
+        )
+
+    def _received_audio_frames(self, count=2):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-1", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        for sequence in range(count):
+            self.store.record_capture_frame_receipt(
+                self.session_id, generation=1,
+                connection_id="synthetic-browser-connection",
+                chunk=AudioChunk(sequence, sequence / 10,
+                                 b"\x01\x00" * 2400),
+            )
 
     def test_encrypted_rows_and_reopen_replay(self):
         evidence, utterance = self._final()
@@ -370,6 +393,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
             "0001_account_service.sql", "0002_final_intake_fence.sql",
             "0003_fair_claim_clock.sql", "0004_view_credentials.sql",
             "0005_capture_transitions.sql", "0006_capture_frame_receipts.sql",
+            "0007_provider_item_lifecycle.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 
@@ -410,6 +434,169 @@ class PostgresServiceStoreTests(unittest.TestCase):
                 (self.session_id,),
             ).fetchone()[0]
         self.assertNotIn(b"item-1", bytes(digest))
+
+    def test_provider_items_order_finals_by_item_not_completion_arrival(self):
+        self._received_audio_frames()
+        strict = self._strict_provider_store()
+        for item_id, frame, previous in (("item-a", 0, None), ("item-b", 1, "item-a")):
+            self.assertEqual(strict.record_provider_commit(
+                self.session_id, connection_id="synthetic-provider-connection",
+                item_id=item_id, event_id=f"commit-{item_id}", generation=1,
+                frame_start=frame, frame_end=frame,
+                audio_start_seconds=frame / 10,
+                audio_end_seconds=(frame + 1) / 10,
+                previous_item_id=previous,
+            ), "committed")
+        self.assertEqual(strict.record_provider_completion(
+            self.session_id, connection_id="synthetic-provider-connection",
+            item_id="item-b", event_id="complete-b", transcript="後の発話",
+        ), "transcribed")
+        self.assertEqual(strict.record_provider_completion(
+            self.session_id, connection_id="synthetic-provider-connection",
+            item_id="item-a", event_id="complete-a", transcript="先の発話",
+        ), "transcribed")
+        with self.assertRaises(ServiceStoreError) as caught:
+            strict.accept_provider_final(
+                self.session_id, audio_connection_id="synthetic-provider-connection",
+                provider_item_id="item-b", raw_text="後の発話", normalized_text="後の発話",
+                contract_version="v1",
+            )
+        self.assertEqual(caught.exception.code, "provider_predecessor_pending")
+        accepted_a = strict.accept_provider_final(
+            self.session_id, audio_connection_id="synthetic-provider-connection",
+            provider_item_id="item-a", raw_text="先の発話", normalized_text="先の発話",
+            contract_version="v1",
+        )
+        self.store.append_events(self.session_id, [event(
+            self.session_id, 3, "session_finalizing", {"last_evidence_sequence": 1},
+        )])
+        accepted_b = strict.accept_provider_final(
+            self.session_id, audio_connection_id="synthetic-provider-connection",
+            provider_item_id="item-b", raw_text="後の発話", normalized_text="後の発話",
+            contract_version="v1",
+        )
+        self.assertEqual((accepted_a["sequence"], accepted_b["sequence"]), (1, 2))
+        self.assertEqual(strict.provider_item_status(
+            self.session_id, connection_id="synthetic-provider-connection",
+            item_id="item-b",
+        ), "evidence_accepted")
+        with psycopg.connect(TEST_DSN) as connection:
+            rows = connection.execute(
+                """SELECT item_digest, provider_connection_digest,
+                          committed_event_digest, completed_event_digest
+                   FROM service_provider_item WHERE session_id = %s""",
+                (self.session_id,),
+            ).fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(b"item-" not in bytes(blob) for row in rows
+                            for blob in row if blob is not None))
+
+    def test_provider_completion_before_commit_remains_unresolved_until_correlated(self):
+        self._received_audio_frames(count=1)
+        strict = self._strict_provider_store()
+        self.assertEqual(strict.record_provider_completion(
+            self.session_id, connection_id="synthetic-provider-connection",
+            item_id="item-late", event_id="complete-late", transcript="合成発話",
+        ), "unmatched_completion")
+        with self.assertRaises(ServiceStoreError) as caught:
+            strict.accept_provider_final(
+                self.session_id, audio_connection_id="synthetic-provider-connection",
+                provider_item_id="item-late", raw_text="合成発話", normalized_text="合成発話",
+                contract_version="v1",
+            )
+        self.assertEqual(caught.exception.code, "provider_item_unresolved")
+        self.assertEqual(strict.record_provider_commit(
+            self.session_id, connection_id="synthetic-provider-connection",
+            item_id="item-late", event_id="commit-late", generation=1,
+            frame_start=0, frame_end=0,
+            audio_start_seconds=0.0, audio_end_seconds=0.1,
+        ), "transcribed")
+        accepted = strict.accept_provider_final(
+            self.session_id, audio_connection_id="synthetic-provider-connection",
+            provider_item_id="item-late", raw_text="合成発話", normalized_text="合成発話",
+            contract_version="v1",
+        )
+        self.assertTrue(accepted["created"])
+
+    def test_provider_completion_digest_prevents_wrong_final_or_conflicting_retry(self):
+        self._received_audio_frames(count=1)
+        strict = self._strict_provider_store()
+        args = {
+            "session_id": self.session_id,
+            "connection_id": "synthetic-provider-connection",
+            "item_id": "item-a",
+        }
+        strict.record_provider_commit(
+            **args, event_id="commit-a", generation=1,
+            frame_start=0, frame_end=0,
+            audio_start_seconds=0.0, audio_end_seconds=0.1,
+        )
+        self.assertEqual(strict.record_provider_completion(
+            **args, event_id="complete-a", transcript="確定した発話",
+        ), "transcribed")
+        self.assertEqual(strict.record_provider_completion(
+            **args, event_id="complete-a", transcript="確定した発話",
+        ), "transcribed")
+        with self.assertRaises(ServiceStoreError) as caught:
+            strict.record_provider_completion(
+                **args, event_id="complete-a", transcript="別の発話文",
+            )
+        self.assertEqual(caught.exception.code, "provider_completion_conflict")
+        with self.assertRaises(ServiceStoreError) as caught:
+            strict.accept_provider_final(
+                self.session_id, audio_connection_id=args["connection_id"],
+                provider_item_id=args["item_id"], raw_text="別の発話文",
+                normalized_text="別の発話文", contract_version="v1",
+            )
+        self.assertEqual(caught.exception.code, "provider_transcript_mismatch")
+        accepted = strict.accept_provider_final(
+            self.session_id, audio_connection_id=args["connection_id"],
+            provider_item_id=args["item_id"], raw_text="確定した発話",
+            normalized_text="確定した発話", contract_version="v1",
+        )
+        self.assertTrue(accepted["created"])
+
+    def test_empty_or_unknown_provider_item_blocks_complete_drain(self):
+        self._received_audio_frames(count=1)
+        strict = self._strict_provider_store()
+        self.assertEqual(strict.record_provider_commit(
+            self.session_id, connection_id="synthetic-provider-connection",
+            item_id="item-empty", event_id="commit-empty", generation=1,
+            frame_start=0, frame_end=0,
+            audio_start_seconds=0.0, audio_end_seconds=0.1,
+        ), "committed")
+        self.assertEqual(strict.record_provider_completion(
+            self.session_id, connection_id="synthetic-provider-connection",
+            item_id="item-empty", event_id="complete-empty", transcript="",
+        ), "empty")
+        self.assertEqual(strict.record_provider_commit(
+            self.session_id, connection_id="synthetic-provider-connection",
+            item_id="item-unknown", event_id="commit-unknown", generation=1,
+            frame_start=None, frame_end=None,
+        ), "coverage_unknown")
+        self.assertEqual(strict.record_provider_completion(
+            self.session_id, connection_id="synthetic-provider-connection",
+            item_id="item-unknown", event_id="complete-unknown", transcript="範囲不明",
+        ), "coverage_unknown")
+        with self.assertRaises(ServiceStoreError) as caught:
+            strict.accept_provider_final(
+                self.session_id, audio_connection_id="synthetic-provider-connection",
+                provider_item_id="item-unknown", raw_text="範囲不明", normalized_text="範囲不明",
+                contract_version="v1",
+            )
+        self.assertEqual(caught.exception.code, "provider_item_unresolved")
+        self.store.append_events(self.session_id, [event(
+            self.session_id, 3, "session_finalizing", {"last_evidence_sequence": 0},
+        )])
+        ending = event(self.session_id, 4, "session_ended", {
+            "drain_status": "partial", "final_graph_revision": 3,
+            "pending_analysis": False,
+        })
+        with self.assertRaises(ServiceStoreError) as caught:
+            strict.finalize(self.session_id, ending, incomplete=False)
+        self.assertEqual(caught.exception.code, "unresolved_provider_items")
+        self.assertEqual(strict.finalize(self.session_id, ending, incomplete=True), 4)
+        self.assertEqual(len(strict.replay(self.session_id).state["evidence"]), 0)
 
     def test_parallel_provider_finals_get_distinct_contiguous_sequences(self):
         barrier = threading.Barrier(2)
