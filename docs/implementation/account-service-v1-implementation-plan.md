@@ -65,7 +65,7 @@ P1の保存方式検証とP5の鍵/削除試験は一つの設計依存として
 | P2 | 所有者照合とSession限定・短命・取消可能なShared View表示資格をDB境界で検証。 | OIDC基盤の選定と実認証、API/WSS接続、CSRF/Origin、退会・失効、評価API隔離の統合試験。表示資格はまだ公開経路へ接続しない。 |
 | P3 | Service Captureの永続状態、操作Key/CAS、接続generation、休憩区間と取込み不能区間の区別、フレーム受理台帳・連番/時刻断絶検知、終了時のCapture fenceを合成データで検証。Provider item別のcommit/completion/Final照合、逆順完了、未知範囲・空完了による完全Drain拒否を合成データで検証。 | 実WSS/Providerとの接続、Provider appendの受領証明とlocal frame範囲の確定、未知範囲の欠落判定、Pod/Provider障害復旧とDrainのEnd-to-End。 |
 | P4 | Session間の公平Job claimと、PostgreSQL advisory lockによる原子的な新規Session Admissionを合成データで検証。 | 4会議×2時間超、実運用での容量計測、配備更新・rollback。 |
-| P5 | Session別暗号化の基礎、終了受理時の`ended_at`と7日後`expires_at`の原子記録、期限欠落Sessionの検出を合成データで検証。 | PDF、所有者削除／退会、期限到来処理、鍵破棄、全保存先照合、バックアップ復元不能性。期限記録だけでは削除を保証しない。 |
+| P5 | Session別暗号化の基礎、終了受理時の`ended_at`と7日後`expires_at`の原子記録、期限欠落Sessionの検出を合成データで検証。所有者照合済み固定revisionの読出し、同じCanvas座標に基づく印刷用概要とCanonical詳細のPDFを合成データで生成・描画検証。 | 認証済みHTTP配信、非公開PDF保存、所有者削除／退会、期限到来処理、鍵破棄、全保存先照合、バックアップ復元不能性。PDF生成・期限記録だけではサービス公開や削除を保証しない。 |
 | P6 | 各段階の安全テストを継続。 | 監視/Alert/Runbook、承認監査、脅威レビュー、Human/負荷/Pilot受入れ。 |
 
 この表は実装済み範囲と未達ゲートを分けるためのもの。未達の段階を完了と解釈しない。

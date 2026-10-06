@@ -15,6 +15,7 @@ import psycopg
 from prototype.postgres_service_store import PostgresServiceStore
 from prototype.service_analyzer_worker import ServiceAnalyzerWorker
 from prototype.service_final_ingest import ServiceFinalIngestor
+from prototype.service_final_record import prepare_final_record, render_final_pdf
 from prototype.schema import SchemaValidator
 from prototype.service_crypto import InMemoryTestKeyRegistry, ServiceCryptoError
 from prototype.service_errors import ServiceStoreError
@@ -299,6 +300,31 @@ class PostgresServiceStoreTests(unittest.TestCase):
         with self.assertRaises(ServiceStoreError) as caught:
             self.store.retention_deadline(self.session_id, "synthetic-owner")
         self.assertEqual(caught.exception.code, "retention_deadline_missing")
+
+    def test_owner_only_fixed_final_record_source(self):
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.load_owner_final_record_source(self.session_id, "synthetic-owner")
+        self.assertEqual(caught.exception.code, "session_not_ended")
+        self.store.append_events(self.session_id, [event(
+            self.session_id, 3, "session_finalizing", {"last_evidence_sequence": 0},
+        )])
+        self.store.finalize(self.session_id, event(
+            self.session_id, 4, "session_ended",
+            {"drain_status": "complete", "final_graph_revision": 3,
+             "pending_analysis": False},
+        ))
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.load_owner_final_record_source(self.session_id, "different-owner")
+        self.assertEqual(caught.exception.code, "session_not_found")
+        replay, revision, intervals = self.store.load_owner_final_record_source(
+            self.session_id, "synthetic-owner",
+        )
+        self.assertEqual((revision, intervals), (4, []))
+        record = prepare_final_record(
+            replay, final_revision=revision, capture_intervals=intervals,
+            schema_validator=self.validator,
+        )
+        self.assertTrue(render_final_pdf(record).startswith(b"%PDF-"))
 
     def test_open_session_and_first_event_are_one_database_transaction(self):
         sid = f"test-open-{uuid.uuid4()}"

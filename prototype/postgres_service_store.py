@@ -1272,6 +1272,37 @@ class PostgresServiceStore:
                 raise ServiceStoreError("retention_deadline_missing", "Ended Session has no deadline")
             return row["expires_at"]
 
+    def load_owner_final_record_source(
+        self, session_id: str, owner_user_id: str,
+    ) -> tuple[ReplayResult, int, list[dict[str, Any]]]:
+        """Authorize a fixed final revision before offline PDF rendering.
+
+        This does not issue a URL, persist a PDF, or expose a public route.
+        The caller must keep returned content private and enforce no-store.
+        """
+
+        with self._transaction() as connection:
+            row = self._require_owner_locked(connection, session_id, owner_user_id)
+            if row["service_state"] not in {"ended", "ended_incomplete"}:
+                raise ServiceStoreError("session_not_ended", "Final record is not available")
+            if row["final_revision"] is None or row["final_revision"] != row["graph_revision"]:
+                raise ServiceStoreError("final_revision_mismatch", "Session final revision is inconsistent")
+            replay = self._replay_locked(connection, session_id)
+            if replay.state["graph"]["revision"] != row["final_revision"]:
+                raise ServiceStoreError("replay_mismatch", "Final Event stream differs from Session")
+            intervals = connection.execute(
+                """SELECT kind, opened_at, closed_at FROM service_capture_interval
+                   WHERE session_id = %s ORDER BY interval_id""",
+                (session_id,),
+            ).fetchall()
+            safe_intervals = [
+                {"kind": str(item["kind"]),
+                 "opened_at": item["opened_at"].isoformat() if item["opened_at"] else None,
+                 "closed_at": item["closed_at"].isoformat() if item["closed_at"] else None}
+                for item in intervals
+            ]
+            return replay, int(row["final_revision"]), safe_intervals
+
     def count_ended_sessions_missing_expiry(self) -> int:
         """Expose legacy/malformed rows that must not be silently retained."""
 
