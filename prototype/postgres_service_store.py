@@ -1931,13 +1931,17 @@ class PostgresServiceStore:
             )
 
     def begin_due_deletion(self) -> str | None:
-        """Fence one ended Session at its DB-clock seven-day expiry."""
+        """Fence one ended Session before its DB-clock seven-day deadline.
+
+        The guard band allows key deletion retries before retention expires.
+        It is not evidence that an external Key Registry has destroyed keys.
+        """
 
         with self._transaction() as connection:
             row = connection.execute(
                 """SELECT * FROM service_session
                    WHERE service_state IN ('ended', 'ended_incomplete')
-                     AND expires_at <= now()
+                     AND expires_at <= now() + interval '15 minutes'
                    ORDER BY expires_at, session_id
                    LIMIT 1 FOR UPDATE SKIP LOCKED""",
             ).fetchone()

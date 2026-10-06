@@ -16,6 +16,7 @@ from prototype.postgres_service_store import PostgresServiceStore
 from prototype.service_analyzer_worker import ServiceAnalyzerWorker
 from prototype.service_drain_supervisor import ServiceDrainSupervisor
 from prototype.service_deletion_worker import ServiceDeletionWorker
+from prototype.service_observability import collect_service_counters, service_alert_codes
 from prototype.service_final_ingest import ServiceFinalIngestor
 from prototype.service_realtime_items import ServiceRealtimeItemIngestor
 from prototype.service_final_record import prepare_final_record, render_final_pdf
@@ -469,6 +470,62 @@ class PostgresServiceStoreTests(unittest.TestCase):
                 (self.session_id,),
             ).fetchone()[0]
         self.assertEqual(remaining, 0)
+
+    def test_deletion_begins_before_retention_deadline(self):
+        self._begin_supervised_drain(self.session_id, "early-delete")
+        self.assertEqual(self.store.complete_drain_if_ready(self.session_id)["state"], "ended")
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                """UPDATE service_session SET expires_at = now() + interval '10 minutes'
+                   WHERE session_id = %s""", (self.session_id,),
+            )
+        self.assertEqual(ServiceDeletionWorker(self.store).process_one()["state"], "purged")
+
+    def test_content_free_counters_flag_retention_and_retry(self):
+        self._begin_supervised_drain(self.session_id, "observe")
+        self.assertEqual(self.store.complete_drain_if_ready(self.session_id)["state"], "ended")
+        baseline = collect_service_counters(TEST_DSN)
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                """UPDATE service_session SET expires_at = now() + interval '9 minutes'
+                   WHERE session_id = %s""", (self.session_id,),
+            )
+        due = collect_service_counters(TEST_DSN)
+        self.assertEqual(due["retention_due_unfenced"],
+                         baseline["retention_due_unfenced"] + 1)
+        self.assertIn("retention_due_unfenced", service_alert_codes(due))
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                """UPDATE service_session SET expires_at = now() - interval '1 second'
+                   WHERE session_id = %s""", (self.session_id,),
+            )
+        expired = collect_service_counters(TEST_DSN)
+        self.assertEqual(expired["retention_overdue"], baseline["retention_overdue"] + 1)
+        self.assertIn("retention_deadline_breached", service_alert_codes(expired))
+        original_delete = self.registry.delete_key
+        def unverified(_session_id):
+            raise ServiceCryptoError("key_deletion_unverified")
+        self.registry.delete_key = unverified
+        try:
+            with self.assertRaises(ServiceCryptoError):
+                ServiceDeletionWorker(self.store).process_one()
+        finally:
+            self.registry.delete_key = original_delete
+        retrying = collect_service_counters(TEST_DSN)
+        self.assertEqual(retrying["deletion_retrying"], baseline["deletion_retrying"] + 1)
+        self.assertIn("deletion_retry_pending", service_alert_codes(retrying))
+        self.assertTrue(all(type(value) is int for value in retrying.values()))
+        self.assertNotIn(self.session_id, str(retrying))
+        self.assertNotIn("synthetic-owner", str(retrying))
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                """UPDATE service_deletion_job
+                   SET created_at = now() - interval '6 minutes'
+                   WHERE session_id = %s""", (self.session_id,),
+            )
+        stalled = collect_service_counters(TEST_DSN)
+        self.assertEqual(stalled["deletion_stalled"], baseline["deletion_stalled"] + 1)
+        self.assertIn("deletion_job_stalled", service_alert_codes(stalled))
 
     def test_capture_lease_is_cross_store_and_expiry_fences_old_audio(self):
         self.store.request_capture_transition(
