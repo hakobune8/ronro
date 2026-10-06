@@ -152,6 +152,17 @@ class ServiceMeetingHttpTests(unittest.TestCase):
             self.assertEqual(self._request(
                 f"{path}/{session_id}", cookie=self.other_cookie,
             )[0], 404)
+            start_status, _, start_body = self._request(
+                f"{path}/{session_id}/capture", method="POST",
+                cookie=self.owner_cookie, origin=origin, csrf=self.owner_csrf,
+                content_type="application/json", body=json.dumps({
+                    "action": "start", "operation_key": "http-first-start",
+                    "expected_version": 0,
+                }).encode(),
+            )
+            self.assertEqual(start_status, 202)
+            self.assertEqual(json.loads(start_body)["state"], "resuming")
+            self.assertEqual(self.content.replay(session_id).state["session"]["status"], "active")
         status, _, body = request(cookie=self.owner_cookie, csrf=self.owner_csrf)
         self.assertEqual(status, 429)
         self.assertEqual(json.loads(body)["error"]["code"], "capacity_unavailable")

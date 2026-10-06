@@ -15,6 +15,7 @@ import psycopg
 from prototype.postgres_service_store import PostgresServiceStore
 from prototype.service_analyzer_worker import ServiceAnalyzerWorker
 from prototype.service_final_ingest import ServiceFinalIngestor
+from prototype.service_realtime_items import ServiceRealtimeItemIngestor
 from prototype.service_final_record import prepare_final_record, render_final_pdf
 from prototype.schema import SchemaValidator
 from prototype.service_crypto import InMemoryTestKeyRegistry, ServiceCryptoError
@@ -212,6 +213,79 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.assertEqual(len(replay.state["evidence"]), 1)
         self.assertEqual(len(replay.state["graph"]["nodes"]), 1)
         self.assertEqual(reopened.job_state(self.session_id, first["job_id"]), "completed")
+
+    def test_realtime_item_bridge_accepts_only_received_frame_coverage(self):
+        self._received_audio_frames(count=2)
+        strict = self._strict_provider_store()
+        bridge = ServiceRealtimeItemIngestor(
+            strict, session_id=self.session_id, generation=1,
+            audio_connection_id="synthetic-browser-connection", contract_version="v1",
+        )
+        turn = {"range_known": True, "frame_start": 0, "frame_end": 1,
+                "audio_start": 0.0, "audio_end": 0.2}
+        self.assertEqual(bridge.process({
+            "type": "provider_item_committed", "item_id": "synthetic-item",
+            "event_id": "synthetic-commit", "_turn": turn,
+        })["status"], "committed")
+        accepted = bridge.process({
+            "type": "final_transcript",
+            "raw_type": "conversation.item.input_audio_transcription.completed",
+            "item_id": "synthetic-item", "event_id": "synthetic-completion",
+            "text": "合成の案を検討する", "_turn": turn,
+        })
+        self.assertTrue(accepted["created"])
+        self.assertEqual(len(strict.replay(self.session_id).state["evidence"]), 1)
+        self.assertFalse(bridge.process({
+            "type": "final_transcript",
+            "raw_type": "conversation.item.input_audio_transcription.completed",
+            "item_id": "synthetic-item", "event_id": "synthetic-completion",
+            "text": "合成の案を検討する", "_turn": turn,
+        })["created"])
+
+    def test_initial_capture_start_atomically_starts_canonical_session(self):
+        new_id = f"test-{uuid.uuid4()}"
+        self.created_sessions.append(new_id)
+        self.store.open_session(
+            new_id, "synthetic-owner",
+            event(new_id, 1, "session_created", {"title": "合成会議", "goal": "検討"}),
+        )
+        self.assertEqual(self.store.replay(new_id).state["session"]["status"], "created")
+        started = self.store.request_capture_transition(
+            new_id, "synthetic-owner", action="start",
+            operation_key="first-start", expected_version=0,
+        )
+        self.assertEqual(started["state"], "resuming")
+        replayed = self.store.replay(new_id)
+        self.assertEqual(replayed.state["session"]["status"], "active")
+        self.assertEqual([e["event_type"] for e in replayed.events], [
+            "session_created", "session_started",
+        ])
+        self.assertEqual(self.store.request_capture_transition(
+            new_id, "synthetic-owner", action="start",
+            operation_key="first-start", expected_version=0,
+        ), started)
+        self.assertEqual(len(self.store.replay(new_id).events), 2)
+
+    def test_realtime_bridge_keeps_unverified_audio_unresolved(self):
+        self._received_audio_frames(count=1)
+        strict = self._strict_provider_store()
+        bridge = ServiceRealtimeItemIngestor(
+            strict, session_id=self.session_id, generation=1,
+            audio_connection_id="synthetic-browser-connection", contract_version="v1",
+        )
+        unknown = {"range_known": False}
+        self.assertEqual(bridge.process({
+            "type": "provider_item_committed", "item_id": "uncertain-item",
+            "event_id": "uncertain-commit", "_turn": unknown,
+        })["status"], "coverage_unknown")
+        with self.assertRaises(ServiceStoreError):
+            bridge.process({
+                "type": "final_transcript",
+                "raw_type": "conversation.item.input_audio_transcription.completed",
+                "item_id": "uncertain-item", "event_id": "uncertain-completed",
+                "text": "合成の発話", "_turn": unknown,
+            })
+        self.assertEqual(len(strict.replay(self.session_id).state["evidence"]), 0)
 
     def test_invalid_presentation_hint_does_not_commit_node_or_job(self):
         evidence, _ = self._final()

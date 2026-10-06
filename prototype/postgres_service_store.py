@@ -375,6 +375,24 @@ class PostgresServiceStore:
             next_state = transitions.get((row["capture_state"], action))
             if next_state is None:
                 raise ServiceStoreError("capture_transition_invalid", "Capture transition is not allowed")
+            if action == "start":
+                canonical = self._replay_locked(connection, session_id)
+                status = canonical.state["session"]["status"]
+                if status == "created":
+                    started = {
+                        "event_id": str(uuid.uuid4()), "session_id": session_id,
+                        "sequence": len(canonical.events) + 1,
+                        "event_type": "session_started",
+                        "occurred_at": dt.datetime.now(dt.timezone.utc).isoformat(
+                            timespec="milliseconds"
+                        ).replace("+00:00", "Z"),
+                        "actor": "system", "source_evidence_ids": [], "payload": {},
+                    }
+                    self._append_locked(connection, session_id, [started])
+                elif status != "active":
+                    raise ServiceStoreError(
+                        "capture_transition_invalid", "Canonical Session cannot start"
+                    )
             generation = int(row["capture_generation"]) + (action in {"start", "resume"})
             if action == "resume":
                 connection.execute(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from dataclasses import replace
 from unittest.mock import patch
@@ -8,6 +9,7 @@ from prototype.live_stt import (
     DEFAULT_KEYWORDS,
     DEFAULT_STT_PROMPT,
     DEFAULT_STT_MODEL,
+    OpenAIRealtimeTranscriptionClient,
     RealtimeSTTConfig,
     adapt_realtime_event,
     build_append_event,
@@ -95,6 +97,40 @@ class LiveSTTAdapterTests(unittest.TestCase):
         self.assertEqual(event["item_id"], "item-1")
         self.assertEqual(event["transcript_id"], "transcript-1")
         self.assertEqual(event["commit_id"], "commit-1")
+
+    def test_committed_event_exposes_only_item_correlation_metadata(self) -> None:
+        event = adapt_realtime_event({
+            "type": "input_audio_buffer.committed", "event_id": "evt-commit",
+            "item_id": "item-1", "previous_item_id": "item-before",
+            "untrusted_private_payload": "must-not-cross",
+        })
+        self.assertEqual(event, {
+            "type": "provider_item_committed", "event_id": "evt-commit",
+            "item_id": "item-1", "previous_item_id": "item-before",
+            "raw_type": "input_audio_buffer.committed",
+        })
+
+    def test_committed_event_carries_local_audio_range_after_turn_correlation(self) -> None:
+        class SyntheticSocket:
+            async def recv(self):
+                return json.dumps({
+                    "type": "input_audio_buffer.committed", "event_id": "evt-commit",
+                    "item_id": "item-1",
+                })
+
+        async def exercise():
+            client = OpenAIRealtimeTranscriptionClient(self.config)
+            client._connection = SyntheticSocket()
+            client.turns.append(b"\x01\x00" * 2400)
+            client.turns.request(1, "bounded_fallback", "local-commit")
+            return await client.receive_event()
+
+        import asyncio
+        event = asyncio.run(exercise())
+        self.assertEqual(event["type"], "provider_item_committed")
+        self.assertEqual(event["_turn"]["frame_start"], 0)
+        self.assertEqual(event["_turn"]["frame_end"], 0)
+        self.assertEqual(event["_turn"]["audio_end"], 0.1)
 
     def test_partial_event_is_runtime_only(self) -> None:
         value = adapt_realtime_event({
