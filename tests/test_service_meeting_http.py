@@ -302,6 +302,10 @@ class ServiceMeetingHttpTests(unittest.TestCase):
         self.assertEqual(status, 202)
         self.assertEqual(json.loads(body), {"state": "deleting"})
         self.assertEqual(self._request(
+            path, method="DELETE", cookie=self.owner_cookie, origin=origin,
+            csrf=self.owner_csrf,
+        )[0], 202)
+        self.assertEqual(self._request(
             f"{path}/canvas", cookie=self.owner_cookie,
         )[0], 410)
         self.assertEqual(ServiceDeletionWorker(self.content).process_one()["state"],

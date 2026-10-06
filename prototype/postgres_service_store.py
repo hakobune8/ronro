@@ -203,6 +203,7 @@ class PostgresServiceStore:
 
     def _require_owner_locked(
         self, connection: psycopg.Connection, session_id: str, owner_user_id: str,
+        *, allow_deleting: bool = False,
     ) -> dict[str, Any]:
         """Authenticate an internal owner ID without revealing another Session."""
 
@@ -223,7 +224,7 @@ class PostgresServiceStore:
             stored_owner, owner_user_id
         ):
             raise ServiceStoreError("session_not_found", "Session not found")
-        if row["service_state"] == "deleting":
+        if row["service_state"] == "deleting" and not allow_deleting:
             raise ServiceStoreError("session_deleted", "Session is no longer available")
         return row
 
@@ -1912,7 +1913,9 @@ class PostgresServiceStore:
         """Immediately revoke a meeting, then let a trusted worker destroy it."""
 
         with self._transaction() as connection:
-            row = self._require_owner_locked(connection, session_id, owner_user_id)
+            row = self._require_owner_locked(
+                connection, session_id, owner_user_id, allow_deleting=True,
+            )
             self._begin_deletion_locked(
                 connection, session_id, row, reason="owner_requested",
             )

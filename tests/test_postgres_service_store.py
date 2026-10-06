@@ -367,6 +367,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
             self.session_id, "synthetic-owner",
         )
         self.store.begin_owner_deletion(self.session_id, "synthetic-owner")
+        self.store.begin_owner_deletion(self.session_id, "synthetic-owner")
         with self.assertRaises(ServiceStoreError) as owner:
             self.store.authorize_owner_session(self.session_id, "synthetic-owner")
         self.assertEqual(owner.exception.code, "session_deleted")
