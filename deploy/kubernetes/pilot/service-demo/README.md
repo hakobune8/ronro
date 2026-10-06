@@ -9,8 +9,8 @@ the old evaluation/audio PVC or a backup. The existing Pilot PVC is not
 deleted by these manifests.
 
 The new Deployment is installed and checked for local readiness first. Then
-change the existing `ronro-pilot` Service selector to `ronro-service-demo`
-using the repository's `deploy/kubernetes/base/service.yaml` and run the
+change only the existing `ronro-pilot` Service selector to
+`ronro-service-demo` (retain its NodePort type and port numbers) and run the
 real-browser login/audio smoke through the fixed public OIDC callback. If that
 smoke fails, restore the old selector. The edge NodePorts and `/live` path
 remain unchanged. After a passing smoke, scale the old Deployment down; do

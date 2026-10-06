@@ -32,7 +32,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ronro
-          image: ghcr.io/hakobune8/ronro:v0.1.1-account-service-demo-rc1
+          image: ghcr.io/hakobune8/ronro@sha256:e432c380356e650a768d52a459f751cfabce643edb6c3acd76c7f0413659a5c3
           imagePullPolicy: IfNotPresent
           command: ["python", "-m", "prototype.service_pilot_demo"]
           ports:
