@@ -1,14 +1,16 @@
-"""Loopback-only owner and live-display read routes for Account Service v1.
+"""Loopback-only owner and live-display routes for Account Service v1.
 
-This is not a deployed Service entrypoint. In particular it cannot create a
-meeting, accept audio, or delete content. The content adapter rejects the
-ephemeral test registry unless explicitly opted in for synthetic tests.
+This is not a deployed Service entrypoint. It cannot accept audio or delete
+content. The content adapter rejects the ephemeral test registry unless
+explicitly opted in for synthetic tests.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
+import uuid
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -33,10 +35,11 @@ _BEARER = re.compile(r"Bearer ([A-Za-z0-9_-]{32,128})\Z", re.ASCII)
 class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
     content: PostgresServiceStore
 
-    def _mutating_owner(self) -> str:
+    def _mutating_owner(self, *, require_empty_body: bool = True) -> str:
         if self.headers.get("Authorization") is not None:
             raise ServiceStoreError("session_not_found", "Session not found")
-        if self.headers.get("Transfer-Encoding") is not None or self.headers.get("Content-Length") not in (None, "0"):
+        if (self.headers.get("Transfer-Encoding") is not None or
+                (require_empty_body and self.headers.get("Content-Length") not in (None, "0"))):
             raise ServiceStoreError("request_invalid", "Unexpected request body")
         return self.identity.authenticate_mutation(
             token=_cookie_value(self.headers.get("Cookie"), COOKIE_NAME),
@@ -44,8 +47,51 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
             csrf_token=self.headers.get("X-Ronro-CSRF"),
         )
 
+    def _new_session_input(self) -> tuple[str | None, str | None]:
+        if self.headers.get("Content-Type") != "application/json":
+            raise ServiceStoreError("request_invalid", "JSON content type required")
+        length = self.headers.get("Content-Length")
+        if (length is None or len(length) > 5 or not length.isascii()
+                or not length.isdecimal()):
+            raise ServiceStoreError("request_invalid", "Request length invalid")
+        size = int(length)
+        if not 2 <= size <= 4096:
+            raise ServiceStoreError("request_invalid", "Request length invalid")
+        try:
+            payload = json.loads(self.rfile.read(size).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ServiceStoreError("request_invalid", "Invalid JSON") from exc
+        if not isinstance(payload, dict) or set(payload) != {"title", "goal"}:
+            raise ServiceStoreError("request_invalid", "Session fields invalid")
+        for value in payload.values():
+            if value is not None and (not isinstance(value, str) or len(value) > 256):
+                raise ServiceStoreError("request_invalid", "Session field invalid")
+        return payload["title"], payload["goal"]
+
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlsplit(self.path)
+        if parsed.path == "/api/service/sessions" and not parsed.query:
+            try:
+                owner = self._mutating_owner(require_empty_body=False)
+                title, goal = self._new_session_input()
+                session_id = str(uuid.uuid4())
+                created = {
+                    "event_id": str(uuid.uuid4()), "session_id": session_id,
+                    "sequence": 1, "event_type": "session_created",
+                    "occurred_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "actor": "system", "source_evidence_ids": [],
+                    "payload": {"title": title, "goal": goal},
+                }
+                replay = self.content.open_session(session_id, owner, created)
+                self._send(201, json.dumps({
+                    "session_id": session_id,
+                    "graph_revision": replay.state["graph"]["revision"],
+                }, separators=(",", ":")).encode("ascii"))
+            except ServiceStoreError as exc:
+                self._error(exc)
+            except Exception:
+                self._send(503, b'{"error":{"code":"service_unavailable"}}')
+            return
         matched = _ISSUE_VIEW_PATH.fullmatch(parsed.path) if not parsed.query else None
         if matched is None:
             super().do_POST()

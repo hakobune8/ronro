@@ -104,7 +104,7 @@ class ServiceMeetingHttpTests(unittest.TestCase):
         return session_id
 
     def _request(self, path, *, method="GET", cookie=None, authorization=None,
-                 origin=None, csrf=None, body=None):
+                 origin=None, csrf=None, body=None, content_type=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
         headers = {}
         if cookie is not None:
@@ -115,11 +115,44 @@ class ServiceMeetingHttpTests(unittest.TestCase):
             headers["Origin"] = origin
         if csrf is not None:
             headers["X-Ronro-CSRF"] = csrf
+        if content_type is not None:
+            headers["Content-Type"] = content_type
         connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         result = response.status, dict(response.getheaders()), response.read()
         connection.close()
         return result
+
+    def test_owner_can_create_only_own_session_with_csrf_and_capacity_gate(self):
+        path = "/api/service/sessions"
+        origin = "https://ronro.example.test"
+        payload = json.dumps({"title": "合成の新会議", "goal": "安全を検討"}).encode()
+        def request(*, cookie=None, csrf=None, body=payload, content_type="application/json"):
+            return self._request(
+                path, method="POST", cookie=cookie, origin=origin, csrf=csrf,
+                body=body, content_type=content_type,
+            )
+        self.assertEqual(request()[0], 401)
+        self.assertEqual(request(cookie=self.owner_cookie)[0], 403)
+        self.assertEqual(request(cookie=self.owner_cookie, csrf=self.owner_csrf,
+                                 content_type="text/plain")[0], 400)
+        self.assertEqual(request(cookie=self.owner_cookie, csrf=self.owner_csrf,
+                                 body=b"not-json")[0], 400)
+        for _ in range(2):
+            status, headers, body = request(cookie=self.owner_cookie, csrf=self.owner_csrf)
+            self.assertEqual(status, 201)
+            self.assertEqual(headers["Cache-Control"], "no-store")
+            created = json.loads(body)
+            self.assertEqual(created["graph_revision"], 1)
+            session_id = created["session_id"]
+            self.sessions.append(session_id)
+            self.assertEqual(self.content.owner_user_id(session_id), self.owner)
+            self.assertEqual(self._request(
+                f"{path}/{session_id}", cookie=self.other_cookie,
+            )[0], 404)
+        status, _, body = request(cookie=self.owner_cookie, csrf=self.owner_csrf)
+        self.assertEqual(status, 429)
+        self.assertEqual(json.loads(body)["error"]["code"], "capacity_unavailable")
 
     def _analyzed_node(self):
         evidence, utterance = final(self.session_id, 1)
