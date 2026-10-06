@@ -32,7 +32,8 @@ class ServiceCandidateRuntime:
     ) -> None:
         allowed_hosts = {"127.0.0.1", "::1"}
         if allow_pilot_network_bind and demo_html is not None:
-            allowed_hosts.add("0.0.0.0")
+            # Only the explicitly enabled, authenticated private Pilot route.
+            allowed_hosts.add("0.0.0.0")  # nosec B104
         if http_host not in allowed_hosts or audio_host not in allowed_hosts:
             raise ValueError("Service candidate may bind only to loopback")
         self.identity = identity

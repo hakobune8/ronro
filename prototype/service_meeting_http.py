@@ -320,8 +320,11 @@ def create_service_meeting_server(
 ) -> ThreadingHTTPServer:
     """Compose candidate owner/display routes; enforce loopback binding."""
 
-    if host not in ({"127.0.0.1", "::1", "0.0.0.0"} if allow_pilot_network_bind and demo_html is not None
-                    else {"127.0.0.1", "::1"}):
+    pilot_host = "0.0.0.0"  # nosec B104 - explicitly gated private Pilot demo
+    allowed_hosts = {"127.0.0.1", "::1"}
+    if allow_pilot_network_bind and demo_html is not None:
+        allowed_hosts.add(pilot_host)
+    if host not in allowed_hosts:
         raise ValueError("Service meeting candidate may bind only to loopback")
     handler = type(
         "BoundServiceMeetingRequestHandler", (ServiceMeetingRequestHandler,),

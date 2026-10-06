@@ -109,10 +109,11 @@ async def run() -> None:
     workers = ServiceWorkerSupervisor.from_service_components(
         store=store, identity=identity, analyzers=[analyzer],
     )
+    pilot_host = "0.0.0.0"  # nosec B104 - isolated private Pilot deployment only
     runtime = ServiceCandidateRuntime(
         identity=identity, oidc=oidc, content=store, gateway=gateway,
-        workers=workers, http_host="0.0.0.0", http_port=8000,
-        audio_host="0.0.0.0", audio_port=8765,
+        workers=workers, http_host=pilot_host, http_port=8000,
+        audio_host=pilot_host, audio_port=8765,
         allow_pilot_network_bind=True,
         demo_html=(WEB / "service-demo.html").read_bytes(),
         demo_worklet=(WEB / "live-audio-worklet.js").read_bytes(),
