@@ -138,6 +138,8 @@ class ServiceMeetingHttpTests(unittest.TestCase):
                                  content_type="text/plain")[0], 400)
         self.assertEqual(request(cookie=self.owner_cookie, csrf=self.owner_csrf,
                                  body=b"not-json")[0], 400)
+        self.assertEqual(request(cookie=self.owner_cookie, csrf=self.owner_csrf,
+                                 body=b'{"title":"A","title":"B","goal":"C"}')[0], 400)
         for _ in range(2):
             status, headers, body = request(cookie=self.owner_cookie, csrf=self.owner_csrf)
             self.assertEqual(status, 201)

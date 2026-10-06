@@ -36,6 +36,15 @@ _BEARER = re.compile(r"Bearer ([A-Za-z0-9_-]{32,128})\Z", re.ASCII)
 class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
     content: PostgresServiceStore
 
+    @staticmethod
+    def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+        value: dict = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("Duplicate JSON key")
+            value[key] = item
+        return value
+
     def _mutating_owner(self, *, require_empty_body: bool = True) -> str:
         if self.headers.get("Authorization") is not None:
             raise ServiceStoreError("session_not_found", "Session not found")
@@ -68,8 +77,11 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
         if not 2 <= size <= maximum_bytes:
             raise ServiceStoreError("request_invalid", "Request length invalid")
         try:
-            payload = json.loads(self.rfile.read(size).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            payload = json.loads(
+                self.rfile.read(size).decode("utf-8"),
+                object_pairs_hook=self._unique_json_object,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             raise ServiceStoreError("request_invalid", "Invalid JSON") from exc
         if not isinstance(payload, dict):
             raise ServiceStoreError("request_invalid", "JSON object required")
