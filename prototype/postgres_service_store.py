@@ -445,6 +445,7 @@ class PostgresServiceStore:
                 ("pausing", "paused"): "paused",
                 ("listening", "disconnected"): "reconnecting",
                 ("resuming", "disconnected"): "reconnecting",
+                ("pausing", "disconnected"): "reconnecting",
             }
             next_state = next_states.get((state, event))
             if next_state is None:
@@ -628,6 +629,37 @@ class PostgresServiceStore:
                 return {"sequence": chunk.sequence, "created": True,
                         "accepted_samples": samples}
         raise ServiceStoreError(failure_code, "PCM discontinuity requires reconnect")
+
+    def record_provider_append_uncertain(
+        self, session_id: str, *, generation: int, connection_id: str,
+        frame_sequence: int,
+    ) -> None:
+        """Fence a received frame whose Provider append failed or is uncertain.
+
+        The frame receipt alone does not prove STT intake. Keep the possible
+        gap explicit and advance the Capture generation before retrying.
+        """
+
+        if type(generation) is not int or generation < 1 or type(frame_sequence) is not int or frame_sequence < 0:
+            raise ServiceStoreError("audio_frame_invalid", "Invalid frame identity")
+        digest = self.codec.blind_capture_connection_id(session_id, connection_id)
+        with self._transaction() as connection:
+            row = self._lock_session(connection, session_id)
+            if (row["service_state"] != "open" or row["capture_generation"] != generation
+                    or row["capture_state"] != "listening"):
+                raise ServiceStoreError("stale_capture_generation", "Capture generation changed")
+            stream = connection.execute(
+                """SELECT connection_digest, last_sequence FROM service_capture_stream
+                   WHERE session_id = %s AND generation = %s FOR UPDATE""",
+                (session_id, generation),
+            ).fetchone()
+            if (stream is None or bytes(stream["connection_digest"]) != digest
+                    or frame_sequence > stream["last_sequence"]):
+                raise ServiceStoreError("audio_frame_invalid", "Frame receipt is missing")
+            self._mark_capture_discontinuity_locked(
+                connection, session_id, row, "provider_append_unverified",
+                frame_sequence, frame_sequence,
+            )
 
     def accept_final(
         self,
