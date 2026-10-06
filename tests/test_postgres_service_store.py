@@ -252,6 +252,31 @@ class PostgresServiceStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ServiceStoreError, "cannot back a live"):
             PostgresServiceStore(TEST_DSN, self.validator, self.registry)
 
+    def test_open_session_and_first_event_are_one_database_transaction(self):
+        sid = f"test-open-{uuid.uuid4()}"
+        self.created_sessions.append(sid)
+        created = event(
+            sid, 1, "session_created", {"title": "新しい合成会議", "goal": "検討"},
+        )
+        result = self.store.open_session(sid, "synthetic-owner", created)
+        self.assertEqual(result.state["graph"]["revision"], 1)
+        reopened = PostgresServiceStore(
+            TEST_DSN, self.validator, self.registry, allow_test_key_registry=True,
+        )
+        self.assertEqual(reopened.replay(sid).events[0], created)
+
+    def test_invalid_first_event_rolls_back_database_session(self):
+        sid = f"test-invalid-{uuid.uuid4()}"
+        self.created_sessions.append(sid)
+        invalid = event(sid, 1, "session_created", {"title": "合成会議"})
+        with self.assertRaises(Exception):
+            self.store.open_session(sid, "synthetic-owner", invalid)
+        with self.assertRaisesRegex(ServiceStoreError, "not found"):
+            self.store.replay(sid)
+        # Key creation precedes the content-DB transaction. Its orphan is
+        # deliberately retained until a reconciler can prove the DB outcome.
+        self.assertEqual(len(self.registry.get_key(sid)), 32)
+
     def test_migration_is_versioned_and_repeatable(self):
         self.store.migrate()
         with psycopg.connect(TEST_DSN) as connection:

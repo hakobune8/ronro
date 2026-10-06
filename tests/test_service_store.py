@@ -80,6 +80,22 @@ class ServiceStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ServiceStoreError, "not a production"):
             SqliteServiceStore(self.path, self.validator)
 
+    def test_open_session_atomically_accepts_first_canonical_event(self):
+        created = event(
+            "s-new", 1, "session_created", {"title": "新しい合成会議", "goal": "検討"},
+        )
+        result = self.store.open_session("s-new", b"opaque-owner", created)
+        self.assertEqual(result.state["graph"]["revision"], 1)
+        reopened = SqliteServiceStore(self.path, self.validator, synthetic_data_only=True)
+        self.assertEqual(reopened.replay("s-new").events[0], created)
+
+    def test_invalid_first_event_rolls_back_session(self):
+        invalid = event("s-invalid", 1, "session_created", {"title": "合成会議"})
+        with self.assertRaises(Exception):
+            self.store.open_session("s-invalid", b"opaque-owner", invalid)
+        with self.assertRaisesRegex(ServiceStoreError, "not found"):
+            self.store.replay("s-invalid")
+
     def test_failed_job_can_retry_without_accepting_old_attempt(self):
         self._accept_first_final()
         first = self.store.claim_job(session_id="s-one", now=100)

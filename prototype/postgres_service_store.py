@@ -117,6 +117,31 @@ class PostgresServiceStore:
                 (session_id, owner_cipher),
             )
 
+    def open_session(
+        self, session_id: str, owner_user_id: str, created_event: dict[str, Any],
+    ) -> ReplayResult:
+        """Atomically establish owner, Session, and first Canonical Event.
+
+        The external Key Registry is a separate system. If the DB transaction
+        fails or its outcome is uncertain, the key is retained for later
+        reconciliation rather than destroyed speculatively.
+        """
+
+        if not session_id or not owner_user_id:
+            raise ServiceStoreError("session_invalid", "Session and owner are required")
+        if (created_event.get("session_id") != session_id
+                or created_event.get("event_type") != "session_created"
+                or created_event.get("sequence") != 1):
+            raise ServiceStoreError("created_event_invalid", "First Event must create this Session")
+        self.key_registry.create_key(session_id)
+        owner_cipher = self.codec.encrypt_json(session_id, "owner", session_id, owner_user_id)
+        with self._transaction() as connection:
+            connection.execute(
+                "INSERT INTO service_session (session_id, owner_cipher) VALUES (%s, %s)",
+                (session_id, owner_cipher),
+            )
+            return self._append_locked(connection, session_id, [created_event])
+
     def owner_user_id(self, session_id: str) -> str:
         with self._transaction() as connection:
             row = connection.execute(

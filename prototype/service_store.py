@@ -155,6 +155,22 @@ class SqliteServiceStore:
                 (session_id, owner_opaque),
             )
 
+    def open_session(
+        self, session_id: str, owner_opaque: bytes, created_event: dict[str, Any],
+    ) -> ReplayResult:
+        if not session_id or not owner_opaque:
+            raise ServiceStoreError("session_invalid", "Session ID and opaque owner are required")
+        if (created_event.get("session_id") != session_id
+                or created_event.get("event_type") != "session_created"
+                or created_event.get("sequence") != 1):
+            raise ServiceStoreError("created_event_invalid", "First Event must create this Session")
+        with self._transaction() as connection:
+            connection.execute(
+                "INSERT INTO service_session(session_id, owner_opaque) VALUES (?, ?)",
+                (session_id, owner_opaque),
+            )
+            return self._append_locked(connection, session_id, [created_event])
+
     def accept_final(
         self,
         session_id: str,
