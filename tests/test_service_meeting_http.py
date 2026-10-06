@@ -154,6 +154,47 @@ class ServiceMeetingHttpTests(unittest.TestCase):
         self.assertEqual(status, 429)
         self.assertEqual(json.loads(body)["error"]["code"], "capacity_unavailable")
 
+    def test_capture_requests_remain_owner_scoped_and_transport_ack_is_separate(self):
+        path = f"/api/service/sessions/{self.session_id}/capture"
+        origin = "https://ronro.example.test"
+        def request(action, operation_key, expected_version, *, cookie=None, csrf=None):
+            return self._request(
+                path, method="POST", cookie=cookie, origin=origin, csrf=csrf,
+                content_type="application/json", body=json.dumps({
+                    "action": action, "operation_key": operation_key,
+                    "expected_version": expected_version,
+                }).encode(),
+            )
+        self.assertEqual(request("start", "start-1", 0)[0], 401)
+        self.assertEqual(request("start", "start-1", 0,
+                                 cookie=self.owner_cookie)[0], 403)
+        self.assertEqual(request("start", "start-1", 0,
+                                 cookie=self.other_cookie, csrf=self.other_csrf)[0], 404)
+        status, _, body = request("start", "start-1", 0,
+                                  cookie=self.owner_cookie, csrf=self.owner_csrf)
+        self.assertEqual(status, 202)
+        started = json.loads(body)
+        self.assertEqual(started, {"state": "resuming", "generation": 1, "version": 1})
+        self.assertEqual(self.content.capture_snapshot(self.session_id, self.owner)["state"],
+                         "resuming")
+        self.assertEqual(request("start", "start-1", 0,
+                                 cookie=self.owner_cookie, csrf=self.owner_csrf)[0], 202)
+        self.assertEqual(request("pause", "pause-before-ack", 1,
+                                 cookie=self.owner_cookie, csrf=self.owner_csrf)[0], 409)
+        self.content.acknowledge_capture_transition(self.session_id, generation=1,
+                                                    event="connected")
+        status, _, body = request("pause", "pause-1", 2,
+                                  cookie=self.owner_cookie, csrf=self.owner_csrf)
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body)["state"], "pausing")
+        self.content.acknowledge_capture_transition(self.session_id, generation=1,
+                                                    event="paused")
+        snapshot = self.content.capture_snapshot(self.session_id, self.owner)
+        status, _, body = request("resume", "resume-1", snapshot["version"],
+                                  cookie=self.owner_cookie, csrf=self.owner_csrf)
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body)["state"], "resuming")
+
     def _analyzed_node(self):
         evidence, utterance = final(self.session_id, 1)
         self.content.accept_final(

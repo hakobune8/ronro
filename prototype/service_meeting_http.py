@@ -25,6 +25,7 @@ from .service_oidc import ServiceOidcClient
 
 
 _SESSION_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})(/canvas)?\Z")
+_CAPTURE_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/capture\Z")
 _ISSUE_VIEW_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/view-credentials\Z")
 _REVOKE_VIEW_PATH = re.compile(
     r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/view-credentials/([0-9a-fA-F-]{36})\Z"
@@ -48,6 +49,15 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
         )
 
     def _new_session_input(self) -> tuple[str | None, str | None]:
+        payload = self._json_input(4096)
+        if set(payload) != {"title", "goal"}:
+            raise ServiceStoreError("request_invalid", "Session fields invalid")
+        for value in payload.values():
+            if value is not None and (not isinstance(value, str) or len(value) > 256):
+                raise ServiceStoreError("request_invalid", "Session field invalid")
+        return payload["title"], payload["goal"]
+
+    def _json_input(self, maximum_bytes: int) -> dict:
         if self.headers.get("Content-Type") != "application/json":
             raise ServiceStoreError("request_invalid", "JSON content type required")
         length = self.headers.get("Content-Length")
@@ -55,21 +65,36 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
                 or not length.isdecimal()):
             raise ServiceStoreError("request_invalid", "Request length invalid")
         size = int(length)
-        if not 2 <= size <= 4096:
+        if not 2 <= size <= maximum_bytes:
             raise ServiceStoreError("request_invalid", "Request length invalid")
         try:
             payload = json.loads(self.rfile.read(size).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ServiceStoreError("request_invalid", "Invalid JSON") from exc
-        if not isinstance(payload, dict) or set(payload) != {"title", "goal"}:
-            raise ServiceStoreError("request_invalid", "Session fields invalid")
-        for value in payload.values():
-            if value is not None and (not isinstance(value, str) or len(value) > 256):
-                raise ServiceStoreError("request_invalid", "Session field invalid")
-        return payload["title"], payload["goal"]
+        if not isinstance(payload, dict):
+            raise ServiceStoreError("request_invalid", "JSON object required")
+        return payload
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlsplit(self.path)
+        capture = _CAPTURE_PATH.fullmatch(parsed.path) if not parsed.query else None
+        if capture is not None:
+            try:
+                owner = self._mutating_owner(require_empty_body=False)
+                payload = self._json_input(512)
+                if set(payload) != {"action", "operation_key", "expected_version"}:
+                    raise ServiceStoreError("request_invalid", "Capture request fields invalid")
+                result = self.content.request_capture_transition(
+                    capture.group(1), owner, action=payload["action"],
+                    operation_key=payload["operation_key"],
+                    expected_version=payload["expected_version"],
+                )
+                self._send(202, json.dumps(result, separators=(",", ":")).encode("ascii"))
+            except ServiceStoreError as exc:
+                self._error(exc)
+            except Exception:
+                self._send(503, b'{"error":{"code":"service_unavailable"}}')
+            return
         if parsed.path == "/api/service/sessions" and not parsed.query:
             try:
                 owner = self._mutating_owner(require_empty_body=False)
