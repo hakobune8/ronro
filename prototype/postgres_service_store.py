@@ -1253,12 +1253,35 @@ class PostgresServiceStore:
             revision = int(result.state["graph"]["revision"])
             connection.execute(
                 """UPDATE service_session SET service_state = %s,
-                   capture_state = %s, final_revision = %s, version = version + 1
+                   capture_state = %s, final_revision = %s, version = version + 1,
+                   ended_at = now(), expires_at = now() + interval '7 days'
                    WHERE session_id = %s""",
                 ("ended_incomplete" if incomplete else "ended",
                  "ended_incomplete" if incomplete else "ended", revision, session_id),
             )
             return revision
+
+    def retention_deadline(self, session_id: str, owner_user_id: str) -> dt.datetime:
+        """Read the accepted deadline for a verified owner; no deletion here."""
+
+        with self._transaction() as connection:
+            row = self._require_owner_locked(connection, session_id, owner_user_id)
+            if row["service_state"] not in {"ended", "ended_incomplete"}:
+                raise ServiceStoreError("session_not_ended", "Retention deadline not established")
+            if row["expires_at"] is None:
+                raise ServiceStoreError("retention_deadline_missing", "Ended Session has no deadline")
+            return row["expires_at"]
+
+    def count_ended_sessions_missing_expiry(self) -> int:
+        """Expose legacy/malformed rows that must not be silently retained."""
+
+        with self._transaction() as connection:
+            row = connection.execute(
+                """SELECT COUNT(*) AS value FROM service_session
+                   WHERE service_state IN ('ended', 'ended_incomplete')
+                     AND (ended_at IS NULL OR expires_at IS NULL)"""
+            ).fetchone()
+            return int(row["value"])
 
     def job_state(self, session_id: str, job_id: str) -> str:
         with self._transaction() as connection:

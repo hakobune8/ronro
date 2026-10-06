@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 import threading
 import unittest
@@ -266,6 +267,14 @@ class PostgresServiceStoreTests(unittest.TestCase):
             {"drain_status": "partial", "final_graph_revision": 3, "pending_analysis": True},
         ), incomplete=True)
         self.assertEqual(revision, 4)
+        deadline = self.store.retention_deadline(self.session_id, "synthetic-owner")
+        with psycopg.connect(TEST_DSN) as connection:
+            ended_at, expires_at = connection.execute(
+                "SELECT ended_at, expires_at FROM service_session WHERE session_id = %s",
+                (self.session_id,),
+            ).fetchone()
+        self.assertEqual(deadline, expires_at)
+        self.assertEqual(expires_at - ended_at, dt.timedelta(days=7))
         with self.assertRaisesRegex(ServiceStoreError, "finalized"):
             self.store.accept_job_result(
                 self.session_id, "job-one", attempt=claim["attempt"],
@@ -275,6 +284,21 @@ class PostgresServiceStoreTests(unittest.TestCase):
     def test_ephemeral_key_registry_cannot_be_used_without_test_gate(self):
         with self.assertRaisesRegex(ServiceStoreError, "cannot back a live"):
             PostgresServiceStore(TEST_DSN, self.validator, self.registry)
+
+    def test_retention_deadline_requires_end_and_missing_deadlines_are_visible(self):
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.retention_deadline(self.session_id, "synthetic-owner")
+        self.assertEqual(caught.exception.code, "session_not_ended")
+        before = self.store.count_ended_sessions_missing_expiry()
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                "UPDATE service_session SET service_state = 'ended' WHERE session_id = %s",
+                (self.session_id,),
+            )
+        self.assertEqual(self.store.count_ended_sessions_missing_expiry(), before + 1)
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.retention_deadline(self.session_id, "synthetic-owner")
+        self.assertEqual(caught.exception.code, "retention_deadline_missing")
 
     def test_open_session_and_first_event_are_one_database_transaction(self):
         sid = f"test-open-{uuid.uuid4()}"
@@ -393,7 +417,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
             "0001_account_service.sql", "0002_final_intake_fence.sql",
             "0003_fair_claim_clock.sql", "0004_view_credentials.sql",
             "0005_capture_transitions.sql", "0006_capture_frame_receipts.sql",
-            "0007_provider_item_lifecycle.sql",
+            "0007_provider_item_lifecycle.sql", "0008_session_retention.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 
