@@ -23,11 +23,57 @@ from .service_oidc import ServiceOidcClient
 
 
 _SESSION_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})(/canvas)?\Z")
+_ISSUE_VIEW_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/view-credentials\Z")
+_REVOKE_VIEW_PATH = re.compile(
+    r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/view-credentials/([0-9a-fA-F-]{36})\Z"
+)
 _BEARER = re.compile(r"Bearer ([A-Za-z0-9_-]{32,128})\Z", re.ASCII)
 
 
 class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
     content: PostgresServiceStore
+
+    def _mutating_owner(self) -> str:
+        if self.headers.get("Authorization") is not None:
+            raise ServiceStoreError("session_not_found", "Session not found")
+        if self.headers.get("Transfer-Encoding") is not None or self.headers.get("Content-Length") not in (None, "0"):
+            raise ServiceStoreError("request_invalid", "Unexpected request body")
+        return self.identity.authenticate_mutation(
+            token=_cookie_value(self.headers.get("Cookie"), COOKIE_NAME),
+            origin=self.headers.get("Origin"),
+            csrf_token=self.headers.get("X-Ronro-CSRF"),
+        )
+
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = urlsplit(self.path)
+        matched = _ISSUE_VIEW_PATH.fullmatch(parsed.path) if not parsed.query else None
+        if matched is None:
+            super().do_POST()
+            return
+        try:
+            owner = self._mutating_owner()
+            grant_id, token = self.content.issue_view_credential(matched.group(1), owner)
+            payload = {"grant_id": grant_id, "token": token, "expires_in": 300}
+            self._send(201, json.dumps(payload, separators=(",", ":")).encode("ascii"))
+        except ServiceStoreError as exc:
+            self._error(exc)
+        except Exception:
+            self._send(503, b'{"error":{"code":"service_unavailable"}}')
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        parsed = urlsplit(self.path)
+        matched = _REVOKE_VIEW_PATH.fullmatch(parsed.path) if not parsed.query else None
+        if matched is None:
+            self._send(404, b'{"error":{"code":"not_found"}}')
+            return
+        try:
+            owner = self._mutating_owner()
+            self.content.revoke_view_credential(matched.group(1), owner, matched.group(2))
+            self._send(204)
+        except ServiceStoreError as exc:
+            self._error(exc)
+        except Exception:
+            self._send(503, b'{"error":{"code":"service_unavailable"}}')
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlsplit(self.path)

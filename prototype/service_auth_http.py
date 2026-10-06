@@ -65,6 +65,7 @@ class ServiceAuthRequestHandler(BaseHTTPRequestHandler):
             "account_unavailable": 403,
             "session_not_found": 404,
             "session_deleted": 410,
+            "session_closed": 409,
             "replay_mismatch": 503,
             "oidc_exchange_failed": 502,
             "oidc_jwks_unavailable": 502,

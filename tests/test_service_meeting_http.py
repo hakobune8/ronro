@@ -58,8 +58,8 @@ class ServiceMeetingHttpTests(unittest.TestCase):
         self.other = self._user("other")
         self.session_id = self._session(self.owner, "合成の会議")
         self.other_session_id = self._session(self.other, "別の合成会議")
-        owner_token, _ = self.identity.issue_web_session(self.owner)
-        other_token, _ = self.identity.issue_web_session(self.other)
+        owner_token, self.owner_csrf = self.identity.issue_web_session(self.owner)
+        other_token, self.other_csrf = self.identity.issue_web_session(self.other)
         self.owner_cookie = f"{COOKIE_NAME}={owner_token}"
         self.other_cookie = f"{COOKIE_NAME}={other_token}"
         self.server = create_service_meeting_server(self.identity, self.oidc, self.content)
@@ -104,14 +104,19 @@ class ServiceMeetingHttpTests(unittest.TestCase):
         self.content.append_events(session_id, [event(session_id, 2, "session_started", {})])
         return session_id
 
-    def _request(self, path, *, cookie=None, authorization=None):
+    def _request(self, path, *, method="GET", cookie=None, authorization=None,
+                 origin=None, csrf=None, body=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
         headers = {}
         if cookie is not None:
             headers["Cookie"] = cookie
         if authorization is not None:
             headers["Authorization"] = authorization
-        connection.request("GET", path, headers=headers)
+        if origin is not None:
+            headers["Origin"] = origin
+        if csrf is not None:
+            headers["X-Ronro-CSRF"] = csrf
+        connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         result = response.status, dict(response.getheaders()), response.read()
         connection.close()
@@ -189,6 +194,55 @@ class ServiceMeetingHttpTests(unittest.TestCase):
                 "expires_at = now() - interval '1 minute' "
                 "WHERE grant_id = %s", (grant,),
             )
+        self.assertEqual(self._request(
+            f"/api/service/sessions/{self.session_id}/canvas",
+            authorization=f"Bearer {token}",
+        )[0], 404)
+
+    def test_owner_only_can_issue_and_revoke_live_display_credential(self):
+        path = f"/api/service/sessions/{self.session_id}/view-credentials"
+        origin = "https://ronro.example.test"
+        self.assertEqual(self._request(
+            path, method="POST", cookie=self.owner_cookie, origin=origin,
+        )[0], 403)
+        self.assertEqual(self._request(
+            path, method="POST", cookie=self.owner_cookie, origin="https://other.example.test",
+            csrf=self.owner_csrf,
+        )[0], 403)
+        self.assertEqual(self._request(
+            path, method="POST", cookie=self.other_cookie, origin=origin,
+            csrf=self.other_csrf,
+        )[0], 404)
+        self.assertEqual(self._request(
+            path, method="POST", cookie=self.owner_cookie, origin=origin,
+            csrf=self.owner_csrf, body=b"unexpected",
+        )[0], 400)
+        status, headers, body = self._request(
+            path, method="POST", cookie=self.owner_cookie, origin=origin,
+            csrf=self.owner_csrf,
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        credential = json.loads(body)
+        self.assertEqual(credential["expires_in"], 300)
+        token = credential["token"]
+        self.assertEqual(self._request(
+            f"/api/service/sessions/{self.session_id}/canvas",
+            authorization=f"Bearer {token}",
+        )[0], 200)
+        revoke = path + "/" + credential["grant_id"]
+        self.assertEqual(self._request(
+            revoke, method="DELETE", cookie=self.other_cookie,
+            origin=origin, csrf=self.other_csrf,
+        )[0], 404)
+        self.assertEqual(self._request(
+            revoke, method="DELETE", cookie=self.owner_cookie,
+            origin=origin, csrf=self.owner_csrf,
+        )[0], 204)
+        self.assertEqual(self._request(
+            revoke, method="DELETE", cookie=self.owner_cookie,
+            origin=origin, csrf=self.owner_csrf,
+        )[0], 204)
         self.assertEqual(self._request(
             f"/api/service/sessions/{self.session_id}/canvas",
             authorization=f"Bearer {token}",
