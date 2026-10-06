@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS service_job (
         REFERENCES service_evidence(session_id, evidence_id) ON DELETE CASCADE
 );
 ALTER TABLE service_job ADD COLUMN IF NOT EXISTS error_cipher BYTEA;
+ALTER TABLE service_job ADD COLUMN IF NOT EXISTS presentation_delta_cipher BYTEA;
 CREATE INDEX IF NOT EXISTS service_job_claim_idx
     ON service_job (state, claim_until, session_id);
 

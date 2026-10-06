@@ -15,7 +15,8 @@ from prototype.postgres_service_store import PostgresServiceStore
 from prototype.schema import SchemaValidator
 from prototype.service_crypto import InMemoryTestKeyRegistry, ServiceCryptoError
 from prototype.service_errors import ServiceStoreError
-from tests.test_service_store import WHEN, event, final
+from tests.test_service_store import WHEN, event, final, presentation_hint
+from prototype.display_labels import display_projection
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,6 +102,55 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.registry.delete_key(self.session_id)
         with self.assertRaisesRegex(ServiceCryptoError, "key_unavailable"):
             reopened.replay(self.session_id)
+
+    def test_presentation_hint_is_encrypted_and_replays(self):
+        evidence, _ = self._final()
+        claim = self.store.claim_job(session_id=self.session_id, now=100)
+        node = event(
+            self.session_id, 3, "node_detected",
+            {"node_type": "idea", "label": "合成の案を検討する"},
+            actor="analyzer", evidence_ids=[evidence["id"]],
+        )
+        hints = presentation_hint(self.store, self.session_id, node, "案を検討する")
+        self.store.accept_job_result(
+            self.session_id, "job-one", attempt=claim["attempt"],
+            start_revision=claim["start_revision"], accepted_output={}, events=[node],
+            presentation_hints=hints,
+        )
+        with psycopg.connect(TEST_DSN) as connection:
+            blob = connection.execute(
+                "SELECT presentation_delta_cipher FROM service_job WHERE session_id = %s",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertNotIn("案を検討する".encode(), bytes(blob))
+        reopened = PostgresServiceStore(
+            TEST_DSN, self.validator, self.registry, allow_test_key_registry=True,
+        )
+        replay = reopened.replay(self.session_id)
+        self.assertEqual(replay.presentation, hints)
+        self.assertEqual(
+            display_projection(replay.state["graph"], replay.presentation)[next(iter(hints))]["text"],
+            "案を検討する",
+        )
+
+    def test_invalid_presentation_hint_does_not_commit_node_or_job(self):
+        evidence, _ = self._final()
+        claim = self.store.claim_job(session_id=self.session_id, now=100)
+        node = event(
+            self.session_id, 3, "node_detected",
+            {"node_type": "idea", "label": "合成案"},
+            actor="analyzer", evidence_ids=[evidence["id"]],
+        )
+        hints = presentation_hint(self.store, self.session_id, node, "合成案")
+        hints[next(iter(hints))]["event_id"] = "wrong-event"
+        with self.assertRaisesRegex(ServiceStoreError, "Hint identity"):
+            self.store.accept_job_result(
+                self.session_id, "job-one", attempt=claim["attempt"],
+                start_revision=claim["start_revision"], accepted_output={}, events=[node],
+                presentation_hints=hints,
+            )
+        self.assertEqual(len(self.store.replay(self.session_id).events), 2)
+        self.assertEqual(self.store.job_state(self.session_id, "job-one"), "processing")
 
     def test_failed_event_batch_rolls_back_events_and_job(self):
         evidence, _ = self._final()

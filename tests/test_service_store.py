@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from prototype.display_labels import POLICY_VERSION, VERSION, content_hash, display_projection
 from prototype.schema import SchemaValidator
 from prototype.service_errors import ServiceStoreError
 from prototype.service_store import SqliteServiceStore
@@ -49,6 +50,17 @@ def final(session_id: str, sequence: int):
         "ended_at": WHEN,
     }
     return evidence, utterance
+
+
+def presentation_hint(store, session_id: str, node_event: dict, label: str) -> dict:
+    staged = store.runner.apply_event(store.replay(session_id), node_event)
+    node_id = f"node:{session_id}:{node_event['event_id']}"
+    node = next(node for node in staged.state["graph"]["nodes"] if node["id"] == node_id)
+    return {node_id: {
+        "version": VERSION, "policy": POLICY_VERSION,
+        "event_id": node_event["event_id"], "sequence": node_event["sequence"],
+        "content_hash": content_hash(node), "display_label": label, "reason": "accepted",
+    }}
 
 
 class ServiceStoreTests(unittest.TestCase):
@@ -137,6 +149,44 @@ class ServiceStoreTests(unittest.TestCase):
             events=[node],
         )
         self.assertEqual(len(again.events), 3)
+
+    def test_presentation_hint_replays_without_changing_canonical_node(self):
+        evidence, _ = self._accept_first_final()
+        claim = self.store.claim_job(now=100)
+        node = event(
+            "s-one", 3, "node_detected", {"node_type": "idea", "label": "合成の案を検討する"},
+            actor="analyzer", evidence_ids=[evidence["id"]],
+        )
+        hints = presentation_hint(self.store, "s-one", node, "案を検討する")
+        result = self.store.accept_job_result(
+            "s-one", "job-one", attempt=claim["attempt"],
+            start_revision=claim["start_revision"], accepted_output={}, events=[node],
+            presentation_hints=hints,
+        )
+        reopened = SqliteServiceStore(self.path, self.validator, synthetic_data_only=True)
+        replay = reopened.replay("s-one")
+        self.assertEqual(replay.presentation, result.presentation)
+        graph = replay.state["graph"]
+        self.assertEqual(graph["nodes"][0]["label"], "合成の案を検討する")
+        self.assertEqual(display_projection(graph, replay.presentation)[next(iter(hints))]["text"], "案を検討する")
+
+    def test_invalid_presentation_hint_rolls_back_entire_job(self):
+        evidence, _ = self._accept_first_final()
+        claim = self.store.claim_job(now=100)
+        node = event(
+            "s-one", 3, "node_detected", {"node_type": "idea", "label": "合成案"},
+            actor="analyzer", evidence_ids=[evidence["id"]],
+        )
+        hints = presentation_hint(self.store, "s-one", node, "違う案")
+        hints[next(iter(hints))]["content_hash"] = "wrong"
+        with self.assertRaisesRegex(ServiceStoreError, "Hint identity"):
+            self.store.accept_job_result(
+                "s-one", "job-one", attempt=claim["attempt"],
+                start_revision=claim["start_revision"], accepted_output={}, events=[node],
+                presentation_hints=hints,
+            )
+        self.assertEqual(len(self.store.replay("s-one").events), 2)
+        self.assertEqual(self.store.job_state("s-one", "job-one"), "processing")
 
     def test_invalid_event_rolls_back_entire_job_completion(self):
         evidence, _ = self._accept_first_final()

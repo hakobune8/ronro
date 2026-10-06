@@ -18,6 +18,7 @@ from typing import Any, Iterator, Sequence
 from .replay import ReplayResult, ReplayRunner
 from .schema import SchemaValidator
 from .service_errors import ServiceStoreError
+from .service_presentation import validate_presentation_delta
 
 
 def _json(value: Any) -> str:
@@ -93,6 +94,7 @@ class SqliteServiceStore:
                     start_revision INTEGER,
                     accepted_output_json TEXT,
                     error_json TEXT,
+                    presentation_delta_json TEXT,
                     PRIMARY KEY (session_id, job_id),
                     UNIQUE (session_id, evidence_id, contract_version),
                     FOREIGN KEY (session_id, evidence_id)
@@ -112,6 +114,13 @@ class SqliteServiceStore:
                     state_json TEXT NOT NULL
                 );
             """)
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(service_job)")
+            }
+            if "presentation_delta_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE service_job ADD COLUMN presentation_delta_json TEXT"
+                )
 
     @staticmethod
     def _require_open(connection: sqlite3.Connection, session_id: str) -> sqlite3.Row:
@@ -252,12 +261,25 @@ class SqliteServiceStore:
             "SELECT event_json FROM service_event WHERE session_id = ? ORDER BY sequence",
             (session_id,),
         ).fetchall()
-        return self.runner.replay_events(
+        result = self.runner.replay_events(
             session_id=session_id,
             evidence=[json.loads(row["evidence_json"]) for row in evidence_rows],
             utterances=[json.loads(row["utterance_json"]) for row in evidence_rows],
             events=[json.loads(row["event_json"]) for row in event_rows],
         )
+        hint_rows = connection.execute(
+            """SELECT j.presentation_delta_json FROM service_job AS j
+               JOIN service_evidence AS e ON e.session_id = j.session_id
+                 AND e.evidence_id = j.evidence_id
+               WHERE j.session_id = ? AND j.state = 'completed'
+                 AND j.presentation_delta_json IS NOT NULL
+               ORDER BY e.utterance_sequence""",
+            (session_id,),
+        ).fetchall()
+        for row in hint_rows:
+            for node_id, record in json.loads(row["presentation_delta_json"]).items():
+                result.presentation.setdefault(node_id, record)
+        return result
 
     def replay(self, session_id: str) -> ReplayResult:
         with self._transaction() as connection:
@@ -307,6 +329,7 @@ class SqliteServiceStore:
         start_revision: int,
         accepted_output: dict[str, Any],
         events: Sequence[dict[str, Any]],
+        presentation_hints: dict[str, Any] | None = None,
     ) -> ReplayResult:
         """Commit accepted output, Events, Graph revision, and Job state atomically."""
 
@@ -325,11 +348,14 @@ class SqliteServiceStore:
             if row["start_revision"] != start_revision or session["graph_revision"] != start_revision:
                 raise ServiceStoreError("revision_mismatch", "Graph changed while Analyzer was processing")
             result = self._append_locked(connection, session_id, events)
+            delta = validate_presentation_delta(result, events, presentation_hints)
             connection.execute(
                 """UPDATE service_job SET state = 'completed', claim_until = NULL,
-                   accepted_output_json = ? WHERE session_id = ? AND job_id = ?""",
-                (_json(accepted_output), session_id, job_id),
+                   accepted_output_json = ?, presentation_delta_json = ?
+                   WHERE session_id = ? AND job_id = ?""",
+                (_json(accepted_output), _json(delta), session_id, job_id),
             )
+            result.presentation.update(delta)
             return result
 
     def finalize(

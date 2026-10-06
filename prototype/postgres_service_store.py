@@ -19,6 +19,7 @@ from .replay import ReplayResult, ReplayRunner
 from .schema import SchemaValidator
 from .service_crypto import InMemoryTestKeyRegistry, SessionEnvelopeCodec, SessionKeyRegistry
 from .service_errors import ServiceStoreError
+from .service_presentation import validate_presentation_delta
 
 
 MIGRATION = Path(__file__).resolve().parents[1] / "migrations" / "0001_account_service.sql"
@@ -245,6 +246,21 @@ class PostgresServiceStore:
             events=[self.codec.decrypt_json(session_id, "event", str(row["sequence"]), row["event_cipher"])
                     for row in event_rows],
         )
+        hint_rows = connection.execute(
+            """SELECT j.job_id, j.presentation_delta_cipher FROM service_job AS j
+               JOIN service_evidence AS e ON e.session_id = j.session_id
+                 AND e.evidence_id = j.evidence_id
+               WHERE j.session_id = %s AND j.state = 'completed'
+                 AND j.presentation_delta_cipher IS NOT NULL
+               ORDER BY e.utterance_sequence""",
+            (session_id,),
+        ).fetchall()
+        for row in hint_rows:
+            delta = self.codec.decrypt_json(
+                session_id, "presentation-delta", row["job_id"], row["presentation_delta_cipher"]
+            )
+            for node_id, record in delta.items():
+                result.presentation.setdefault(node_id, record)
         # Revision zero precedes session_created and intentionally has null
         # lifecycle timestamps; it is not a complete Domain document yet.
         if result.events:
@@ -327,6 +343,7 @@ class PostgresServiceStore:
         start_revision: int,
         accepted_output: dict[str, Any],
         events: Sequence[dict[str, Any]],
+        presentation_hints: dict[str, Any] | None = None,
     ) -> ReplayResult:
         with self._transaction() as connection:
             session = self._lock_session(connection, session_id)
@@ -345,13 +362,16 @@ class PostgresServiceStore:
             if row["start_revision"] != start_revision or session["graph_revision"] != start_revision:
                 raise ServiceStoreError("revision_mismatch", "Graph changed while Analyzer was processing")
             result = self._append_locked(connection, session_id, events)
+            delta = validate_presentation_delta(result, events, presentation_hints)
             connection.execute(
                 """UPDATE service_job SET state = 'completed', claim_until = NULL,
-                   accepted_output_cipher = %s
+                   accepted_output_cipher = %s, presentation_delta_cipher = %s
                    WHERE session_id = %s AND job_id = %s""",
                 (self.codec.encrypt_json(session_id, "job-output", job_id, accepted_output),
+                 self.codec.encrypt_json(session_id, "presentation-delta", job_id, delta),
                  session_id, job_id),
             )
+            result.presentation.update(delta)
             return result
 
     def finalize(
