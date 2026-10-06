@@ -265,6 +265,70 @@ class PostgresServiceStoreTests(unittest.TestCase):
         )
         self.assertEqual(reopened.replay(sid).events[0], created)
 
+    def test_concurrent_admission_never_exceeds_open_session_limit(self):
+        # setUp already created one open synthetic Session. Two concurrent
+        # applicants compete for the one remaining slot.
+        applicants = [f"test-admit-{uuid.uuid4()}" for _ in range(2)]
+        self.created_sessions.extend(applicants)
+
+        def request(sid):
+            created = event(
+                sid, 1, "session_created", {"title": "同時受付試験", "goal": "検討"},
+            )
+            try:
+                result = self.store.open_session(
+                    sid, "synthetic-owner", created, max_open_sessions=2,
+                )
+                return sid, "accepted", result.state["graph"]["revision"]
+            except ServiceStoreError as exc:
+                return sid, exc.code, None
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(request, applicants))
+        self.assertEqual(
+            sorted(outcome[1] for outcome in outcomes),
+            ["accepted", "capacity_unavailable"],
+        )
+        accepted = next(sid for sid, status, _ in outcomes if status == "accepted")
+        rejected = next(sid for sid, status, _ in outcomes if status != "accepted")
+        self.assertEqual(len(self.store.replay(accepted).events), 1)
+        with self.assertRaisesRegex(ServiceStoreError, "not found"):
+            self.store.replay(rejected)
+        with self.assertRaisesRegex(ServiceCryptoError, "key_unavailable"):
+            self.registry.get_key(rejected)
+        with psycopg.connect(TEST_DSN) as connection:
+            active = connection.execute(
+                "SELECT COUNT(*) FROM service_session WHERE service_state = 'open'"
+            ).fetchone()[0]
+        self.assertEqual(active, 2)
+
+    def test_invalid_admission_limit_rejects_before_key_creation(self):
+        sid = f"test-admit-invalid-{uuid.uuid4()}"
+        self.created_sessions.append(sid)
+        created = event(sid, 1, "session_created", {"title": "合成会議", "goal": "検討"})
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.open_session(sid, "synthetic-owner", created, max_open_sessions=0)
+        self.assertEqual(caught.exception.code, "capacity_invalid")
+        with self.assertRaisesRegex(ServiceCryptoError, "key_unavailable"):
+            self.registry.get_key(sid)
+
+    def test_ended_session_releases_admission_slot(self):
+        self.store.append_events(self.session_id, [event(
+            self.session_id, 3, "session_finalizing", {"last_evidence_sequence": 0},
+        )])
+        self.store.finalize(self.session_id, event(
+            self.session_id, 4, "session_ended",
+            {"drain_status": "complete", "final_graph_revision": 3,
+             "pending_analysis": False},
+        ))
+        sid = f"test-admit-reuse-{uuid.uuid4()}"
+        self.created_sessions.append(sid)
+        created = event(sid, 1, "session_created", {"title": "新しい合成会議", "goal": "検討"})
+        result = self.store.open_session(
+            sid, "synthetic-owner", created, max_open_sessions=1,
+        )
+        self.assertEqual(result.state["graph"]["revision"], 1)
+
     def test_invalid_first_event_rolls_back_database_session(self):
         sid = f"test-invalid-{uuid.uuid4()}"
         self.created_sessions.append(sid)

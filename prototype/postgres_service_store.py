@@ -122,8 +122,9 @@ class PostgresServiceStore:
 
     def open_session(
         self, session_id: str, owner_user_id: str, created_event: dict[str, Any],
+        *, max_open_sessions: int = 4,
     ) -> ReplayResult:
-        """Atomically establish owner, Session, and first Canonical Event.
+        """Admit and atomically establish owner, Session, and first Event.
 
         The external Key Registry is a separate system. If the DB transaction
         fails or its outcome is uncertain, the key is retained for later
@@ -136,9 +137,24 @@ class PostgresServiceStore:
                 or created_event.get("event_type") != "session_created"
                 or created_event.get("sequence") != 1):
             raise ServiceStoreError("created_event_invalid", "First Event must create this Session")
-        self.key_registry.create_key(session_id)
-        owner_cipher = self.codec.encrypt_json(session_id, "owner", session_id, owner_user_id)
+        if type(max_open_sessions) is not int or max_open_sessions < 1:
+            raise ServiceStoreError("capacity_invalid", "Active Session limit must be positive")
         with self._transaction() as connection:
+            # Serialize new-Session admission across every application replica.
+            # This lock is distinct from the migration lock.
+            connection.execute("SELECT pg_advisory_xact_lock(824563, 2)")
+            active = connection.execute(
+                "SELECT COUNT(*) AS value FROM service_session WHERE service_state = 'open'"
+            ).fetchone()["value"]
+            if active >= max_open_sessions:
+                raise ServiceStoreError("capacity_unavailable", "New Session capacity unavailable")
+            # Key creation is external to PostgreSQL. A later DB failure may
+            # leave a key-only orphan for reconciliation; never delete on an
+            # uncertain commit outcome.
+            self.key_registry.create_key(session_id)
+            owner_cipher = self.codec.encrypt_json(
+                session_id, "owner", session_id, owner_user_id
+            )
             connection.execute(
                 "INSERT INTO service_session (session_id, owner_cipher) VALUES (%s, %s)",
                 (session_id, owner_cipher),
