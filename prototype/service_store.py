@@ -68,6 +68,7 @@ class SqliteServiceStore:
                     session_id TEXT PRIMARY KEY,
                     owner_opaque BLOB NOT NULL,
                     service_state TEXT NOT NULL DEFAULT 'open',
+                    intake_closed INTEGER NOT NULL DEFAULT 0,
                     graph_revision INTEGER NOT NULL DEFAULT 0,
                     final_revision INTEGER,
                     CHECK (graph_revision >= 0)
@@ -121,6 +122,13 @@ class SqliteServiceStore:
                 connection.execute(
                     "ALTER TABLE service_job ADD COLUMN presentation_delta_json TEXT"
                 )
+            session_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(service_session)")
+            }
+            if "intake_closed" not in session_columns:
+                connection.execute(
+                    "ALTER TABLE service_session ADD COLUMN intake_closed INTEGER NOT NULL DEFAULT 0"
+                )
 
     @staticmethod
     def _require_open(connection: sqlite3.Connection, session_id: str) -> sqlite3.Row:
@@ -164,7 +172,7 @@ class SqliteServiceStore:
         if not job_id or not contract_version:
             raise ServiceStoreError("job_invalid", "Job identity and contract version are required")
         with self._transaction() as connection:
-            self._require_open(connection, session_id)
+            session = self._require_open(connection, session_id)
             existing = connection.execute(
                 """SELECT e.evidence_id, e.provider_item_id, e.evidence_json, e.utterance_json,
                           j.job_id, j.contract_version
@@ -183,6 +191,8 @@ class SqliteServiceStore:
                         and existing["contract_version"] == contract_version):
                     return
                 raise ServiceStoreError("duplicate_final", "Final or Provider item already has Evidence")
+            if session["intake_closed"]:
+                raise ServiceStoreError("session_finalizing", "Cannot accept new Final after intake stopped")
             latest_event = connection.execute(
                 """SELECT event_json FROM service_event WHERE session_id = ?
                    ORDER BY sequence DESC LIMIT 1""",
@@ -302,8 +312,11 @@ class SqliteServiceStore:
             )
         self.runner.schema_validator.validate_domain(result.state)
         connection.execute(
-            """UPDATE service_session SET graph_revision = ? WHERE session_id = ?""",
-            (result.state["graph"]["revision"], session_id),
+            """UPDATE service_session SET graph_revision = ?,
+               intake_closed = intake_closed OR ? WHERE session_id = ?""",
+            (result.state["graph"]["revision"],
+             int(any(event.get("event_type") == "session_finalizing" for event in events)),
+             session_id),
         )
         connection.execute(
             """INSERT INTO service_checkpoint(session_id, revision, state_json) VALUES (?, ?, ?)
@@ -317,7 +330,9 @@ class SqliteServiceStore:
         if any(event.get("actor") == "analyzer" for event in events):
             raise ServiceStoreError("analyzer_job_required", "Analyzer Events require a Job transaction")
         with self._transaction() as connection:
-            self._require_open(connection, session_id)
+            session = self._require_open(connection, session_id)
+            if session["intake_closed"] and events:
+                raise ServiceStoreError("session_finalizing", "Human/System Event after intake stopped")
             return self._append_locked(connection, session_id, events)
 
     def accept_job_result(

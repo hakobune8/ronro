@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Sequence
@@ -23,7 +24,7 @@ from .service_errors import ServiceStoreError
 from .service_presentation import validate_presentation_delta
 
 
-MIGRATION = Path(__file__).resolve().parents[1] / "migrations" / "0001_account_service.sql"
+MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
 
 class PostgresServiceStore:
@@ -54,9 +55,9 @@ class PostgresServiceStore:
     def migrate(self) -> None:
         """Apply the versioned additive migration once under a DB-wide lock."""
 
-        source = MIGRATION.read_bytes()
-        checksum = hashlib.sha256(source).hexdigest()
-        statements = source.decode("utf-8").split(";")
+        migrations = sorted(MIGRATIONS_DIR.glob("[0-9][0-9][0-9][0-9]_*.sql"))
+        if not migrations:
+            raise ServiceStoreError("migration_missing", "No service migrations found")
         with self._transaction() as connection:
             connection.execute("SELECT pg_advisory_xact_lock(824563, 1)")
             connection.execute(
@@ -66,23 +67,26 @@ class PostgresServiceStore:
                        applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
                    )"""
             )
-            existing = connection.execute(
-                "SELECT checksum FROM service_schema_migration WHERE name = %s",
-                (MIGRATION.name,),
-            ).fetchone()
-            if existing is not None:
-                if existing["checksum"] != checksum:
-                    raise ServiceStoreError(
-                        "migration_checksum_mismatch", "Applied service migration changed"
-                    )
-                return
-            for statement in statements:
-                if statement.strip():
-                    connection.execute(statement)
-            connection.execute(
-                "INSERT INTO service_schema_migration (name, checksum) VALUES (%s, %s)",
-                (MIGRATION.name, checksum),
-            )
+            for migration in migrations:
+                source = migration.read_bytes()
+                checksum = hashlib.sha256(source).hexdigest()
+                existing = connection.execute(
+                    "SELECT checksum FROM service_schema_migration WHERE name = %s",
+                    (migration.name,),
+                ).fetchone()
+                if existing is not None:
+                    if existing["checksum"] != checksum:
+                        raise ServiceStoreError(
+                            "migration_checksum_mismatch", "Applied service migration changed"
+                        )
+                    continue
+                for statement in source.decode("utf-8").split(";"):
+                    if statement.strip():
+                        connection.execute(statement)
+                connection.execute(
+                    "INSERT INTO service_schema_migration (name, checksum) VALUES (%s, %s)",
+                    (migration.name, checksum),
+                )
 
     @staticmethod
     def _lock_session(connection: psycopg.Connection, session_id: str) -> dict[str, Any]:
@@ -167,6 +171,8 @@ class PostgresServiceStore:
                         and existing["contract_version"] == contract_version):
                     return
                 raise ServiceStoreError("duplicate_final", "Final or Provider item already has Evidence")
+            if session["intake_closed"]:
+                raise ServiceStoreError("session_finalizing", "Cannot accept new Final after intake stopped")
             latest_event = connection.execute(
                 """SELECT sequence, event_cipher FROM service_event WHERE session_id = %s
                    ORDER BY sequence DESC LIMIT 1""",
@@ -198,6 +204,126 @@ class PostgresServiceStore:
                    VALUES (%s, %s, %s, %s)""",
                 (session_id, job_id, evidence["id"], contract_version),
             )
+
+    def accept_provider_final(
+        self,
+        session_id: str,
+        *,
+        audio_connection_id: str,
+        provider_item_id: str,
+        raw_text: str,
+        normalized_text: str,
+        speaker: str | None = None,
+        contract_version: str,
+    ) -> dict[str, Any]:
+        """Atomically number one STT Final and its Job, including retry dedupe.
+
+        The Realtime gateway supplies its connection identity and Provider item
+        identity. Neither is stored in plaintext. A repeated Final can be
+        acknowledged even after Drain, but a conflicting retry cannot replace
+        the original Evidence. Unknown item identity must remain an explicit
+        error rather than inventing a dedupe key from transcript text.
+        """
+
+        if (not isinstance(audio_connection_id, str) or not audio_connection_id
+                or not isinstance(provider_item_id, str) or not provider_item_id
+                or not isinstance(contract_version, str) or not contract_version
+                or "\x00" in audio_connection_id or "\x00" in provider_item_id):
+            raise ServiceStoreError("provider_identity_invalid", "Provider Final identity is required")
+        if (not isinstance(raw_text, str) or not raw_text.strip()
+                or not isinstance(normalized_text, str) or not normalized_text.strip()
+                or (speaker is not None and not isinstance(speaker, str))):
+            raise ServiceStoreError("final_invalid", "Final transcript and normalization are required")
+        raw_text = raw_text.strip()
+        normalized_text = normalized_text.strip()
+        provider_identity = json.dumps(
+            [audio_connection_id, provider_item_id], ensure_ascii=False, separators=(",", ":")
+        )
+        digest = self.codec.blind_provider_item_id(session_id, provider_identity)
+        suffix = digest.hex()
+        evidence_id = f"service-evidence:{suffix}"
+        utterance_id = f"service-utterance:{suffix}"
+        job_id = f"service-job:{suffix}"
+        with self._transaction() as connection:
+            session = self._lock_session(connection, session_id)
+            existing = connection.execute(
+                """SELECT e.evidence_id, e.utterance_sequence, e.evidence_cipher,
+                          e.utterance_cipher, j.job_id, j.contract_version
+                   FROM service_evidence AS e JOIN service_job AS j
+                     ON j.session_id = e.session_id AND j.evidence_id = e.evidence_id
+                   WHERE e.session_id = %s AND e.provider_item_digest = %s""",
+                (session_id, digest),
+            ).fetchone()
+            if existing is not None:
+                prior_evidence = self.codec.decrypt_json(
+                    session_id, "evidence", existing["evidence_id"], existing["evidence_cipher"]
+                )
+                prior_utterance = self.codec.decrypt_json(
+                    session_id, "utterance", existing["evidence_id"], existing["utterance_cipher"]
+                )
+                if (prior_evidence["text"] != raw_text or prior_evidence["speaker"] != speaker
+                        or prior_utterance["text"] != normalized_text
+                        or existing["contract_version"] != contract_version):
+                    raise ServiceStoreError("duplicate_final", "Provider item has conflicting Evidence")
+                return {
+                    "evidence_id": existing["evidence_id"],
+                    "utterance_id": prior_utterance["id"],
+                    "job_id": existing["job_id"],
+                    "sequence": existing["utterance_sequence"],
+                    "created": False,
+                }
+            self._require_open(session)
+            if session["intake_closed"]:
+                raise ServiceStoreError("session_finalizing", "Cannot accept new Final after intake stopped")
+            latest = connection.execute(
+                """SELECT sequence, event_cipher FROM service_event
+                   WHERE session_id = %s ORDER BY sequence DESC LIMIT 1""",
+                (session_id,),
+            ).fetchone()
+            if latest is None:
+                raise ServiceStoreError("session_not_started", "Canonical Session is not active")
+            latest_event = self.codec.decrypt_json(
+                session_id, "event", str(latest["sequence"]), latest["event_cipher"]
+            )
+            if latest_event["event_type"] == "session_finalizing":
+                raise ServiceStoreError("session_finalizing", "Cannot accept new Final after intake stopped")
+            if latest_event["event_type"] == "session_created":
+                raise ServiceStoreError("session_not_started", "Canonical Session is not active")
+            last = connection.execute(
+                "SELECT MAX(utterance_sequence) AS value FROM service_evidence WHERE session_id = %s",
+                (session_id,),
+            ).fetchone()["value"]
+            sequence = (last or 0) + 1
+            timestamp = dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace(
+                "+00:00", "Z"
+            )
+            evidence = {
+                "id": evidence_id, "session_id": session_id, "sequence": sequence,
+                "timestamp": timestamp, "speaker": speaker, "text": raw_text,
+            }
+            utterance = {
+                "id": utterance_id, "session_id": session_id, "sequence": sequence,
+                "evidence_ids": [evidence_id], "text": normalized_text,
+                "started_at": timestamp, "ended_at": timestamp,
+            }
+            connection.execute(
+                """INSERT INTO service_evidence
+                   (session_id, evidence_id, utterance_sequence, provider_item_digest,
+                    evidence_cipher, utterance_cipher)
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                (session_id, evidence_id, sequence, digest,
+                 self.codec.encrypt_json(session_id, "evidence", evidence_id, evidence),
+                 self.codec.encrypt_json(session_id, "utterance", evidence_id, utterance)),
+            )
+            connection.execute(
+                """INSERT INTO service_job (session_id, job_id, evidence_id, contract_version)
+                   VALUES (%s, %s, %s, %s)""",
+                (session_id, job_id, evidence_id, contract_version),
+            )
+            return {
+                "evidence_id": evidence_id, "utterance_id": utterance_id,
+                "job_id": job_id, "sequence": sequence, "created": True,
+            }
 
     def claim_job(
         self, *, session_id: str | None = None, now: float | None = None,
@@ -339,8 +465,9 @@ class PostgresServiceStore:
         self.runner.schema_validator.validate_domain(result.state)
         revision = result.state["graph"]["revision"]
         connection.execute(
-            "UPDATE service_session SET graph_revision = %s WHERE session_id = %s",
-            (revision, session_id),
+            """UPDATE service_session SET graph_revision = %s,
+               intake_closed = intake_closed OR %s WHERE session_id = %s""",
+            (revision, any(event.get("event_type") == "session_finalizing" for event in events), session_id),
         )
         connection.execute(
             """INSERT INTO service_checkpoint (session_id, revision, state_cipher)
@@ -356,7 +483,10 @@ class PostgresServiceStore:
         if any(event.get("actor") == "analyzer" for event in events):
             raise ServiceStoreError("analyzer_job_required", "Analyzer Events require a Job transaction")
         with self._transaction() as connection:
-            self._require_open(self._lock_session(connection, session_id))
+            session = self._lock_session(connection, session_id)
+            self._require_open(session)
+            if session["intake_closed"] and events:
+                raise ServiceStoreError("session_finalizing", "Human/System Event after intake stopped")
             return self._append_locked(connection, session_id, events)
 
     def accept_job_result(

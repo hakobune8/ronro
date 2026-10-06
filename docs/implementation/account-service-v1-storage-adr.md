@@ -4,11 +4,13 @@ Status: Content-store choice accepted for implementation; Key Registry deploymen
 
 ## Decision
 
-Use PostgreSQL as the transactional content database for Account Service v1. Keep it separate from the current single-Session Pilot runtime. The additive migration is [`0001_account_service.sql`](../../migrations/0001_account_service.sql); Service routes are not enabled by applying it.
+Use PostgreSQL as the transactional content database for Account Service v1. Keep it separate from the current single-Session Pilot runtime. The additive migrations begin with [`0001_account_service.sql`](../../migrations/0001_account_service.sql) and [`0002_final_intake_fence.sql`](../../migrations/0002_final_intake_fence.sql); Service routes are not enabled by applying them.
 
 The migration runner takes a PostgreSQL transaction-scoped advisory lock and records the filename and SHA-256 checksum in `service_schema_migration`. Repeated application of the same file is a no-op; an edited applied migration is rejected. New schema revisions must use a new numbered file rather than rewriting an applied one. Provisioning and the production migration principal remain external to this adapter.
 
 The service writes each accepted Final together with its Analyzer Job in one transaction. A Worker claims a Job with a lease and PostgreSQL row locking; acceptance of output, ordered Canonical Events, Graph revision/checkpoint, and Job completion is another Session-serialized transaction. A stale claim or Graph revision cannot append Events. `session_ended` and frozen final revision are accepted together; later Worker output cannot mutate the meeting. Events remain the replay source of truth; a checkpoint is a rebuildable cache.
+
+For Realtime intake, `accept_provider_final` requires the audio connection ID and Provider item ID. It derives a Session-keyed opaque item identity, assigns the Final sequence while holding the Session row lock, and inserts Evidence plus Job atomically. An identical retry returns the accepted identifiers (including after Drain); a conflicting retry fails. Reused Provider item IDs on different connections remain distinct. The `intake_closed` fence is set atomically with `session_finalizing`, so a later Analyzer Event cannot accidentally reopen STT intake. The gateway still needs to connect its actual Final callback to this boundary; unknown item identity is not silently guessed from transcript text.
 
 Meeting content columns use per-Session AES-256-GCM with authenticated context consisting of Session, record kind, and record identity. This includes owner identity, Evidence/Utterance text, Canonical Event payload, Analyzer output, and checkpoint. A Provider item ID is stored as a keyed digest, not raw text. Keys are never stored in the content database. Session IDs and processing state remain plaintext operational metadata; their re-identification risk must be reviewed with logs and backups before release.
 

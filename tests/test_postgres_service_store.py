@@ -221,11 +221,102 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.store.migrate()
         with psycopg.connect(TEST_DSN) as connection:
             rows = connection.execute(
-                "SELECT name, checksum FROM service_schema_migration"
+                "SELECT name, checksum FROM service_schema_migration ORDER BY name"
             ).fetchall()
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][0], "0001_account_service.sql")
-        self.assertEqual(len(rows[0][1]), 64)
+        self.assertEqual([row[0] for row in rows], [
+            "0001_account_service.sql", "0002_final_intake_fence.sql",
+        ])
+        self.assertTrue(all(len(row[1]) == 64 for row in rows))
+
+    def test_provider_final_assigns_sequence_dedupes_and_scopes_connection(self):
+        first = self.store.accept_provider_final(
+            self.session_id, audio_connection_id="synthetic-connection-a",
+            provider_item_id="item-1", raw_text="合成の発話", normalized_text="合成の発話",
+            contract_version="v1",
+        )
+        retry = self.store.accept_provider_final(
+            self.session_id, audio_connection_id="synthetic-connection-a",
+            provider_item_id="item-1", raw_text=" 合成の発話 ", normalized_text="合成の発話",
+            contract_version="v1",
+        )
+        self.assertEqual(first["sequence"], 1)
+        self.assertTrue(first["created"])
+        self.assertEqual({k: v for k, v in retry.items() if k != "created"},
+                         {k: v for k, v in first.items() if k != "created"})
+        self.assertFalse(retry["created"])
+        second = self.store.accept_provider_final(
+            self.session_id, audio_connection_id="synthetic-connection-b",
+            provider_item_id="item-1", raw_text="別の合成発話", normalized_text="別の合成発話",
+            contract_version="v1",
+        )
+        self.assertEqual(second["sequence"], 2)
+        self.assertNotEqual(first["evidence_id"], second["evidence_id"])
+        with self.assertRaisesRegex(ServiceStoreError, "conflicting Evidence"):
+            self.store.accept_provider_final(
+                self.session_id, audio_connection_id="synthetic-connection-a",
+                provider_item_id="item-1", raw_text="書き換えた発話", normalized_text="書き換えた発話",
+                contract_version="v1",
+            )
+        replay = self.store.replay(self.session_id)
+        self.assertEqual(len(replay.state["evidence"]), 2)
+        with psycopg.connect(TEST_DSN) as connection:
+            digest = connection.execute(
+                "SELECT provider_item_digest FROM service_evidence WHERE session_id = %s LIMIT 1",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertNotIn(b"item-1", bytes(digest))
+
+    def test_parallel_provider_finals_get_distinct_contiguous_sequences(self):
+        barrier = threading.Barrier(2)
+
+        def accept(number):
+            barrier.wait(timeout=5)
+            return self.store.accept_provider_final(
+                self.session_id, audio_connection_id="synthetic-connection",
+                provider_item_id=f"item-{number}", raw_text=f"合成発話{number}",
+                normalized_text=f"合成発話{number}", contract_version="v1",
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(accept, (1, 2)))
+        self.assertEqual(sorted(result["sequence"] for result in results), [1, 2])
+        self.assertEqual(len(self.store.replay(self.session_id).state["evidence"]), 2)
+
+    def test_finalizing_fence_survives_analyzer_events_and_late_retry(self):
+        accepted = self.store.accept_provider_final(
+            self.session_id, audio_connection_id="synthetic-connection",
+            provider_item_id="item-1", raw_text="合成の発話", normalized_text="合成の発話",
+            contract_version="v1",
+        )
+        self.store.append_events(self.session_id, [event(
+            self.session_id, 3, "session_finalizing", {"last_evidence_sequence": 1},
+        )])
+        claim = self.store.claim_job(session_id=self.session_id, now=100)
+        node = event(
+            self.session_id, 4, "node_detected", {"node_type": "idea", "label": "合成の案"},
+            actor="analyzer", evidence_ids=[accepted["evidence_id"]],
+        )
+        self.store.accept_job_result(
+            self.session_id, accepted["job_id"], attempt=claim["attempt"],
+            start_revision=claim["start_revision"], accepted_output={}, events=[node],
+        )
+        with self.assertRaisesRegex(ServiceStoreError, "intake stopped"):
+            self.store.accept_provider_final(
+                self.session_id, audio_connection_id="synthetic-connection",
+                provider_item_id="item-2", raw_text="遅い発話", normalized_text="遅い発話",
+                contract_version="v1",
+            )
+        with self.assertRaisesRegex(ServiceStoreError, "after intake stopped"):
+            self.store.append_events(self.session_id, [event(
+                self.session_id, 5, "session_finalizing", {"last_evidence_sequence": 1},
+            )])
+        retry = self.store.accept_provider_final(
+            self.session_id, audio_connection_id="synthetic-connection",
+            provider_item_id="item-1", raw_text="合成の発話", normalized_text="合成の発話",
+            contract_version="v1",
+        )
+        self.assertEqual(retry["evidence_id"], accepted["evidence_id"])
+        self.assertFalse(retry["created"])
 
     def test_other_session_is_isolated_and_claims_are_distinct(self):
         other = f"test-{uuid.uuid4()}"
