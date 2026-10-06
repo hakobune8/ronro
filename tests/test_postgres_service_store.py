@@ -20,6 +20,7 @@ from prototype.service_errors import ServiceStoreError
 from tests.test_service_store import WHEN, event, final, presentation_hint
 from tests.test_service_analyzer_worker import BlockingAnalyzer, LabelAnalyzer
 from prototype.display_labels import display_projection
+from prototype.live_audio import AudioChunk
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -368,7 +369,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.assertEqual([row[0] for row in rows], [
             "0001_account_service.sql", "0002_final_intake_fence.sql",
             "0003_fair_claim_clock.sql", "0004_view_credentials.sql",
-            "0005_capture_transitions.sql",
+            "0005_capture_transitions.sql", "0006_capture_frame_receipts.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 
@@ -608,6 +609,10 @@ class PostgresServiceStoreTests(unittest.TestCase):
             self.session_id, generation=1, event="connected",
         )
         self.assertEqual(connected["state"], "listening")
+        self.store.record_capture_frame_receipt(
+            self.session_id, generation=1, connection_id="synthetic-connection-1",
+            chunk=AudioChunk(0, 0.0, b"\x01\x00" * 2400),
+        )
         self.assertEqual(self.store.acknowledge_capture_transition(
             self.session_id, generation=1, event="connected",
         ), connected)
@@ -637,12 +642,31 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.assertEqual(resuming["state"], "resuming")
         self.assertEqual(resuming["generation"], 2)
         with self.assertRaises(ServiceStoreError) as caught:
+            self.store.record_capture_frame_receipt(
+                self.session_id, generation=1,
+                connection_id="synthetic-connection-1",
+                chunk=AudioChunk(1, 0.1, b"\x01\x00" * 2400),
+            )
+        self.assertEqual(caught.exception.code, "stale_capture_generation")
+        with self.assertRaises(ServiceStoreError) as caught:
             self.store.acknowledge_capture_transition(
                 self.session_id, generation=1, event="connected",
             )
         self.assertEqual(caught.exception.code, "stale_capture_generation")
         self.store.acknowledge_capture_transition(
             self.session_id, generation=2, event="connected",
+        )
+        with psycopg.connect(TEST_DSN) as connection:
+            pending = connection.execute(
+                """SELECT COUNT(*) FROM service_capture_interval
+                   WHERE session_id = %s AND kind = 'capture_unavailable'
+                     AND closed_at IS NULL""",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertEqual(pending, 1)
+        self.store.record_capture_frame_receipt(
+            self.session_id, generation=2, connection_id="synthetic-connection-2",
+            chunk=AudioChunk(0, 0.1, b"\x01\x00" * 2400),
         )
         with psycopg.connect(TEST_DSN) as connection:
             intervals = connection.execute(
@@ -668,6 +692,10 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.store.acknowledge_capture_transition(
             self.session_id, generation=1, event="connected",
         )
+        self.store.record_capture_frame_receipt(
+            self.session_id, generation=1, connection_id="synthetic-connection-1",
+            chunk=AudioChunk(0, 0.0, b"\x01\x00" * 2400),
+        )
         reconnecting = self.store.acknowledge_capture_transition(
             self.session_id, generation=1, event="disconnected",
         )
@@ -681,6 +709,10 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.store.acknowledge_capture_transition(
             self.session_id, generation=2, event="connected",
         )
+        self.store.record_capture_frame_receipt(
+            self.session_id, generation=2, connection_id="synthetic-connection-2",
+            chunk=AudioChunk(0, 0.1, b"\x01\x00" * 2400),
+        )
         with psycopg.connect(TEST_DSN) as connection:
             intervals = connection.execute(
                 """SELECT kind, reason_code, closed_at FROM service_capture_interval
@@ -691,6 +723,113 @@ class PostgresServiceStoreTests(unittest.TestCase):
             ("capture_unavailable", "transport_disconnected"),
         ])
         self.assertIsNotNone(intervals[0][2])
+
+    def test_frame_receipts_dedupe_and_sequence_gap_fence_generation(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-1", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        first = AudioChunk(0, 0.0, b"\x01\x00" * 2400)
+        accepted = self.store.record_capture_frame_receipt(
+            self.session_id, generation=1, connection_id="synthetic-connection",
+            chunk=first,
+        )
+        self.assertEqual(accepted, {"sequence": 0, "created": True,
+                                    "accepted_samples": 2400})
+        retry = self.store.record_capture_frame_receipt(
+            self.session_id, generation=1, connection_id="synthetic-connection",
+            chunk=first,
+        )
+        self.assertEqual(retry, {"sequence": 0, "created": False,
+                                 "accepted_samples": 2400})
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.record_capture_frame_receipt(
+                self.session_id, generation=1, connection_id="synthetic-connection",
+                chunk=AudioChunk(0, 0.0, b"\x02\x00" * 2400),
+            )
+        self.assertEqual(caught.exception.code, "duplicate_audio_conflict")
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.record_capture_frame_receipt(
+                self.session_id, generation=1, connection_id="synthetic-connection",
+                chunk=AudioChunk(2, 0.2, b"\x01\x00" * 2400),
+            )
+        self.assertEqual(caught.exception.code, "audio_sequence_gap")
+        self.assertEqual(self.store.capture_snapshot(
+            self.session_id, "synthetic-owner"
+        )["state"], "reconnecting")
+        self.assertEqual(self.store.capture_snapshot(
+            self.session_id, "synthetic-owner"
+        )["generation"], 2)
+        with psycopg.connect(TEST_DSN) as connection:
+            gap = connection.execute(
+                """SELECT reason_code, missing_first_sequence,
+                          missing_last_sequence, closed_at
+                   FROM service_capture_interval WHERE session_id = %s""",
+                (self.session_id,),
+            ).fetchone()
+            receipt = connection.execute(
+                """SELECT last_sequence, accepted_samples,
+                          connection_digest, last_frame_digest
+                   FROM service_capture_stream WHERE session_id = %s""",
+                (self.session_id,),
+            ).fetchone()
+        self.assertEqual(gap[:3], ("audio_sequence_gap", 1, 1))
+        self.assertIsNone(gap[3])
+        self.assertEqual(receipt[:2], (0, 2400))
+        self.assertNotEqual(bytes(receipt[2]), b"synthetic-connection")
+        self.assertEqual(len(bytes(receipt[3])), 32)
+
+    def test_frame_audio_clock_discontinuity_is_not_silent(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-1", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        self.store.record_capture_frame_receipt(
+            self.session_id, generation=1, connection_id="synthetic-connection",
+            chunk=AudioChunk(0, 0.0, b"\x01\x00" * 2400),
+        )
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.record_capture_frame_receipt(
+                self.session_id, generation=1, connection_id="synthetic-connection",
+                chunk=AudioChunk(1, 0.3, b"\x01\x00" * 2400),
+            )
+        self.assertEqual(caught.exception.code, "audio_clock_discontinuity")
+        self.assertEqual(self.store.capture_snapshot(
+            self.session_id, "synthetic-owner"
+        )["state"], "reconnecting")
+
+    def test_first_frame_skip_records_missing_sequence_without_pcm(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-1", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.record_capture_frame_receipt(
+                self.session_id, generation=1, connection_id="synthetic-connection",
+                chunk=AudioChunk(3, 0.3, b"\x01\x00" * 2400),
+            )
+        self.assertEqual(caught.exception.code, "audio_sequence_gap")
+        with psycopg.connect(TEST_DSN) as connection:
+            interval = connection.execute(
+                """SELECT missing_first_sequence, missing_last_sequence
+                   FROM service_capture_interval WHERE session_id = %s""",
+                (self.session_id,),
+            ).fetchone()
+            count = connection.execute(
+                "SELECT COUNT(*) FROM service_capture_stream WHERE session_id = %s",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertEqual(interval, (0, 2))
+        self.assertEqual(count, 0)
 
     def test_capture_version_and_operation_key_conflicts_leave_state_unchanged(self):
         initial = self.store.capture_snapshot(self.session_id, "synthetic-owner")

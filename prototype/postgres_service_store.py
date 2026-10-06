@@ -11,6 +11,7 @@ import datetime as dt
 import hashlib
 import hmac
 import json
+import math
 import secrets
 import uuid
 from contextlib import contextmanager
@@ -21,6 +22,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from .replay import ReplayResult, ReplayRunner
+from .live_audio import AudioChunk, TARGET_SAMPLE_RATE
 from .schema import SchemaValidator
 from .service_crypto import InMemoryTestKeyRegistry, SessionEnvelopeCodec, SessionKeyRegistry
 from .service_errors import ServiceStoreError
@@ -374,20 +376,24 @@ class PostgresServiceStore:
                        VALUES (%s, %s, 'paused', 'user_pause')""",
                     (session_id, generation),
                 )
-            elif event == "disconnected" and state == "listening":
-                connection.execute(
-                    """INSERT INTO service_capture_interval
-                       (session_id, generation, kind, reason_code)
-                       VALUES (%s, %s, 'capture_unavailable', 'transport_disconnected')""",
-                    (session_id, generation),
-                )
-            elif event == "connected":
-                connection.execute(
-                    """UPDATE service_capture_interval SET closed_at = now()
+            elif event == "disconnected":
+                open_interval = connection.execute(
+                    """UPDATE service_capture_interval
+                       SET reason_code = 'transport_disconnected'
                        WHERE session_id = %s AND kind = 'capture_unavailable'
-                         AND closed_at IS NULL""",
+                         AND closed_at IS NULL RETURNING interval_id""",
                     (session_id,),
-                )
+                ).fetchone()
+                if open_interval is None:
+                    connection.execute(
+                        """INSERT INTO service_capture_interval
+                           (session_id, generation, kind, reason_code)
+                           VALUES (%s, %s, 'capture_unavailable',
+                                   'transport_disconnected')""",
+                        (session_id, generation),
+                    )
+            # A connected socket is not proof that PCM intake has resumed.
+            # The possible-gap interval closes only on the first accepted frame.
             version = int(row["version"]) + 1
             connection.execute(
                 """UPDATE service_session SET capture_state = %s,
@@ -395,6 +401,149 @@ class PostgresServiceStore:
                 (next_state, next_generation, version, session_id),
             )
             return {"state": next_state, "generation": next_generation, "version": version}
+
+    @staticmethod
+    def _mark_capture_discontinuity_locked(
+        connection: psycopg.Connection, session_id: str, row: dict[str, Any],
+        reason_code: str, missing_first: int | None = None,
+        missing_last: int | None = None,
+    ) -> None:
+        open_interval = connection.execute(
+            """UPDATE service_capture_interval
+               SET reason_code = %s,
+                   missing_first_sequence = COALESCE(missing_first_sequence, %s),
+                   missing_last_sequence = COALESCE(missing_last_sequence, %s)
+               WHERE session_id = %s AND kind = 'capture_unavailable'
+                 AND closed_at IS NULL RETURNING interval_id""",
+            (reason_code, missing_first, missing_last, session_id),
+        ).fetchone()
+        if open_interval is None:
+            connection.execute(
+                """INSERT INTO service_capture_interval
+                   (session_id, generation, kind, reason_code,
+                    missing_first_sequence, missing_last_sequence)
+                   VALUES (%s, %s, 'capture_unavailable', %s, %s, %s)""",
+                (session_id, row["capture_generation"], reason_code,
+                 missing_first, missing_last),
+            )
+        connection.execute(
+            """UPDATE service_session SET capture_state = 'reconnecting',
+               capture_generation = capture_generation + 1,
+               version = version + 1 WHERE session_id = %s""",
+            (session_id,),
+        )
+
+    def record_capture_frame_receipt(
+        self, session_id: str, *, generation: int, connection_id: str,
+        chunk: AudioChunk,
+    ) -> dict[str, Any]:
+        """Persist a received frame's metadata before Provider append.
+
+        PCM is used only to authenticate a repeat of the latest frame. It is
+        never written to the database. A discontinuity fences the generation
+        and commits a possible-gap interval before signalling failure.
+        """
+
+        if (type(generation) is not int or generation < 1
+                or not isinstance(connection_id, str)
+                or not 1 <= len(connection_id) <= 128
+                or not connection_id.isascii() or not connection_id.isprintable()
+                or not isinstance(chunk, AudioChunk)
+                or type(chunk.sequence) is not int or not 0 <= chunk.sequence < 2**32
+                or isinstance(chunk.audio_start_seconds, bool)
+                or not isinstance(chunk.audio_start_seconds, (int, float))
+                or not math.isfinite(chunk.audio_start_seconds)
+                or chunk.audio_start_seconds < 0
+                or not isinstance(chunk.pcm16le, bytes)
+                or not 0 < len(chunk.pcm16le) <= TARGET_SAMPLE_RATE * 2 * 5
+                or len(chunk.pcm16le) % 2):
+            raise ServiceStoreError("audio_frame_invalid", "Invalid PCM frame metadata")
+        connection_digest = self.codec.blind_capture_connection_id(
+            session_id, connection_id
+        )
+        frame_digest = self.codec.blind_capture_frame(
+            session_id, generation, chunk.sequence,
+            float(chunk.audio_start_seconds), chunk.pcm16le,
+        )
+        failure_code: str | None = None
+        with self._transaction() as connection:
+            row = self._lock_session(connection, session_id)
+            if row["service_state"] != "open" or row["intake_closed"]:
+                raise ServiceStoreError("capture_not_listening", "Capture is not accepting PCM")
+            if generation != row["capture_generation"]:
+                raise ServiceStoreError("stale_capture_generation", "Capture generation changed")
+            if row["capture_state"] != "listening":
+                raise ServiceStoreError("capture_not_listening", "Capture is not accepting PCM")
+            stream = connection.execute(
+                """SELECT * FROM service_capture_stream
+                   WHERE session_id = %s AND generation = %s FOR UPDATE""",
+                (session_id, generation),
+            ).fetchone()
+            if stream is None:
+                if chunk.sequence != 0:
+                    failure_code = "audio_sequence_gap"
+                    self._mark_capture_discontinuity_locked(
+                        connection, session_id, row, failure_code,
+                        0, chunk.sequence - 1,
+                    )
+                else:
+                    connection.execute(
+                        """INSERT INTO service_capture_stream
+                           (session_id, generation, connection_digest, last_sequence,
+                            last_frame_digest, last_audio_end_seconds, accepted_samples)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                        (session_id, generation, connection_digest, chunk.sequence,
+                         frame_digest, chunk.audio_end_seconds, chunk.sample_count),
+                    )
+            elif bytes(stream["connection_digest"]) != connection_digest:
+                failure_code = "audio_connection_changed"
+                self._mark_capture_discontinuity_locked(
+                    connection, session_id, row, failure_code
+                )
+            elif chunk.sequence == stream["last_sequence"]:
+                if bytes(stream["last_frame_digest"]) != frame_digest:
+                    raise ServiceStoreError("duplicate_audio_conflict", "Repeated frame differs")
+                return {
+                    "sequence": chunk.sequence, "created": False,
+                    "accepted_samples": int(stream["accepted_samples"]),
+                }
+            elif chunk.sequence < stream["last_sequence"]:
+                raise ServiceStoreError("stale_audio_frame", "Frame is older than receipt")
+            elif chunk.sequence != stream["last_sequence"] + 1:
+                failure_code = "audio_sequence_gap"
+                self._mark_capture_discontinuity_locked(
+                    connection, session_id, row, failure_code,
+                    int(stream["last_sequence"]) + 1, chunk.sequence - 1,
+                )
+            elif abs(chunk.audio_start_seconds - stream["last_audio_end_seconds"]) > 0.025:
+                failure_code = "audio_clock_discontinuity"
+                self._mark_capture_discontinuity_locked(
+                    connection, session_id, row, failure_code
+                )
+            else:
+                connection.execute(
+                    """UPDATE service_capture_stream SET last_sequence = %s,
+                       last_frame_digest = %s, last_audio_end_seconds = %s,
+                       accepted_samples = accepted_samples + %s,
+                       updated_at = now()
+                       WHERE session_id = %s AND generation = %s""",
+                    (chunk.sequence, frame_digest, chunk.audio_end_seconds,
+                     chunk.sample_count, session_id, generation),
+                )
+            if failure_code is None:
+                connection.execute(
+                    """UPDATE service_capture_interval SET closed_at = now()
+                       WHERE session_id = %s AND kind = 'capture_unavailable'
+                         AND closed_at IS NULL""",
+                    (session_id,),
+                )
+                samples = (
+                    chunk.sample_count if stream is None
+                    else int(stream["accepted_samples"]) + chunk.sample_count
+                )
+                return {"sequence": chunk.sequence, "created": True,
+                        "accepted_samples": samples}
+        raise ServiceStoreError(failure_code, "PCM discontinuity requires reconnect")
 
     def accept_final(
         self,

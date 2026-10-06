@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import struct
 import threading
 from typing import Any, Protocol
 
@@ -103,5 +104,25 @@ class SessionEnvelopeCodec:
         return hmac.digest(
             self.registry.get_key(session_id),
             self._aad(session_id, "provider-item", provider_item_id),
+            hashlib.sha256,
+        )
+
+    def blind_capture_connection_id(self, session_id: str, connection_id: str) -> bytes:
+        if not connection_id:
+            raise ServiceCryptoError("capture_connection_invalid")
+        return hmac.digest(
+            self.registry.get_key(session_id),
+            self._aad(session_id, "capture-connection", connection_id),
+            hashlib.sha256,
+        )
+
+    def blind_capture_frame(
+        self, session_id: str, generation: int, sequence: int,
+        audio_start_seconds: float, pcm16le: bytes,
+    ) -> bytes:
+        return hmac.digest(
+            self.registry.get_key(session_id),
+            self._aad(session_id, "capture-frame", f"{generation}:{sequence}")
+            + struct.pack(">d", audio_start_seconds) + pcm16le,
             hashlib.sha256,
         )
