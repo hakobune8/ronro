@@ -8,6 +8,7 @@ before live meeting data may be accepted through public routes.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Sequence
@@ -51,13 +52,37 @@ class PostgresServiceStore:
             yield connection
 
     def migrate(self) -> None:
-        """Apply the static additive migration; provisioning is external."""
+        """Apply the versioned additive migration once under a DB-wide lock."""
 
-        statements = MIGRATION.read_text(encoding="utf-8").split(";")
+        source = MIGRATION.read_bytes()
+        checksum = hashlib.sha256(source).hexdigest()
+        statements = source.decode("utf-8").split(";")
         with self._transaction() as connection:
+            connection.execute("SELECT pg_advisory_xact_lock(824563, 1)")
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS service_schema_migration (
+                       name TEXT PRIMARY KEY,
+                       checksum TEXT NOT NULL,
+                       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                   )"""
+            )
+            existing = connection.execute(
+                "SELECT checksum FROM service_schema_migration WHERE name = %s",
+                (MIGRATION.name,),
+            ).fetchone()
+            if existing is not None:
+                if existing["checksum"] != checksum:
+                    raise ServiceStoreError(
+                        "migration_checksum_mismatch", "Applied service migration changed"
+                    )
+                return
             for statement in statements:
                 if statement.strip():
                     connection.execute(statement)
+            connection.execute(
+                "INSERT INTO service_schema_migration (name, checksum) VALUES (%s, %s)",
+                (MIGRATION.name, checksum),
+            )
 
     @staticmethod
     def _lock_session(connection: psycopg.Connection, session_id: str) -> dict[str, Any]:

@@ -217,6 +217,16 @@ class PostgresServiceStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ServiceStoreError, "cannot back a live"):
             PostgresServiceStore(TEST_DSN, self.validator, self.registry)
 
+    def test_migration_is_versioned_and_repeatable(self):
+        self.store.migrate()
+        with psycopg.connect(TEST_DSN) as connection:
+            rows = connection.execute(
+                "SELECT name, checksum FROM service_schema_migration"
+            ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], "0001_account_service.sql")
+        self.assertEqual(len(rows[0][1]), 64)
+
     def test_other_session_is_isolated_and_claims_are_distinct(self):
         other = f"test-{uuid.uuid4()}"
         self.created_sessions.append(other)
