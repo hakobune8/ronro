@@ -41,6 +41,9 @@ _BEARER = re.compile(r"Bearer ([A-Za-z0-9_-]{32,128})\Z", re.ASCII)
 
 class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
     content: PostgresServiceStore
+    demo_html: bytes | None = None
+    demo_worklet: bytes | None = None
+    demo_script: bytes | None = None
 
     @staticmethod
     def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
@@ -236,6 +239,20 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlsplit(self.path)
+        if parsed.path == "/" and not parsed.query and self.demo_html is not None:
+            self._send(303, location="/service-demo")
+            return
+        if parsed.path == "/service-demo" and not parsed.query and self.demo_html is not None:
+            self._send(200, self.demo_html, content_type="text/html; charset=utf-8")
+            return
+        if (parsed.path == "/static/service-audio-worklet.js" and not parsed.query
+                and self.demo_worklet is not None):
+            self._send(200, self.demo_worklet, content_type="text/javascript; charset=utf-8")
+            return
+        if (parsed.path == "/static/service-demo.js" and not parsed.query
+                and self.demo_script is not None):
+            self._send(200, self.demo_script, content_type="text/javascript; charset=utf-8")
+            return
         pdf = _PDF_PATH.fullmatch(parsed.path) if not parsed.query else None
         if pdf is not None:
             try:
@@ -297,13 +314,21 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
 def create_service_meeting_server(
     identity: ServiceIdentityStore, oidc: ServiceOidcClient,
     content: PostgresServiceStore, *, host: str = "127.0.0.1", port: int = 0,
+    demo_html: bytes | None = None, demo_worklet: bytes | None = None,
+    demo_script: bytes | None = None,
+    allow_pilot_network_bind: bool = False,
 ) -> ThreadingHTTPServer:
     """Compose candidate owner/display routes; enforce loopback binding."""
 
-    if host not in {"127.0.0.1", "::1"}:
+    if host not in ({"127.0.0.1", "::1", "0.0.0.0"} if allow_pilot_network_bind and demo_html is not None
+                    else {"127.0.0.1", "::1"}):
         raise ValueError("Service meeting candidate may bind only to loopback")
     handler = type(
         "BoundServiceMeetingRequestHandler", (ServiceMeetingRequestHandler,),
-        {"identity": identity, "oidc": oidc, "content": content},
+        {"identity": identity, "oidc": oidc, "content": content,
+         "demo_html": demo_html, "demo_worklet": demo_worklet,
+         "demo_script": demo_script,
+         "post_login_location": ("/service-demo" if demo_html is not None
+                                 else "/api/service/auth/session")},
     )
     return ThreadingHTTPServer((host, port), handler)

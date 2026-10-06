@@ -1,8 +1,10 @@
 """Encrypted PostgreSQL content-store adapter for Account Service v1.
 
-This is the P1 persistence boundary, not a complete service: it requires an
-external durable SessionKeyRegistry, authentication, and deletion lifecycle
-before live meeting data may be accepted through public routes.
+This is the P1 persistence boundary, not a complete service. Normal service
+use requires an external durable SessionKeyRegistry, authentication, and a
+verified deletion lifecycle. An explicitly opted-in, non-durable Pilot demo
+registry is allowed only for isolated temporary data and makes no recovery
+promise.
 """
 
 from __future__ import annotations
@@ -25,7 +27,8 @@ from .replay import ReplayResult, ReplayRunner
 from .live_audio import AudioChunk, TARGET_SAMPLE_RATE
 from .schema import SchemaValidator
 from .service_crypto import (
-    InMemoryTestKeyRegistry, ServiceCryptoError, SessionEnvelopeCodec, SessionKeyRegistry,
+    EphemeralPilotDemoKeyRegistry, InMemoryTestKeyRegistry, ServiceCryptoError,
+    SessionEnvelopeCodec, SessionKeyRegistry,
 )
 from .service_errors import ServiceStoreError
 from .service_presentation import validate_presentation_delta
@@ -46,11 +49,15 @@ class PostgresServiceStore:
         key_registry: SessionKeyRegistry,
         *,
         allow_test_key_registry: bool = False,
+        allow_ephemeral_pilot_registry: bool = False,
         require_provider_items: bool = True,
         drain_deadline_seconds: int = DEFAULT_DRAIN_DEADLINE_SECONDS,
     ) -> None:
-        if isinstance(key_registry, InMemoryTestKeyRegistry) and not allow_test_key_registry:
-            raise ServiceStoreError("unsafe_key_registry", "Ephemeral keys cannot back a live service")
+        if isinstance(key_registry, EphemeralPilotDemoKeyRegistry):
+            if not allow_ephemeral_pilot_registry:
+                raise ServiceStoreError("unsafe_key_registry", "Pilot demo keys require an explicit opt-in")
+        elif isinstance(key_registry, InMemoryTestKeyRegistry) and not allow_test_key_registry:
+            raise ServiceStoreError("unsafe_key_registry", "Test keys cannot back a live service")
         if not dsn:
             raise ServiceStoreError("database_unconfigured", "PostgreSQL DSN is required")
         if (type(drain_deadline_seconds) is not int
@@ -327,6 +334,7 @@ class PostgresServiceStore:
             return result, {
                 "state": str(row["service_state"]),
                 "capture_state": str(row["capture_state"]),
+                "generation": int(row["capture_generation"]),
                 "version": int(row["version"]),
                 "graph_revision": int(row["graph_revision"]),
                 "final_revision": int(row["final_revision"]) if row["final_revision"] is not None else None,

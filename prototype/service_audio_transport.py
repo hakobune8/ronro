@@ -37,7 +37,9 @@ except ImportError:  # pragma: no cover - optional runtime dependency
         pass
 
 
-_AUDIO_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/audio\Z")
+_AUDIO_PATH = re.compile(
+    r"/(?:api/service|live/service)/sessions/([A-Za-z0-9_-]{1,128})/audio\Z"
+)
 
 
 class ServiceAudioGateway:
@@ -402,10 +404,12 @@ class ServiceAudioGateway:
 
 async def serve_service_audio_candidate(
     gateway: ServiceAudioGateway, *, host: str = "127.0.0.1", port: int = 0,
+    allow_pilot_network_bind: bool = False,
 ):
     """Bind only the isolated local candidate; never expose the Pilot port."""
 
-    if host not in {"127.0.0.1", "::1"}:
+    if host not in ({"127.0.0.1", "::1", "0.0.0.0"} if allow_pilot_network_bind
+                    else {"127.0.0.1", "::1"}):
         raise ValueError("Service audio candidate may bind only to loopback")
     if serve is None:
         raise RuntimeError("websockets is not installed")

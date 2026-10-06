@@ -26,8 +26,14 @@ class ServiceCandidateRuntime:
         workers: ServiceWorkerSupervisor,
         http_host: str = "127.0.0.1", http_port: int = 0,
         audio_host: str = "127.0.0.1", audio_port: int = 0,
+        demo_html: bytes | None = None, demo_worklet: bytes | None = None,
+        demo_script: bytes | None = None,
+        allow_pilot_network_bind: bool = False,
     ) -> None:
-        if http_host not in {"127.0.0.1", "::1"} or audio_host not in {"127.0.0.1", "::1"}:
+        allowed_hosts = {"127.0.0.1", "::1"}
+        if allow_pilot_network_bind and demo_html is not None:
+            allowed_hosts.add("0.0.0.0")
+        if http_host not in allowed_hosts or audio_host not in allowed_hosts:
             raise ValueError("Service candidate may bind only to loopback")
         self.identity = identity
         self.oidc = oidc
@@ -38,6 +44,10 @@ class ServiceCandidateRuntime:
         self.http_port = http_port
         self.audio_host = audio_host
         self.audio_port = audio_port
+        self.demo_html = demo_html
+        self.demo_worklet = demo_worklet
+        self.demo_script = demo_script
+        self.allow_pilot_network_bind = allow_pilot_network_bind
         self.http_server: Any = None
         self.audio_server: Any = None
         self.http_thread: threading.Thread | None = None
@@ -53,6 +63,9 @@ class ServiceCandidateRuntime:
             self.http_server = create_service_meeting_server(
                 self.identity, self.oidc, self.content,
                 host=self.http_host, port=self.http_port,
+                demo_html=self.demo_html, demo_worklet=self.demo_worklet,
+                demo_script=self.demo_script,
+                allow_pilot_network_bind=self.allow_pilot_network_bind,
             )
             self.http_thread = threading.Thread(
                 target=self.http_server.serve_forever,
@@ -61,6 +74,7 @@ class ServiceCandidateRuntime:
             self.http_thread.start()
             self.audio_server = await serve_service_audio_candidate(
                 self.gateway, host=self.audio_host, port=self.audio_port,
+                allow_pilot_network_bind=self.allow_pilot_network_bind,
             )
             self._workers_start_attempted = True
             self.workers.start()

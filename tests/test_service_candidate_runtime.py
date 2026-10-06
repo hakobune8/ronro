@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import http.client
 import socket
 import unittest
 from unittest.mock import Mock
@@ -14,12 +16,15 @@ async def inert_gateway(_connection):
 
 
 class ServiceCandidateRuntimeTests(unittest.IsolatedAsyncioTestCase):
-    def runtime(self, *, audio_port=0, workers=None):
+    def runtime(self, *, audio_port=0, workers=None, demo_html=None):
         return ServiceCandidateRuntime(
             identity=Mock(), oidc=Mock(), content=Mock(),
             gateway=inert_gateway,
             workers=workers or Mock(stop=Mock(return_value=True)),
             audio_port=audio_port,
+            demo_html=demo_html,
+            demo_worklet=b"/* synthetic worklet */" if demo_html is not None else None,
+            demo_script=b"/* synthetic script */" if demo_html is not None else None,
         )
 
     @staticmethod
@@ -82,6 +87,35 @@ class ServiceCandidateRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await runtime.stop(timeout_seconds=0.01))
         self.assertEqual(workers.stop.call_count, 3)
 
+    async def test_demo_routes_are_opt_in_and_do_not_expose_audio_or_state(self):
+        for html, expected in ((None, 404), (b"synthetic demo", 200)):
+            runtime = self.runtime(demo_html=html)
+            await runtime.start()
+            try:
+                port = runtime.http_server.server_address[1]
+
+                def request(path):
+                    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                    try:
+                        connection.request("GET", path)
+                        response = connection.getresponse()
+                        return response.status, response.read(), response.getheader("Cache-Control")
+                    finally:
+                        connection.close()
+
+                status, body, cache = await asyncio.to_thread(request, "/service-demo")
+                self.assertEqual(status, expected)
+                self.assertEqual(cache, "no-store")
+                if html is not None:
+                    self.assertEqual(body, html)
+                    self.assertEqual((await asyncio.to_thread(
+                        request, "/static/service-audio-worklet.js"))[0], 200)
+                    self.assertEqual((await asyncio.to_thread(
+                        request, "/static/service-demo.js"))[0], 200)
+                    self.assertEqual((await asyncio.to_thread(request, "/"))[0], 303)
+            finally:
+                self.assertTrue(await runtime.stop())
+
     def test_public_bind_is_rejected(self):
         with self.assertRaises(ValueError):
             ServiceCandidateRuntime(
@@ -93,3 +127,19 @@ class ServiceCandidateRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 identity=Mock(), oidc=Mock(), content=Mock(),
                 gateway=inert_gateway, workers=Mock(), audio_host="0.0.0.0",
             )
+
+    def test_pilot_network_bind_requires_explicit_demo(self):
+        with self.assertRaises(ValueError):
+            ServiceCandidateRuntime(
+                identity=Mock(), oidc=Mock(), content=Mock(),
+                gateway=inert_gateway, workers=Mock(),
+                http_host="0.0.0.0", audio_host="0.0.0.0",
+                allow_pilot_network_bind=True,
+            )
+        runtime = ServiceCandidateRuntime(
+            identity=Mock(), oidc=Mock(), content=Mock(),
+            gateway=inert_gateway, workers=Mock(),
+            http_host="0.0.0.0", audio_host="0.0.0.0",
+            demo_html=b"demo", allow_pilot_network_bind=True,
+        )
+        self.assertEqual(runtime.http_host, "0.0.0.0")

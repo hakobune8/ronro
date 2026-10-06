@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self' wss:; img-src 'self'; base-uri 'none'; form-action 'self'">
+  <title>RONRO | アカウントサービス Pilot デモ</title>
+  <style>
+    :root { font-family: -apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif; color:#172a3a; background:#f3f7fa; }
+    * { box-sizing:border-box; } body { margin:0; } button,input { font:inherit; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:17px 28px; background:#fff; border-bottom:1px solid #dbe5ec; }
+    h1 { margin:0; font-size:23px; } h2 { font-size:18px; margin:0 0 12px; } p { line-height:1.55; }
+    .pilot { color:#7b4f0a; background:#fff5d8; padding:6px 11px; border-radius:999px; font-size:13px; font-weight:700; }
+    main { max-width:1600px; margin:auto; padding:20px 24px 35px; display:grid; grid-template-columns:360px minmax(0,1fr); gap:18px; }
+    .panel { background:#fff; border:1px solid #d9e3ea; border-radius:15px; box-shadow:0 2px 10px #1f40500a; padding:19px; }
+    .notice { grid-column:1 / -1; background:#fff8e7; border:1px solid #e9cb80; border-radius:12px; padding:13px 17px; line-height:1.55; font-size:14px; }
+    .notice strong { display:block; margin-bottom:3px; } .controls { display:flex; flex-direction:column; gap:13px; align-self:start; }
+    .controls label { display:block; font-size:13px; font-weight:700; } .controls input[type=text] { width:100%; margin-top:5px; padding:10px 11px; border:1px solid #bacbd7; border-radius:8px; }
+    .controls .consent { display:flex; align-items:flex-start; gap:8px; line-height:1.5; font-weight:500; } .consent input { margin-top:3px; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; } button,.button-link { display:inline-block; border:1px solid #98b0c1; border-radius:8px; background:#fff; color:#18354c; padding:9px 13px; cursor:pointer; text-decoration:none; font-weight:700; }
+    button.primary,.button-link.primary { background:#1762a0; border-color:#1762a0; color:#fff; } button:disabled,.button-link[aria-disabled=true] { opacity:.45; cursor:not-allowed; }
+    button.warning { color:#a34a20; border-color:#dcae9c; } .state { border-radius:9px; padding:10px 12px; background:#eef5fa; font-size:14px; }
+    .state.error { color:#8c2b25; background:#fff0ec; } .muted { color:#637b8d; font-size:13px; } .small { font-size:12px; }
+    .map-panel { min-width:0; } .map-head { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:10px; }
+    #canvas { position:relative; height:550px; overflow:hidden; border:1px solid #d9e7ed; border-radius:13px; background:radial-gradient(#d8e8ed 1px,transparent 1px) 0 0/40px 40px,#f8fbfd; }
+    #edges { position:absolute; inset:0; width:100%; height:100%; } .node { position:absolute; width:205px; transform:translate(-50%,-50%); padding:10px 12px; border:2px solid #6c9bbb; border-radius:10px; background:#fff; box-shadow:0 2px 8px #183b4b17; font-size:15px; line-height:1.4; overflow-wrap:anywhere; }
+    .node.focus { border-width:3px; border-color:#1266b1; box-shadow:0 0 0 5px #2387d425; } .node .kind { display:block; font-size:11px; font-weight:800; margin-bottom:4px; }
+    .node.concern { background:#fff7f2; border-color:#c8684b; } .node.option { background:#f1faf4; border-color:#3b9764; } .node.decision { background:#fff9eb; border-color:#bf8f27; } .node.action { background:#f6f1ff; border-color:#8260b5; }
+    #detail { margin-top:13px; border-left:4px solid #3779b6; padding:8px 12px; min-height:65px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
+    #detail h2 { font-size:14px; margin:0 0 5px; } [hidden] { display:none !important; }
+    @media(max-width:1050px) { main { grid-template-columns:1fr; } .notice { grid-column:1; } #canvas { height:460px; } }
+  </style>
+  <script src="/static/service-demo.js" defer></script>
+</head>
+<body>
+  <header><h1>RONRO <span class="small">アカウントサービス</span></h1><span class="pilot">Pilot デモ・保存保証なし</span></header>
+  <main>
+    <div class="notice"><strong>実アカウント・実音声の先行デモです</strong>参加者全員に音声処理と一時記録を説明し、同意を得てから開始してください。生音声はこの経路では保存しません。会議データはPilot専用の一時領域に置き、再起動後の復旧や会議後の保持は保証しません。重要な会議記録として依存しないでください。</div>
+    <section class="controls panel" aria-label="会議の操作">
+      <div id="auth-off"><h2>アカウントで利用</h2><p class="muted">RONRO専用の認証でログインします。</p><a class="button-link primary" href="/api/service/auth/login">ZITADELでログイン</a></div>
+      <div id="auth-on" hidden><h2>会議を始める</h2><p class="muted">ログイン済み。デモでは最後に開いた会議のみ、このブラウザに表示します。</p>
+        <label>会議名<input id="title" type="text" maxlength="120" value="試行会議"></label>
+        <label>目的<input id="goal" type="text" maxlength="120" value="論点の整理"></label>
+        <button id="create">新しい会議を作成</button>
+        <label class="consent"><input id="consent" type="checkbox">参加者全員に音声処理・一時保存・復旧保証なしを説明し、同意を得ました</label>
+        <div class="actions"><button id="start" class="primary" disabled>音声を開始</button><button id="pause" disabled>休憩</button><button id="resume" disabled>再開</button><button id="end" class="warning" disabled>会議を終了</button></div>
+        <div class="actions"><a id="pdf" class="button-link" href="#" hidden>会議後PDF</a><button id="logout">ログアウト</button></div>
+      </div>
+      <div id="status" class="state" role="status">認証状態を確認しています。</div>
+      <div id="meeting-meta" class="muted small"></div>
+    </section>
+    <section class="map-panel panel"><div class="map-head"><h2>議論の現在地</h2><span id="revision" class="muted"></span></div><div id="canvas"><svg id="edges" aria-hidden="true"></svg></div><div id="detail"><h2>いま加わった内容</h2><span id="canonical">会議を始めると、論点図がここに育っていきます。</span></div></section>
+  </main>
+</body>
+</html>

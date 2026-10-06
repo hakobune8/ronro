@@ -1,10 +1,15 @@
 import unittest
 
 from prototype.service_crypto import (
+    EphemeralPilotDemoKeyRegistry,
     InMemoryTestKeyRegistry,
     ServiceCryptoError,
     SessionEnvelopeCodec,
 )
+from prototype.postgres_service_store import PostgresServiceStore
+from prototype.schema import SchemaValidator
+from prototype.service_errors import ServiceStoreError
+from pathlib import Path
 
 
 class ServiceCryptoTests(unittest.TestCase):
@@ -43,6 +48,34 @@ class ServiceCryptoTests(unittest.TestCase):
         self.assertEqual(first, self.codec.blind_provider_item_id("session-a", "item-123"))
         self.assertNotEqual(first, self.codec.blind_provider_item_id("session-b", "item-123"))
         self.assertNotIn(b"item-123", first)
+
+    def test_pilot_demo_registry_requires_separate_explicit_opt_in(self):
+        registry = EphemeralPilotDemoKeyRegistry()
+        schema = SchemaValidator(Path(__file__).resolve().parents[1] / "schemas")
+        with self.assertRaises(ServiceStoreError) as missing_opt_in:
+            PostgresServiceStore("postgresql://example.invalid/demo", schema, registry)
+        self.assertEqual(missing_opt_in.exception.code, "unsafe_key_registry")
+        with self.assertRaises(ServiceStoreError) as wrong_opt_in:
+            PostgresServiceStore(
+                "postgresql://example.invalid/demo", schema, registry,
+                allow_test_key_registry=True,
+            )
+        self.assertEqual(wrong_opt_in.exception.code, "unsafe_key_registry")
+        candidate = PostgresServiceStore(
+            "postgresql://example.invalid/demo", schema, registry,
+            allow_ephemeral_pilot_registry=True,
+        )
+        registry.create_key("synthetic-session")
+        ciphertext = candidate.codec.encrypt_json(
+            "synthetic-session", "evidence", "synthetic", {"text": "合成データ"},
+        )
+        self.assertEqual(candidate.codec.decrypt_json(
+            "synthetic-session", "evidence", "synthetic", ciphertext,
+        ), {"text": "合成データ"})
+        with self.assertRaisesRegex(ServiceCryptoError, "key_unavailable"):
+            SessionEnvelopeCodec(EphemeralPilotDemoKeyRegistry()).decrypt_json(
+                "synthetic-session", "evidence", "synthetic", ciphertext,
+            )
 
 
 if __name__ == "__main__":

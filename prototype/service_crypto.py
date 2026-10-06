@@ -56,6 +56,15 @@ class InMemoryTestKeyRegistry:
             self._keys.pop(session_id, None)
 
 
+class EphemeralPilotDemoKeyRegistry(InMemoryTestKeyRegistry):
+    """Per-process keys for an explicitly non-durable private Pilot demo.
+
+    A process restart loses every key. The database may still contain
+    ciphertext until its deletion worker purges it, but cannot recover that
+    content. Never use this for a service promising meeting retention.
+    """
+
+
 class SessionEnvelopeCodec:
     VERSION = 1
     NONCE_BYTES = 12

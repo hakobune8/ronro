@@ -33,6 +33,7 @@ def _cookie_value(header: str | None, name: str) -> str | None:
 class ServiceAuthRequestHandler(BaseHTTPRequestHandler):
     identity: ServiceIdentityStore
     oidc: ServiceOidcClient
+    post_login_location = "/api/service/auth/session"
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A003
         # Callback URLs contain OIDC codes. Do not emit an access log here.
@@ -84,6 +85,9 @@ class ServiceAuthRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         try:
             parsed = urlsplit(self.path)
+            if parsed.path == "/api/service/healthz" and not parsed.query:
+                self._send(200, b'{"status":"ok"}')
+                return
             if parsed.path == "/api/service/auth/login" and not parsed.query:
                 existing = _cookie_value(self.headers.get("Cookie"), LOGIN_COOKIE_NAME)
                 binding = existing if self.identity._valid_opaque(existing) else secrets.token_urlsafe(32)
@@ -112,7 +116,7 @@ class ServiceAuthRequestHandler(BaseHTTPRequestHandler):
                 user_id = self.identity.get_or_create_user(verified)
                 token, _ = self.identity.issue_web_session(user_id)
                 self._send(
-                    303, location="/api/service/auth/session",
+                    303, location=self.post_login_location,
                     cookies=(self.identity.browser_security.session_cookie(
                         token, max_age_seconds=12 * 3600,
                     ),),
