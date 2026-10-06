@@ -380,9 +380,10 @@ class PostgresServiceStore:
                 open_interval = connection.execute(
                     """UPDATE service_capture_interval
                        SET reason_code = 'transport_disconnected'
-                       WHERE session_id = %s AND kind = 'capture_unavailable'
+                       WHERE session_id = %s AND generation = %s
+                         AND kind = 'capture_unavailable'
                          AND closed_at IS NULL RETURNING interval_id""",
-                    (session_id,),
+                    (session_id, generation),
                 ).fetchone()
                 if open_interval is None:
                     connection.execute(
@@ -413,9 +414,11 @@ class PostgresServiceStore:
                SET reason_code = %s,
                    missing_first_sequence = COALESCE(missing_first_sequence, %s),
                    missing_last_sequence = COALESCE(missing_last_sequence, %s)
-               WHERE session_id = %s AND kind = 'capture_unavailable'
+               WHERE session_id = %s AND generation = %s
+                 AND kind = 'capture_unavailable'
                  AND closed_at IS NULL RETURNING interval_id""",
-            (reason_code, missing_first, missing_last, session_id),
+            (reason_code, missing_first, missing_last,
+             session_id, row["capture_generation"]),
         ).fetchone()
         if open_interval is None:
             connection.execute(

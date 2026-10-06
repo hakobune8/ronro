@@ -831,6 +831,50 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.assertEqual(interval, (0, 2))
         self.assertEqual(count, 0)
 
+    def test_repeated_disconnects_preserve_each_generation_gap(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-1", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        self.store.record_capture_frame_receipt(
+            self.session_id, generation=1, connection_id="synthetic-connection-1",
+            chunk=AudioChunk(0, 0.0, b"\x01\x00" * 2400),
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="disconnected",
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=2, event="connected",
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=2, event="disconnected",
+        )
+        with psycopg.connect(TEST_DSN) as connection:
+            rows = connection.execute(
+                """SELECT generation, closed_at FROM service_capture_interval
+                   WHERE session_id = %s ORDER BY interval_id""",
+                (self.session_id,),
+            ).fetchall()
+        self.assertEqual([row[0] for row in rows], [1, 2])
+        self.assertTrue(all(row[1] is None for row in rows))
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=3, event="connected",
+        )
+        self.store.record_capture_frame_receipt(
+            self.session_id, generation=3, connection_id="synthetic-connection-3",
+            chunk=AudioChunk(0, 0.1, b"\x01\x00" * 2400),
+        )
+        with psycopg.connect(TEST_DSN) as connection:
+            remaining = connection.execute(
+                """SELECT COUNT(*) FROM service_capture_interval
+                   WHERE session_id = %s AND closed_at IS NULL""",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertEqual(remaining, 0)
+
     def test_capture_version_and_operation_key_conflicts_leave_state_unchanged(self):
         initial = self.store.capture_snapshot(self.session_id, "synthetic-owner")
         with self.assertRaises(ServiceStoreError) as caught:
