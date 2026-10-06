@@ -445,6 +445,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
             "0005_capture_transitions.sql", "0006_capture_frame_receipts.sql",
             "0007_provider_item_lifecycle.sql", "0008_session_retention.sql",
             "0009_service_identity.sql",
+            "0010_oidc_browser_binding.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 

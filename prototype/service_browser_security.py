@@ -17,6 +17,7 @@ from .service_errors import ServiceStoreError
 
 
 COOKIE_NAME = "__Host-ronro_session"
+LOGIN_COOKIE_NAME = "__Host-ronro_login"
 _OPAQUE_TOKEN = re.compile(r"[A-Za-z0-9_-]{32,128}\Z", re.ASCII)
 
 
@@ -79,4 +80,13 @@ class ServiceBrowserSecurity:
                 or type(max_age_seconds) is not int or not 1 <= max_age_seconds <= 86400):
             raise ServiceStoreError("session_cookie_invalid", "Invalid Web Session cookie")
         return (f"{COOKIE_NAME}={value}; Path=/; Max-Age={max_age_seconds}; "
+                "Secure; HttpOnly; SameSite=Lax")
+
+    @staticmethod
+    def login_cookie(value: str, *, max_age_seconds: int = 600) -> str:
+        if (not isinstance(value, str) or _OPAQUE_TOKEN.fullmatch(value) is None
+                or type(max_age_seconds) is not int
+                or not 1 <= max_age_seconds <= 600):
+            raise ServiceStoreError("login_cookie_invalid", "Invalid OIDC login cookie")
+        return (f"{LOGIN_COOKIE_NAME}={value}; Path=/; Max-Age={max_age_seconds}; "
                 "Secure; HttpOnly; SameSite=Lax")

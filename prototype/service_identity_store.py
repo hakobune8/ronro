@@ -8,6 +8,8 @@ the key's recovery, rotation, and deletion runbooks have been validated.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
 import json
 import os
@@ -83,33 +85,42 @@ class ServiceIdentityStore:
             raise ServiceStoreError("oidc_attempt_corrupt", "OIDC attempt is unavailable")
         return attempt
 
-    def save_attempt(self, attempt: AuthorizationAttempt, *, ttl_seconds: int = 600) -> None:
+    def save_attempt(
+        self, attempt: AuthorizationAttempt, *, browser_binding_token: str,
+        ttl_seconds: int = 600,
+    ) -> None:
         if (not isinstance(attempt, AuthorizationAttempt)
                 or not all(self._valid_opaque(v) for v in asdict(attempt).values())
+                or not self._valid_opaque(browser_binding_token)
                 or type(ttl_seconds) is not int or not 1 <= ttl_seconds <= 600):
             raise ServiceStoreError("oidc_attempt_invalid", "OIDC attempt is invalid")
         digest = self._digest("oidc-state", attempt.state.encode("ascii"))
+        browser_digest = self._digest("oidc-browser", browser_binding_token.encode("ascii"))
         cipher = self._encrypt_attempt(digest, attempt)
         with psycopg.connect(self.dsn) as connection:
             connection.execute(
                 """INSERT INTO service_auth_attempt
-                   (state_digest, secret_cipher, expires_at)
-                   VALUES (%s, %s, now() + (%s * interval '1 second'))""",
-                (digest, cipher, ttl_seconds),
+                   (state_digest, browser_bind_digest, secret_cipher, expires_at)
+                   VALUES (%s, %s, %s, now() + (%s * interval '1 second'))""",
+                (digest, browser_digest, cipher, ttl_seconds),
             )
 
-    def consume_attempt(self, received_state: str | None) -> AuthorizationAttempt:
+    def consume_attempt(
+        self, received_state: str | None, *, browser_binding_token: str | None,
+    ) -> AuthorizationAttempt:
         """Delete before token exchange; retries and concurrent callbacks fail."""
 
-        if not self._valid_opaque(received_state):
+        if not self._valid_opaque(received_state) or not self._valid_opaque(browser_binding_token):
             raise ServiceStoreError("oidc_state_invalid", "OIDC callback state is invalid")
         digest = self._digest("oidc-state", received_state.encode("ascii"))
+        browser_digest = self._digest("oidc-browser", browser_binding_token.encode("ascii"))
         with psycopg.connect(self.dsn, row_factory=dict_row) as connection:
             row = connection.execute(
                 """DELETE FROM service_auth_attempt
-                   WHERE state_digest = %s AND expires_at > now()
+                   WHERE state_digest = %s AND browser_bind_digest = %s
+                     AND expires_at > now()
                    RETURNING secret_cipher""",
-                (digest,),
+                (digest, browser_digest),
             ).fetchone()
             if row is None:
                 raise ServiceStoreError("oidc_state_invalid", "OIDC callback state is invalid")
@@ -151,7 +162,8 @@ class ServiceIdentityStore:
                 or type(ttl_seconds) is not int or not 60 <= ttl_seconds <= 86400):
             raise ServiceStoreError("web_session_invalid", "Web Session request is invalid")
         token = secrets.token_urlsafe(32)
-        csrf_token, csrf_digest = self.browser_security.new_csrf_secret()
+        csrf_token = self._csrf_token(token)
+        csrf_digest = hashlib.sha256(csrf_token.encode("ascii")).digest()
         digest = self._digest("web-session", token.encode("ascii"))
         with psycopg.connect(self.dsn, row_factory=dict_row) as connection:
             row = connection.execute(
@@ -167,6 +179,19 @@ class ServiceIdentityStore:
                 (digest, user_id, csrf_digest, ttl_seconds),
             )
         return token, csrf_token
+
+    def _csrf_token(self, token: str) -> str:
+        value = self._digest("web-csrf", token.encode("ascii"))
+        return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+    def csrf_token_for_web_session(self, token: str | None) -> str:
+        """Same-origin GET may retrieve the stable token in each browser tab."""
+
+        _, stored_digest = self._lookup_session(token)
+        derived = self._csrf_token(token)
+        if not hmac.compare_digest(hashlib.sha256(derived.encode("ascii")).digest(), stored_digest):
+            raise ServiceStoreError("csrf_rejected", "CSRF verification failed")
+        return derived
 
     def _lookup_session(self, token: str | None) -> tuple[str, bytes]:
         if not self._valid_opaque(token):

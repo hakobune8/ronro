@@ -50,6 +50,7 @@ class ServiceIdentityStoreTests(unittest.TestCase):
         )
         self.created_users = []
         self.created_sessions = []
+        self.browser_binding = "B" * 43
 
     def tearDown(self):
         with psycopg.connect(TEST_DSN) as connection:
@@ -80,7 +81,7 @@ class ServiceIdentityStoreTests(unittest.TestCase):
 
     def test_attempt_is_encrypted_one_use_and_rejects_expired_state(self):
         _, attempt = self.oidc.begin_authorization()
-        self.store.save_attempt(attempt)
+        self.store.save_attempt(attempt, browser_binding_token=self.browser_binding)
         first_digest = self.store._digest("oidc-state", attempt.state.encode())
         with psycopg.connect(TEST_DSN) as connection:
             row = connection.execute(
@@ -90,13 +91,15 @@ class ServiceIdentityStoreTests(unittest.TestCase):
         self.assertNotIn(attempt.state.encode(), bytes(row[0]) + bytes(row[1]))
         self.assertNotIn(attempt.nonce.encode(), bytes(row[1]))
         self.assertNotIn(attempt.code_verifier.encode(), bytes(row[1]))
-        self.assertEqual(self.store.consume_attempt(attempt.state), attempt)
+        self.assertEqual(self.store.consume_attempt(
+            attempt.state, browser_binding_token=self.browser_binding,
+        ), attempt)
         with self.assertRaises(ServiceStoreError) as caught:
-            self.store.consume_attempt(attempt.state)
+            self.store.consume_attempt(attempt.state, browser_binding_token=self.browser_binding)
         self.assertEqual(caught.exception.code, "oidc_state_invalid")
 
         _, expired = self.oidc.begin_authorization()
-        self.store.save_attempt(expired)
+        self.store.save_attempt(expired, browser_binding_token=self.browser_binding)
         digest = self.store._digest("oidc-state", expired.state.encode())
         with psycopg.connect(TEST_DSN) as connection:
             connection.execute(
@@ -105,16 +108,18 @@ class ServiceIdentityStoreTests(unittest.TestCase):
                 "WHERE state_digest = %s", (digest,),
             )
         with self.assertRaises(ServiceStoreError):
-            self.store.consume_attempt(expired.state)
+            self.store.consume_attempt(expired.state, browser_binding_token=self.browser_binding)
         self.assertEqual(self.store.purge_expired_auth_records()[0], 1)
 
     def test_concurrent_callback_can_consume_state_only_once(self):
         _, attempt = self.oidc.begin_authorization()
-        self.store.save_attempt(attempt)
+        self.store.save_attempt(attempt, browser_binding_token=self.browser_binding)
 
         def consume():
             try:
-                return self.store.consume_attempt(attempt.state)
+                return self.store.consume_attempt(
+                    attempt.state, browser_binding_token=self.browser_binding,
+                )
             except ServiceStoreError as exc:
                 return exc.code
 
@@ -122,6 +127,21 @@ class ServiceIdentityStoreTests(unittest.TestCase):
             results = list(pool.map(lambda _: consume(), range(2)))
         self.assertEqual(sum(isinstance(r, AuthorizationAttempt) for r in results), 1)
         self.assertEqual(results.count("oidc_state_invalid"), 1)
+
+    def test_callback_requires_same_browser_without_breaking_parallel_tabs(self):
+        _, first = self.oidc.begin_authorization()
+        _, second = self.oidc.begin_authorization()
+        self.store.save_attempt(first, browser_binding_token=self.browser_binding)
+        self.store.save_attempt(second, browser_binding_token=self.browser_binding)
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.consume_attempt(first.state, browser_binding_token="C" * 43)
+        self.assertEqual(caught.exception.code, "oidc_state_invalid")
+        self.assertEqual(self.store.consume_attempt(
+            second.state, browser_binding_token=self.browser_binding,
+        ), second)
+        self.assertEqual(self.store.consume_attempt(
+            first.state, browser_binding_token=self.browser_binding,
+        ), first)
 
     def test_user_mapping_and_session_revocation_are_scoped(self):
         first_subject = f"subject-{uuid.uuid4()}"
@@ -131,6 +151,7 @@ class ServiceIdentityStoreTests(unittest.TestCase):
         token, csrf = self.store.issue_web_session(first)
         other_token, _ = self.store.issue_web_session(second)
         self.assertEqual(self.store.authenticate(token), first)
+        self.assertEqual(self.store.csrf_token_for_web_session(token), csrf)
         self.assertEqual(
             self.store.authenticate_mutation(
                 token=token, origin=self.browser.public_origin, csrf_token=csrf,

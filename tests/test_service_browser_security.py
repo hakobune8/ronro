@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from prototype.service_browser_security import COOKIE_NAME, ServiceBrowserSecurity
+from prototype.service_browser_security import COOKIE_NAME, LOGIN_COOKIE_NAME, ServiceBrowserSecurity
 from prototype.service_errors import ServiceStoreError
 
 
@@ -60,3 +60,13 @@ class ServiceBrowserSecurityTests(unittest.TestCase):
         for lifetime in (0, -1, 86401, True):
             with self.subTest(lifetime=lifetime), self.assertRaises(ServiceStoreError):
                 self.policy.session_cookie("A" * 43, max_age_seconds=lifetime)
+
+    def test_oidc_browser_binding_cookie_is_host_only_and_short_lived(self):
+        header = self.policy.login_cookie("B" * 43)
+        self.assertTrue(header.startswith(f"{LOGIN_COOKIE_NAME}="))
+        for part in ("Path=/", "Max-Age=600", "Secure", "HttpOnly", "SameSite=Lax"):
+            self.assertIn(part, header)
+        self.assertNotIn("Domain=", header)
+        for bad in (None, "short", "B" * 43 + "; Domain=evil.test"):
+            with self.assertRaises(ServiceStoreError):
+                self.policy.login_cookie(bad)
