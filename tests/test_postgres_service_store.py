@@ -15,6 +15,7 @@ import psycopg
 from prototype.postgres_service_store import PostgresServiceStore
 from prototype.service_analyzer_worker import ServiceAnalyzerWorker
 from prototype.service_drain_supervisor import ServiceDrainSupervisor
+from prototype.service_deletion_worker import ServiceDeletionWorker
 from prototype.service_final_ingest import ServiceFinalIngestor
 from prototype.service_realtime_items import ServiceRealtimeItemIngestor
 from prototype.service_final_record import prepare_final_record, render_final_pdf
@@ -54,6 +55,9 @@ class PostgresServiceStoreTests(unittest.TestCase):
             for session_id in self.created_sessions:
                 connection.execute(
                     "DELETE FROM service_session WHERE session_id = %s", (session_id,)
+                )
+                connection.execute(
+                    "DELETE FROM service_deletion_job WHERE session_id = %s", (session_id,)
                 )
 
     def _final(self, sequence=1, job_id="job-one", provider_item_id="provider-one"):
@@ -356,6 +360,114 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.assertEqual(self.store.capture_snapshot(
             self.session_id, "synthetic-owner",
         )["state"], "pausing")
+
+    def test_owner_deletion_fences_then_purges_after_key_unavailable(self):
+        self._final()
+        grant_id, token = self.store.issue_view_credential(
+            self.session_id, "synthetic-owner",
+        )
+        self.store.begin_owner_deletion(self.session_id, "synthetic-owner")
+        with self.assertRaises(ServiceStoreError) as owner:
+            self.store.authorize_owner_session(self.session_id, "synthetic-owner")
+        self.assertEqual(owner.exception.code, "session_deleted")
+        with self.assertRaises(ServiceStoreError):
+            self.store.authorize_live_canvas(self.session_id, token)
+        self.assertIsNone(self.store.claim_job(session_id=self.session_id))
+        self.assertEqual(ServiceDeletionWorker(self.store).process_one(), {
+            "session_id": self.session_id, "state": "purged",
+        })
+        with self.assertRaises(ServiceCryptoError) as key:
+            self.registry.get_key(self.session_id)
+        self.assertEqual(key.exception.code, "key_unavailable")
+        with psycopg.connect(TEST_DSN) as connection:
+            counts = [connection.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE session_id = %s",
+                (self.session_id,),
+            ).fetchone()[0] for table in (
+                "service_session", "service_evidence", "service_job", "service_event",
+                "service_checkpoint", "service_view_credential", "service_deletion_job",
+            )]
+        self.assertEqual(counts, [0] * len(counts))
+
+    def test_unverified_key_destruction_keeps_fenced_job_retryable(self):
+        self.store.begin_owner_deletion(self.session_id, "synthetic-owner")
+        original_delete = self.registry.delete_key
+        def unverified(_session_id):
+            raise ServiceCryptoError("key_deletion_unverified")
+        self.registry.delete_key = unverified
+        try:
+            with self.assertRaises(ServiceCryptoError) as caught:
+                ServiceDeletionWorker(self.store).process_one()
+            self.assertEqual(caught.exception.code, "key_deletion_unverified")
+        finally:
+            self.registry.delete_key = original_delete
+        with psycopg.connect(TEST_DSN) as connection:
+            job = connection.execute(
+                """SELECT state, last_error_code, next_attempt_at > now()
+                   FROM service_deletion_job WHERE session_id = %s""",
+                (self.session_id,),
+            ).fetchone()
+            session_state = connection.execute(
+                "SELECT service_state FROM service_session WHERE session_id = %s",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertEqual(job, ("pending", "key_deletion_unverified", True))
+        self.assertEqual(session_state, "deleting")
+        self.assertEqual(len(self.registry.get_key(self.session_id)), 32)
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                """UPDATE service_deletion_job SET next_attempt_at = now() - interval '1 second'
+                   WHERE session_id = %s""", (self.session_id,),
+            )
+        self.assertEqual(ServiceDeletionWorker(self.store).process_one()["state"], "purged")
+
+    def test_destroyed_key_before_row_purge_does_not_disclose_session(self):
+        self.store.begin_owner_deletion(self.session_id, "synthetic-owner")
+        self.registry.delete_key(self.session_id)
+        with self.assertRaises(ServiceStoreError) as owner:
+            self.store.authorize_owner_session(self.session_id, "synthetic-owner")
+        self.assertEqual(owner.exception.code, "session_not_found")
+        with self.assertRaises(ServiceStoreError) as other:
+            self.store.authorize_owner_session(self.session_id, "another-owner")
+        self.assertEqual(other.exception.code, "session_not_found")
+        self.assertEqual(ServiceDeletionWorker(self.store).process_one()["state"], "purged")
+
+    def test_deletion_fences_in_flight_analyzer_result(self):
+        evidence, _ = self._final()
+        claim = self.store.claim_job(session_id=self.session_id, now=100)
+        self.assertIsNotNone(claim)
+        self.store.begin_owner_deletion(self.session_id, "synthetic-owner")
+        node = event(
+            self.session_id, 3, "node_detected",
+            {"node_type": "idea", "label": "遅れた合成案"},
+            actor="analyzer", evidence_ids=[evidence["id"]],
+        )
+        with self.assertRaises(ServiceStoreError) as stale:
+            self.store.accept_job_result(
+                self.session_id, "job-one", attempt=claim["attempt"],
+                start_revision=claim["start_revision"],
+                accepted_output={"text": "遅れた合成出力"}, events=[node],
+            )
+        self.assertEqual(stale.exception.code, "session_closed")
+        self.assertEqual(ServiceDeletionWorker(self.store).process_one()["state"], "purged")
+
+    def test_expired_session_is_fenced_and_deleted_by_worker(self):
+        self._begin_supervised_drain(self.session_id, "expiry-delete")
+        self.assertEqual(self.store.complete_drain_if_ready(self.session_id)["state"],
+                         "ended")
+        self.assertIsNone(self.store.begin_due_deletion())
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                """UPDATE service_session SET expires_at = now() - interval '1 second'
+                   WHERE session_id = %s""", (self.session_id,),
+            )
+        self.assertEqual(ServiceDeletionWorker(self.store).process_one()["state"], "purged")
+        with psycopg.connect(TEST_DSN) as connection:
+            remaining = connection.execute(
+                "SELECT COUNT(*) FROM service_session WHERE session_id = %s",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertEqual(remaining, 0)
 
     def test_capture_lease_is_cross_store_and_expiry_fences_old_audio(self):
         self.store.request_capture_transition(
@@ -1051,6 +1163,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
             "0010_oidc_browser_binding.sql", "0011_capture_connection_lease.sql",
             "0012_drain_supervision.sql",
             "0013_active_end_intent.sql",
+            "0014_session_deletion_job.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 

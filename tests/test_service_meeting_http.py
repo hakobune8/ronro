@@ -21,6 +21,7 @@ from prototype.service_browser_security import COOKIE_NAME, ServiceBrowserSecuri
 from prototype.service_crypto import InMemoryTestKeyRegistry
 from prototype.service_identity_store import ServiceIdentityStore
 from prototype.service_meeting_http import create_service_meeting_server
+from prototype.service_deletion_worker import ServiceDeletionWorker
 from prototype.service_oidc import OidcConfiguration, ServiceOidcClient
 from tests.test_service_store import event, final
 
@@ -282,6 +283,32 @@ class ServiceMeetingHttpTests(unittest.TestCase):
         )
         self.content.complete_end_intent(self.session_id)
         self.assertEqual(request()[0], 200)
+
+    def test_owner_delete_fences_access_and_requires_csrf(self):
+        path = f"/api/service/sessions/{self.session_id}"
+        origin = "https://ronro.example.test"
+        self.assertEqual(self._request(path, method="DELETE", origin=origin)[0], 401)
+        self.assertEqual(self._request(
+            path, method="DELETE", cookie=self.owner_cookie, origin=origin,
+        )[0], 403)
+        self.assertEqual(self._request(
+            path, method="DELETE", cookie=self.other_cookie, origin=origin,
+            csrf=self.other_csrf,
+        )[0], 404)
+        status, _, body = self._request(
+            path, method="DELETE", cookie=self.owner_cookie, origin=origin,
+            csrf=self.owner_csrf,
+        )
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body), {"state": "deleting"})
+        self.assertEqual(self._request(
+            f"{path}/canvas", cookie=self.owner_cookie,
+        )[0], 410)
+        self.assertEqual(ServiceDeletionWorker(self.content).process_one()["state"],
+                         "purged")
+        self.assertEqual(self._request(
+            f"{path}/canvas", cookie=self.owner_cookie,
+        )[0], 404)
 
     def _analyzed_node(self):
         evidence, utterance = final(self.session_id, 1)

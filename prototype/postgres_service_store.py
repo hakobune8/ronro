@@ -24,7 +24,9 @@ from psycopg.rows import dict_row
 from .replay import ReplayResult, ReplayRunner
 from .live_audio import AudioChunk, TARGET_SAMPLE_RATE
 from .schema import SchemaValidator
-from .service_crypto import InMemoryTestKeyRegistry, SessionEnvelopeCodec, SessionKeyRegistry
+from .service_crypto import (
+    InMemoryTestKeyRegistry, ServiceCryptoError, SessionEnvelopeCodec, SessionKeyRegistry,
+)
 from .service_errors import ServiceStoreError
 from .service_presentation import validate_presentation_delta
 
@@ -207,9 +209,16 @@ class PostgresServiceStore:
         if not isinstance(owner_user_id, str) or not owner_user_id or not owner_user_id.isascii():
             raise ServiceStoreError("authentication_required", "Authentication required")
         row = self._lock_session(connection, session_id)
-        stored_owner = self.codec.decrypt_json(
-            session_id, "owner", session_id, row["owner_cipher"]
-        )
+        try:
+            stored_owner = self.codec.decrypt_json(
+                session_id, "owner", session_id, row["owner_cipher"]
+            )
+        except ServiceCryptoError as exc:
+            if row["service_state"] == "deleting":
+                # The DEK may already be gone while DB cascade is pending.
+                # Without an owner proof, reveal no Session existence.
+                raise ServiceStoreError("session_not_found", "Session not found") from exc
+            raise
         if not isinstance(stored_owner, str) or not hmac.compare_digest(
             stored_owner, owner_user_id
         ):
@@ -1873,6 +1882,140 @@ class PostgresServiceStore:
             if row["expires_at"] is None:
                 raise ServiceStoreError("retention_deadline_missing", "Ended Session has no deadline")
             return row["expires_at"]
+
+    @staticmethod
+    def _begin_deletion_locked(
+        connection: psycopg.Connection, session_id: str,
+        row: dict[str, Any], *, reason: str,
+    ) -> None:
+        if row["service_state"] == "deleting":
+            return
+        connection.execute(
+            """UPDATE service_session SET service_state = 'deleting',
+               capture_state = 'deleting', intake_closed = TRUE,
+               capture_generation = capture_generation + 1,
+               version = version + 1 WHERE session_id = %s""",
+            (session_id,),
+        )
+        connection.execute(
+            """UPDATE service_view_credential SET revoked_at = COALESCE(revoked_at, now())
+               WHERE session_id = %s""",
+            (session_id,),
+        )
+        connection.execute(
+            """INSERT INTO service_deletion_job (session_id, reason)
+               VALUES (%s, %s) ON CONFLICT (session_id) DO NOTHING""",
+            (session_id, reason),
+        )
+
+    def begin_owner_deletion(self, session_id: str, owner_user_id: str) -> None:
+        """Immediately revoke a meeting, then let a trusted worker destroy it."""
+
+        with self._transaction() as connection:
+            row = self._require_owner_locked(connection, session_id, owner_user_id)
+            self._begin_deletion_locked(
+                connection, session_id, row, reason="owner_requested",
+            )
+
+    def begin_due_deletion(self) -> str | None:
+        """Fence one ended Session at its DB-clock seven-day expiry."""
+
+        with self._transaction() as connection:
+            row = connection.execute(
+                """SELECT * FROM service_session
+                   WHERE service_state IN ('ended', 'ended_incomplete')
+                     AND expires_at <= now()
+                   ORDER BY expires_at, session_id
+                   LIMIT 1 FOR UPDATE SKIP LOCKED""",
+            ).fetchone()
+            if row is None:
+                return None
+            session_id = str(row["session_id"])
+            self._begin_deletion_locked(
+                connection, session_id, row, reason="expiry",
+            )
+            return session_id
+
+    def claim_deletion_job(self) -> dict[str, Any] | None:
+        """Claim one fenced deletion; no key operation runs inside this transaction."""
+
+        with self._transaction() as connection:
+            job = connection.execute(
+                """SELECT session_id, attempt FROM service_deletion_job
+                   WHERE next_attempt_at <= now()
+                     AND (state = 'pending' OR
+                          (state = 'processing' AND claim_until < now()))
+                   ORDER BY next_attempt_at, session_id
+                   LIMIT 1 FOR UPDATE SKIP LOCKED""",
+            ).fetchone()
+            if job is None:
+                return None
+            token = uuid.uuid4().hex
+            connection.execute(
+                """UPDATE service_deletion_job SET state = 'processing',
+                   attempt = attempt + 1, claim_token = %s,
+                   claim_until = now() + interval '60 seconds', updated_at = now()
+                   WHERE session_id = %s""",
+                (token, job["session_id"]),
+            )
+            return {"session_id": str(job["session_id"]),
+                    "attempt": int(job["attempt"]) + 1, "claim_token": token}
+
+    @staticmethod
+    def _require_deletion_claim_locked(
+        connection: psycopg.Connection, session_id: str,
+        claim_token: str,
+    ) -> None:
+        job = connection.execute(
+            """SELECT claim_token, state, claim_until > now() AS live
+               FROM service_deletion_job WHERE session_id = %s FOR UPDATE""",
+            (session_id,),
+        ).fetchone()
+        if (job is None or job["state"] != "processing" or not job["live"]
+                or job["claim_token"] != claim_token):
+            raise ServiceStoreError("stale_deletion_claim", "Deletion claim is unavailable")
+
+    def fail_deletion_job(
+        self, session_id: str, *, claim_token: str, error_code: str,
+    ) -> None:
+        if (not isinstance(error_code, str) or not error_code.isascii()
+                or not 1 <= len(error_code) <= 64
+                or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789_" for char in error_code)):
+            error_code = "deletion_worker_error"
+        with self._transaction() as connection:
+            self._require_deletion_claim_locked(connection, session_id, claim_token)
+            connection.execute(
+                """UPDATE service_deletion_job SET state = 'pending',
+                   claim_token = NULL, claim_until = NULL,
+                   next_attempt_at = now() + interval '30 seconds',
+                   last_error_code = %s, updated_at = now()
+                   WHERE session_id = %s""",
+                (error_code, session_id),
+            )
+
+    def complete_deletion_job(self, session_id: str, *, claim_token: str) -> None:
+        """Purge DB rows only after the registry says this DEK is unavailable."""
+
+        with self._transaction() as connection:
+            row = self._lock_session(connection, session_id)
+            if row["service_state"] != "deleting":
+                raise ServiceStoreError("deletion_not_fenced", "Session is not deleting")
+            self._require_deletion_claim_locked(connection, session_id, claim_token)
+            try:
+                self.key_registry.get_key(session_id)
+            except ServiceCryptoError as exc:
+                if exc.code != "key_unavailable":
+                    raise
+            else:
+                raise ServiceStoreError("key_still_available", "Session key is still readable")
+            connection.execute(
+                "DELETE FROM service_session WHERE session_id = %s",
+                (session_id,),
+            )
+            connection.execute(
+                "DELETE FROM service_deletion_job WHERE session_id = %s",
+                (session_id,),
+            )
 
     def load_owner_final_record_source(
         self, session_id: str, owner_user_id: str,

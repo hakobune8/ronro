@@ -1,8 +1,8 @@
 """Loopback-only owner and live-display routes for Account Service v1.
 
-This is not a deployed Service entrypoint. It cannot accept audio or delete
-content. Active End stages a same-socket stop intent; a trusted Gateway or
-supervisor must reconcile it before Finalizing and Drain.
+This is not a deployed Service entrypoint. It cannot accept audio. Owner
+deletion only fences access; a trusted worker must verify key destruction
+and purge content. Active End stages a same-socket stop intent.
 The content adapter rejects the ephemeral test registry unless
 explicitly opted in for synthetic tests.
 """
@@ -176,6 +176,17 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802
         parsed = urlsplit(self.path)
+        session = _SESSION_PATH.fullmatch(parsed.path) if not parsed.query else None
+        if session is not None and session.group(2) is None:
+            try:
+                owner = self._mutating_owner()
+                self.content.begin_owner_deletion(session.group(1), owner)
+                self._send(202, b'{"state":"deleting"}')
+            except ServiceStoreError as exc:
+                self._error(exc)
+            except Exception:
+                self._send(503, b'{"error":{"code":"service_unavailable"}}')
+            return
         matched = _REVOKE_VIEW_PATH.fullmatch(parsed.path) if not parsed.query else None
         if matched is None:
             self._send(404, b'{"error":{"code":"not_found"}}')
