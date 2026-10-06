@@ -71,10 +71,10 @@ class ServiceOidcTests(unittest.TestCase):
 
     def test_valid_signed_id_token_returns_only_issuer_and_subject(self):
         self.assertEqual(
-            self.client.verify_id_token(
+            vars(self.client.verify_id_token(
                 id_token=self._id_token(), jwks=self.jwks, attempt=self.attempt,
-            ),
-            (self.config.issuer, "synthetic-subject"),
+            )),
+            {"issuer": self.config.issuer, "subject": "synthetic-subject"},
         )
 
     def test_rejects_wrong_issuer_audience_nonce_expiry_and_signature(self):
@@ -150,9 +150,9 @@ class ServiceOidcTests(unittest.TestCase):
                 )
             exchange.assert_not_called()
             self.assertEqual(
-                self.client.complete_authorization(
+                vars(self.client.complete_authorization(
                     code="synthetic-code", received_state=self.attempt.state,
                     attempt=self.attempt,
-                ),
-                (self.config.issuer, "synthetic-subject"),
+                )),
+                {"issuer": self.config.issuer, "subject": "synthetic-subject"},
             )

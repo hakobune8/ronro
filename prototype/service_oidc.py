@@ -21,6 +21,22 @@ from joserfc.jwk import KeySet
 
 from .service_errors import ServiceStoreError
 
+_VERIFIED_IDENTITY_MARKER = object()
+
+
+@dataclass(frozen=True, init=False)
+class VerifiedOidcIdentity:
+    """A subject issued only after this module validates an ID token."""
+
+    issuer: str
+    subject: str
+
+    def __init__(self, issuer: str, subject: str, marker: object) -> None:
+        if marker is not _VERIFIED_IDENTITY_MARKER:
+            raise TypeError("OIDC identity must come from a verified ID token")
+        object.__setattr__(self, "issuer", issuer)
+        object.__setattr__(self, "subject", subject)
+
 
 def _https_origin(value: str) -> str:
     try:
@@ -127,7 +143,7 @@ class ServiceOidcClient:
     def complete_authorization(
         self, *, code: str, received_state: str | None,
         attempt: AuthorizationAttempt,
-    ) -> tuple[str, str]:
+    ) -> VerifiedOidcIdentity:
         """Return verified identity; persisted state must be consumed once first.
 
         Browser-supplied signing keys are never accepted. The configured JWKS
@@ -167,7 +183,7 @@ class ServiceOidcClient:
     def verify_id_token(
         self, *, id_token: str, jwks: dict, attempt: AuthorizationAttempt,
         access_token: str | None = None,
-    ) -> tuple[str, str]:
+    ) -> VerifiedOidcIdentity:
         """Verify RS256 signature/claims; return only stable issuer + subject."""
 
         try:
@@ -187,4 +203,4 @@ class ServiceOidcClient:
                 raise ValueError("OIDC issuer/subject mismatch")
         except Exception as exc:
             raise ServiceStoreError("oidc_token_invalid", "OIDC ID token verification failed") from exc
-        return self.config.issuer, subject
+        return VerifiedOidcIdentity(self.config.issuer, subject, _VERIFIED_IDENTITY_MARKER)

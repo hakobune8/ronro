@@ -12,13 +12,14 @@ WebログインはAuthorization Code + PKCEを使う。サーバーは事前に�
 
 ブラウザのログイン期限切れ・再認証は、すでに受理済みの会議Sessionを自動終了させない。操作再開には再認証を要求し、音声取込みの継続/欠落はP3のCapture状態とgapで説明する。期限切れを黙って`ended`と扱わない。会議時間が約2時間を超えても終了を強制しない。
 
-`prototype/service_browser_security.py`はOrigin/CSRF/Cookie形式の独立した検証境界を持つ。`prototype/service_oidc.py`は専用ClientのCode + S256 PKCE認可URL、state/nonce照合、固定HTTPS JWKSからのRS256 ID Token検証を持つ。合成鍵の単体テストは通っているが、認可試行の一回限りの永続化、RONRO専用Client登録、実ZITADELでのToken交換、Web Session、route保護はまだ未実装である。既存Pilot経路・公開サービスには接続しない。
+`prototype/service_browser_security.py`はOrigin/CSRF/Cookie形式の検証境界を持つ。`prototype/service_oidc.py`は専用ClientのCode + S256 PKCE認可URL、state/nonce照合、固定HTTPS JWKSからのRS256 ID Token検証を持つ。`0009_service_identity.sql`と`prototype/service_identity_store.py`は、暗号化した一回限りの認可試行、`issuer + subject`の鍵付きダイジェストによる内部user対応、ハッシュ化Cookie/CSRFと失効可能なWeb SessionをPostgreSQLに保持する。`prototype/service_owner_access.py`は、これを会議owner照合に接続する内部境界である。合成ユーザーのPostgreSQL試験は通ったが、RONRO専用Client登録、実ZITADELでのToken交換、永続identity keyの運用、HTTP/WSS route保護は未実装である。既存Pilot経路・公開サービスには接続しない。
 
 ## 実装前に固定・検証する設定
 
 - RONRO専用Clientのissuer、client ID、Client認証方式、固定Callback URI、logout URI、許可Originを環境別に登録する。Secretは配備Secretにのみ置く。
 - Discovery/JWKSの取得元をissuerに固定し、署名アルゴリズムを許可リスト化して鍵ローテーションを試験する。失敗時は認証拒否とし、未検証claimsを信用しない。
-- Web Sessionの保存・失効・全端末logout・退会、CSRF digestのSession保存、OIDC state/nonce/PKCEの一回使用と期限を実装する。Cookieだけ・CSRFだけでは操作を許可しない。
+- Web Sessionの発行・失効とCSRF digest、OIDC state/nonce/PKCEの一回使用と期限の保存境界は実装済み。実routeからの呼び出し、全端末logout・退会時の安全な停止/削除、期限切れレコード清掃の運用スケジュールを実装・試験する。Cookieだけ・CSRFだけでは操作を許可しない。
+- identity keyの永続保管・復旧・ローテーションを実証する。この鍵を失うと主体対応と既存Web Sessionが使えず、会議のDEKとは別の障害となる。DBバックアップへ鍵を含めない。
 - 別アカウント/別Session、失効View資格、Cross-Origin、WSS再接続、Callback再送、評価API露出を統合試験する。
 - 会議中のWeb Session期限切れ/IdP一時障害で、会議のCanonical Event列が勝手に終了・削除されないことを検証する。
 
