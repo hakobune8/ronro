@@ -30,6 +30,42 @@ TEST_DSN = os.getenv("RONRO_TEST_POSTGRES_DSN")
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class ServiceSharedRouteTests(unittest.TestCase):
+    def setUp(self):
+        self.server = create_service_meeting_server(
+            object(), object(), object(),
+            demo_html=b"operator", shared_html=(ROOT / "prototype/web/shared.html").read_bytes(),
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+
+    def request(self, path):
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        connection.request("GET", path)
+        response = connection.getresponse()
+        result = response.status, dict(response.getheaders()), response.read()
+        connection.close()
+        return result
+
+    def test_shared_route_uses_existing_canvas_without_exposing_session_in_query(self):
+        status, headers, _ = self.request("/shared")
+        self.assertEqual(status, 303)
+        self.assertEqual(headers["Location"], "/shared?service=1")
+        status, headers, body = self.request("/shared?service=1")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
+        self.assertIn(b"serviceShared", body)
+        self.assertIn(b"renderSemanticCanvas", body)
+        self.assertEqual(self.request("/shared?service=1&session=private-id")[0], 404)
+        self.assertEqual(self.request("/shared?fixture=001")[0], 404)
+
+
 @unittest.skipUnless(TEST_DSN, "Synthetic PostgreSQL test DSN is not configured")
 class ServiceMeetingHttpTests(unittest.TestCase):
     def setUp(self):
@@ -398,6 +434,7 @@ class ServiceMeetingHttpTests(unittest.TestCase):
         self.assertEqual(canvas["revision"], 3)
         self.assertEqual(len(canvas["nodes"]), 1)
         self.assertEqual(canvas["nodes"][0]["canonical"], "合成の案を検討する")
+        self.assertEqual(canvas["session_title"], "合成の会議")
         self.assertNotIn(transcript.encode(), body)
         self.assertNotIn(b"evidence", body.lower())
 

@@ -118,6 +118,7 @@ async def run() -> None:
         demo_html=(WEB / "service-demo.html").read_bytes(),
         demo_worklet=(WEB / "live-audio-worklet.js").read_bytes(),
         demo_script=(WEB / "service-demo.js").read_bytes(),
+        shared_html=(WEB / "shared.html").read_bytes(),
     )
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()

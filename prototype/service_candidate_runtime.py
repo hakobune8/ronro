@@ -28,6 +28,7 @@ class ServiceCandidateRuntime:
         audio_host: str = "127.0.0.1", audio_port: int = 0,
         demo_html: bytes | None = None, demo_worklet: bytes | None = None,
         demo_script: bytes | None = None,
+        shared_html: bytes | None = None,
         allow_pilot_network_bind: bool = False,
     ) -> None:
         allowed_hosts = {"127.0.0.1", "::1"}
@@ -48,6 +49,7 @@ class ServiceCandidateRuntime:
         self.demo_html = demo_html
         self.demo_worklet = demo_worklet
         self.demo_script = demo_script
+        self.shared_html = shared_html
         self.allow_pilot_network_bind = allow_pilot_network_bind
         self.http_server: Any = None
         self.audio_server: Any = None
@@ -66,6 +68,7 @@ class ServiceCandidateRuntime:
                 host=self.http_host, port=self.http_port,
                 demo_html=self.demo_html, demo_worklet=self.demo_worklet,
                 demo_script=self.demo_script,
+                shared_html=self.shared_html,
                 allow_pilot_network_bind=self.allow_pilot_network_bind,
             )
             self.http_thread = threading.Thread(

@@ -52,72 +52,12 @@
     $('resume').textContent = state === 'reconnecting' ? '音声を再接続' : '再開';
     $('end').disabled = busy || !sessionId || ended || meeting?.state === 'deleting';
     $('pdf').hidden = !ended;
+    $('shared-link').hidden = !sessionId;
+    if (sessionId) $('shared-link').href = `/shared?service=1#session=${encodeURIComponent(sessionId)}`;
     if (ended && sessionId) $('pdf').href = `/api/service/sessions/${encodeURIComponent(sessionId)}/final.pdf`;
     $('meeting-meta').textContent = sessionId
       ? `会議の状態: ${meeting?.state || '確認中'} / 音声: ${state || '確認中'} / Graph: ${meeting?.graph_revision ?? '—'}`
       : 'このブラウザで開いている会議はありません。';
-  }
-
-  function nodeKind(node) {
-    const type = node.type || '';
-    if (type === 'decision') return 'decision';
-    if (type === 'action') return 'action';
-    if (type === 'open_item') return 'open';
-    if (type === 'concern') return 'concern';
-    if (type === 'option') return 'option';
-    return 'idea';
-  }
-
-  function nodeKindText(node) {
-    const kind = nodeKind(node);
-    if (kind === 'decision') return node.status === 'confirmed' ? '確定事項' : '決定候補';
-    return { action: '次の対応', open: '未解決事項', concern: '懸念', option: '案', idea: '論点' }[kind];
-  }
-
-  function draw(canvas) {
-    const viewport = $('canvas');
-    const svg = $('edges');
-    while (svg.firstChild) svg.removeChild(svg.firstChild);
-    viewport.querySelectorAll('.node').forEach((node) => node.remove());
-    const nodes = canvas?.nodes || [];
-    const byId = new Map(nodes.map((node) => [node.id, node]));
-    const final = ['ended', 'ended_incomplete'].includes(meeting?.state);
-    const camera = final ? canvas.final_camera : canvas.live_camera;
-    const scale = camera?.scale || 1;
-    const width = viewport.clientWidth;
-    const height = viewport.clientHeight;
-    const point = (node) => ({
-      x: width / 2 + (node.x - (camera?.x || 0)) * scale,
-      y: height / 2 + (node.y - (camera?.y || 0)) * scale,
-    });
-    for (const edge of canvas?.edges || []) {
-      const from = byId.get(edge.source_node_id), to = byId.get(edge.target_node_id);
-      if (!from || !to) continue;
-      const a = point(from), b = point(to);
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', String(a.x)); line.setAttribute('y1', String(a.y));
-      line.setAttribute('x2', String(b.x)); line.setAttribute('y2', String(b.y));
-      line.setAttribute('stroke', edge.type === 'supports' ? '#328961'
-        : edge.type === 'opposes' ? '#bb604b' : '#5c8eac');
-      line.setAttribute('stroke-width', edge.type === 'discussion_provenance' ? '2.5' : '2');
-      line.setAttribute('stroke-opacity', '.8');
-      svg.appendChild(line);
-    }
-    for (const node of nodes) {
-      const p = point(node);
-      if (p.x < -130 || p.x > width + 130 || p.y < -90 || p.y > height + 90) continue;
-      const card = document.createElement('div');
-      card.className = `node ${nodeKind(node)}` + (node.id === canvas.focus_id ? ' focus' : '');
-      if (final && scale < .5) card.classList.add('far');
-      card.style.left = `${p.x}px`; card.style.top = `${p.y}px`;
-      const kind = document.createElement('span'); kind.className = 'kind';
-      kind.textContent = nodeKindText(node);
-      const label = document.createElement('span'); label.textContent = node.label || node.canonical || '';
-      card.append(kind, label); viewport.appendChild(card);
-    }
-    const latest = byId.get(canvas?.latest_detail_id) || byId.get(canvas?.focus_id);
-    $('canonical').textContent = latest?.canonical || 'まだ論点はありません。';
-    $('revision').textContent = canvas ? `更新 ${canvas.revision}` : '';
   }
 
   async function refresh() {
@@ -126,11 +66,10 @@
     refreshPromise = (async () => { try {
       const base = `/api/service/sessions/${encodeURIComponent(sessionId)}`;
       meeting = await request(base);
-      draw(await request(`${base}/canvas`));
       controls();
     } catch (error) {
       if (['session_not_found', 'session_deleted'].includes(error.message)) {
-        sessionId = null; meeting = null; sessionStorage.removeItem(STORAGE_KEY); draw(null);
+        sessionId = null; meeting = null; sessionStorage.removeItem(STORAGE_KEY);
         status('以前の会議は利用できません。デモでは再起動後の復旧を保証しません。', true);
       } else {
         status(`状態を確認できません: ${error.message}`, true);

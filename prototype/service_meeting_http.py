@@ -14,7 +14,7 @@ import json
 import re
 import uuid
 from http.server import ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .display_labels import display_projection
 from .postgres_service_store import PostgresServiceStore
@@ -44,6 +44,7 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
     demo_html: bytes | None = None
     demo_worklet: bytes | None = None
     demo_script: bytes | None = None
+    shared_html: bytes | None = None
 
     @staticmethod
     def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
@@ -245,6 +246,16 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
         if parsed.path == "/service-demo" and not parsed.query and self.demo_html is not None:
             self._send(200, self.demo_html, content_type="text/html; charset=utf-8")
             return
+        if parsed.path == "/shared" and self.shared_html is not None:
+            if not parsed.query:
+                self._send(303, location="/shared?service=1")
+            else:
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                if query != {"service": ["1"]}:
+                    self._send(404, b'{"error":{"code":"not_found"}}')
+                else:
+                    self._send(200, self.shared_html, content_type="text/html; charset=utf-8")
+            return
         if (parsed.path == "/static/service-audio-worklet.js" and not parsed.query
                 and self.demo_worklet is not None):
             self._send(200, self.demo_worklet, content_type="text/javascript; charset=utf-8")
@@ -302,6 +313,7 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
                 display = display_projection(graph, replay.presentation)
                 labels = {node_id: value["text"] for node_id, value in display.items()}
                 payload = project_semantic_canvas(graph, replay.events, labels)
+                payload["session_title"] = replay.state["session"].get("title")
             else:
                 payload = {"session_id": session_id, **state}
             self._send(200, json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
@@ -316,6 +328,7 @@ def create_service_meeting_server(
     content: PostgresServiceStore, *, host: str = "127.0.0.1", port: int = 0,
     demo_html: bytes | None = None, demo_worklet: bytes | None = None,
     demo_script: bytes | None = None,
+    shared_html: bytes | None = None,
     allow_pilot_network_bind: bool = False,
 ) -> ThreadingHTTPServer:
     """Compose candidate owner/display routes; enforce loopback binding."""
@@ -330,7 +343,7 @@ def create_service_meeting_server(
         "BoundServiceMeetingRequestHandler", (ServiceMeetingRequestHandler,),
         {"identity": identity, "oidc": oidc, "content": content,
          "demo_html": demo_html, "demo_worklet": demo_worklet,
-         "demo_script": demo_script,
+         "demo_script": demo_script, "shared_html": shared_html,
          "post_login_location": ("/service-demo" if demo_html is not None
                                  else "/api/service/auth/session")},
     )
