@@ -17,7 +17,7 @@
 
 | 判断・証拠 | 決める時点 | 未達時の扱い |
 | --- | --- | --- |
-| OIDC issuer/subject、Web Session、表示専用資格、運用主体のADR | 認証実装の前 | ローカルの偽ログインを本番へ出さない。 |
+| OIDC issuer/subject、Web Session、表示専用資格、運用主体のADR | 既存ZITADELをRONRO専用Clientで利用する方針は[Identity ADR](account-service-v1-identity-adr.md)に固定。実Client登録・接続確認はP2中 | ローカルの偽ログインを本番へ出さない。 |
 | DB・オブジェクト保存・Key Registry、平文メタデータ／ログ一覧、鍵の復旧と7日以内破棄のADR | 永続化の本格実装前に候補を選び、PDF/削除の受入れ前に復元試験 | 復元不能性が証明できなければGA不可。Providerや配布済みPDFに同じ7日期限を約束しない。 |
 | HTTP/WSSのSession routing、旧世代fencing、更新・rollback手順 | 多Session/障害復旧の受入れ前 | 進行中会議を止める`Recreate`を通常更新として承認しない。 |
 | Provider側の実契約・組織/Project設定、出席者説明・同意、限定的なエラー解析の承認者 | 実利用前 | Pilotの同意/録音条件を本運用へ流用しない。 |
@@ -62,7 +62,7 @@ P1の保存方式検証とP5の鍵/削除試験は一つの設計依存として
 | --- | --- | --- |
 | P0 | 基準固定済み。 | なし。 |
 | P1 | 暗号化PostgreSQL Store、versioned migration、原子受理・replay、Final相関、lease付きWorkerを合成データで検証。 | 永続Key Registry、認証済みLive経路、監督付きWorker、配備資格・復元・性能実証。 |
-| P2 | 所有者照合とSession限定・短命・取消可能なShared View表示資格をDB境界で検証。 | OIDC基盤の選定と実認証、API/WSS接続、CSRF/Origin、退会・失効、評価API隔離の統合試験。表示資格はまだ公開経路へ接続しない。 |
+| P2 | 所有者照合とSession限定・短命・取消可能なShared View表示資格をDB境界で検証。既存ZITADELの専用Client採用をHuman承認・ADR化。HTTPSの同一Origin、Session結合CSRF照合、Host-only `Secure`/`HttpOnly`/`SameSite` cookie生成を独立した境界として追加。 | RONRO専用Client登録と実認証、Web Sessionの永続化、API/WSS接続、CSRF digestのSession保存、退会・失効、評価API隔離の統合試験。新しいブラウザ境界も公開経路には未接続。 |
 | P3 | Service Captureの永続状態、操作Key/CAS、接続generation、休憩区間と取込み不能区間の区別、フレーム受理台帳・連番/時刻断絶検知、終了時のCapture fenceを合成データで検証。Provider item別のcommit/completion/Final照合、逆順完了、未知範囲・空完了による完全Drain拒否を合成データで検証。 | 実WSS/Providerとの接続、Provider appendの受領証明とlocal frame範囲の確定、未知範囲の欠落判定、Pod/Provider障害復旧とDrainのEnd-to-End。 |
 | P4 | Session間の公平Job claimと、PostgreSQL advisory lockによる原子的な新規Session Admissionを合成データで検証。 | 4会議×2時間超、実運用での容量計測、配備更新・rollback。 |
 | P5 | Session別暗号化の基礎、終了受理時の`ended_at`と7日後`expires_at`の原子記録、期限欠落Sessionの検出を合成データで検証。所有者照合済み固定revisionの読出し、同じCanvas座標に基づく印刷用概要とCanonical詳細のPDFを合成データで生成・描画検証。 | 認証済みHTTP配信、非公開PDF保存、所有者削除／退会、期限到来処理、鍵破棄、全保存先照合、バックアップ復元不能性。PDF生成・期限記録だけではサービス公開や削除を保証しない。 |
