@@ -61,7 +61,7 @@ P1の保存方式検証とP5の鍵/削除試験は一つの設計依存として
 | 段階 | 現在の進捗 | 未達の受入れ条件 |
 | --- | --- | --- |
 | P0 | 基準固定済み。 | なし。 |
-| P1 | 暗号化PostgreSQL Store、versioned migration、原子受理・replay、Final相関、lease付きWorkerを合成データで検証。OpenBao専用KV v2領域へのCAS=0作成/読出しアダプタを合成HTTPで検証したが、実mount/policy接続・破棄は未実施。 | 永続Key Registryの実接続と7日削除証明、認証済みLive経路、監督付きWorker、配備資格・復元・性能実証。 |
+| P1 | 暗号化PostgreSQL Store、versioned migration、原子受理・replay、Final相関、lease付きWorkerを合成データで検証。OpenBao専用KV v2領域へのCAS=0作成/読出しアダプタと、HTTPS/CA/ローテーション可能なtokenファイルからの接続設定を合成HTTPで検証したが、実mount/policy接続・破棄は未実施。 | 永続Key Registryの実接続と7日削除証明、認証済みLive経路、監督付きWorker、配備資格・復元・性能実証。 |
 | P2 | 所有者照合とSession限定・短命・取消可能なShared View表示資格をDB境界で検証。既存ZITADELにRONRO専用Project/Web Clientを登録し、Human確認のうえCode + S256 PKCE / `none`・固定Callbackを選択（[Identity ADR](account-service-v1-identity-adr.md)）。合成RS256 ID Token、同一ブラウザ結合・一回限り認可試行、HMAC化主体/Session、複数Tabで使えるCSRF、失効可能なWeb Session、会議ownerのread/mutate/WSS境界をPostgreSQLで検証。分離したloopback HTTP候補でログイン→Callback→Session→Logout、Owner + CSRFによる新規会議作成、ownerのSession/Canvas読出し、表示資格のCanvas限定読出しとowner限定発行・取消を合成データで試験。 | 実ZITADEL認証・Token交換、永続identity keyとその復旧/ローテーション、会議の変更/音声WSS route接続と継続中の失効反映、別ディスプレイpairing/更新、退会、評価API隔離、別端末/実IdP統合試験。新しい候補は公開経路に未接続。 |
 | P3 | Service Captureの永続状態、操作Key/CAS、接続generation、休憩区間と取込み不能区間の区別、フレーム受理台帳・連番/時刻断絶検知、終了時のCapture fenceを合成データで検証。Provider item別のcommit/completion/Final照合、逆順完了、未知範囲・空完了による完全Drain拒否を合成データで検証。Owner+Origin+CSRFのローカルHTTPから開始・休憩・再開を要求しても、Gateway ack前にlisteningを主張しないことを合成DBで確認。 | 実WSS/Providerとの接続、Provider appendの受領証明とlocal frame範囲の確定、未知範囲の欠落判定、Pod/Provider障害復旧とDrainのEnd-to-End。 |
 | P4 | Session間の公平Job claimと、PostgreSQL advisory lockによる原子的な新規Session Admissionを合成データで検証。 | 4会議×2時間超、実運用での容量計測、配備更新・rollback。 |

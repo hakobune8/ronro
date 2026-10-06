@@ -10,9 +10,10 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
 import uuid
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping
 from urllib.parse import urlsplit
 
 import requests
@@ -30,6 +31,47 @@ class OpenBaoKvSessionKeyRegistry:
 
     MOUNT = "ronro-session-keys"
     MAX_RESPONSE_BYTES = 16384
+
+    @classmethod
+    def from_environment(
+        cls, *, environ: Mapping[str, str] | None = None,
+        http: requests.Session | None = None,
+    ) -> "OpenBaoKvSessionKeyRegistry":
+        """Bind an opt-in runtime to mounted credentials, never an env token.
+
+        The token file is opened for every request so a projected workload
+        credential can rotate without retaining the old token in this object.
+        Nothing here creates a mount, policy, auth role, or production key.
+        """
+
+        values = os.environ if environ is None else environ
+        origin = values.get("RONRO_SERVICE_OPENBAO_URL")
+        ca_bundle = values.get("RONRO_SERVICE_OPENBAO_CA_FILE")
+        token_file = values.get("RONRO_SERVICE_OPENBAO_TOKEN_FILE")
+        if not origin or not ca_bundle or not token_file:
+            raise ServiceCryptoError("key_registry_unconfigured")
+        path = Path(token_file)
+        if not path.is_absolute():
+            raise ServiceCryptoError("key_registry_unconfigured")
+
+        def current_token() -> str:
+            try:
+                with path.open("rb") as source:
+                    data = source.read(8193)
+            except OSError as exc:
+                raise ServiceCryptoError("key_registry_token_unavailable") from exc
+            if len(data) > 8192:
+                raise ServiceCryptoError("key_registry_token_unavailable")
+            # A projected token may have a single trailing newline. All other
+            # whitespace remains invalid under _request's token validation.
+            if data.endswith(b"\n"):
+                data = data[:-1]
+            try:
+                return data.decode("ascii")
+            except UnicodeDecodeError as exc:
+                raise ServiceCryptoError("key_registry_token_unavailable") from exc
+
+        return cls(origin, ca_bundle, current_token, http=http)
 
     def __init__(
         self, base_url: str, ca_bundle: str, token_provider: Callable[[], str],

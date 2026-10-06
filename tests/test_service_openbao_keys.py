@@ -116,3 +116,55 @@ class OpenBaoKeyRegistryTests(unittest.TestCase):
             registry.get_key(self.session_id)
         self.assertEqual(caught.exception.code, "key_registry_token_unavailable")
         self.assertEqual(self.http.calls, [])
+
+    def test_runtime_binding_reads_rotating_token_file_without_retention(self):
+        token_file = Path(self.temp.name) / "projected-token"
+        token_file.write_text("first-synthetic-token\n")
+        settings = {
+            "RONRO_SERVICE_OPENBAO_URL": "https://bao.example.test",
+            "RONRO_SERVICE_OPENBAO_CA_FILE": str(self.ca),
+            "RONRO_SERVICE_OPENBAO_TOKEN_FILE": str(token_file),
+        }
+        registry = OpenBaoKvSessionKeyRegistry.from_environment(
+            environ=settings, http=self.http,
+        )
+        registry.create_key(self.session_id)
+        self.assertEqual(self.http.calls[-1][2]["headers"]["X-Vault-Token"],
+                         "first-synthetic-token")
+        token_file.write_text("second-synthetic-token")
+        self.assertEqual(len(registry.get_key(self.session_id)), 32)
+        self.assertEqual(self.http.calls[-1][2]["headers"]["X-Vault-Token"],
+                         "second-synthetic-token")
+        self.assertNotIn("first-synthetic-token", repr(registry))
+        self.assertNotIn("second-synthetic-token", repr(registry))
+
+    def test_runtime_binding_fails_closed_when_config_or_token_is_invalid(self):
+        with self.assertRaises(ServiceCryptoError) as caught:
+            OpenBaoKvSessionKeyRegistry.from_environment(environ={}, http=self.http)
+        self.assertEqual(caught.exception.code, "key_registry_unconfigured")
+        with self.assertRaises(ServiceCryptoError) as caught:
+            OpenBaoKvSessionKeyRegistry.from_environment(environ={
+                "RONRO_SERVICE_OPENBAO_URL": "https://bao.example.test",
+                "RONRO_SERVICE_OPENBAO_CA_FILE": str(self.ca),
+                "RONRO_SERVICE_OPENBAO_TOKEN_FILE": "relative-token",
+            }, http=self.http)
+        self.assertEqual(caught.exception.code, "key_registry_unconfigured")
+        token_file = Path(self.temp.name) / "projected-token"
+        settings = {
+            "RONRO_SERVICE_OPENBAO_URL": "https://bao.example.test",
+            "RONRO_SERVICE_OPENBAO_CA_FILE": str(self.ca),
+            "RONRO_SERVICE_OPENBAO_TOKEN_FILE": str(token_file),
+        }
+        registry = OpenBaoKvSessionKeyRegistry.from_environment(
+            environ=settings, http=self.http,
+        )
+        for token in (None, "bad\ntoken\n", "x" * 8193, "\u00e9"):
+            if token is None:
+                token_file.unlink(missing_ok=True)
+            else:
+                token_file.write_text(token)
+            with self.subTest(token=token is None and "missing" or "invalid"):
+                with self.assertRaises(ServiceCryptoError) as caught:
+                    registry.get_key(self.session_id)
+                self.assertEqual(caught.exception.code, "key_registry_token_unavailable")
+        self.assertEqual(self.http.calls, [])
