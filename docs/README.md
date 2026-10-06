@@ -13,6 +13,9 @@
 - サービス化の設計案：[RFC-0008](rfc/0008-account-based-service-architecture.md)（Human Review待ち。未実装）
 - サービス化の実装設計案：[Account Service v1](implementation/account-service-v1-design.md)（Human Review待ち。現行Pilotには未適用）
 - サービス化の実装計画：[Account Service v1 Plan](implementation/account-service-v1-implementation-plan.md)（開発順序と受入れゲート。未実装）
+- natadeCOCO Spot向けContent移行：[RFC-0009](rfc/0009-ronro-as-natadecoco-local-ai-content.md)（段階実装に着手。Platform契約・配備・機密会議利用は別ゲート）
+- RFC-0009の実装用詳細：[Content契約](architecture/natadecoco-content-contract.md)、[PR単位の実装計画](implementation/natadecoco-content-implementation-plan.md)（PR1着手、実機未検証）
+- Spot版の画面・専用artwork：[UI / Artworkブリーフ](product/natadecoco-ronro-ux-artwork-brief.md)（制作・実機確認前）
 
 画面画像は制御された合成会議による表示例であり、実会議の結果やAnalyzerの精度を示すものではありません。現行Semantic Canvasの段階別の例は[パイロットガイド](pilot/ronro-live-pilot-guide.md)にもあります。
 
