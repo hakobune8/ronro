@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import hmac
 import json
+import secrets
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Sequence
@@ -153,6 +156,88 @@ class PostgresServiceStore:
             if not isinstance(value, str) or not value:
                 raise ServiceStoreError("owner_invalid", "Stored owner identity is invalid")
             return value
+
+    def _require_owner_locked(
+        self, connection: psycopg.Connection, session_id: str, owner_user_id: str,
+    ) -> dict[str, Any]:
+        """Authenticate an internal owner ID without revealing another Session."""
+
+        if not isinstance(owner_user_id, str) or not owner_user_id or not owner_user_id.isascii():
+            raise ServiceStoreError("authentication_required", "Authentication required")
+        row = self._lock_session(connection, session_id)
+        stored_owner = self.codec.decrypt_json(
+            session_id, "owner", session_id, row["owner_cipher"]
+        )
+        if not isinstance(stored_owner, str) or not hmac.compare_digest(
+            stored_owner, owner_user_id
+        ):
+            raise ServiceStoreError("session_not_found", "Session not found")
+        if row["service_state"] == "deleting":
+            raise ServiceStoreError("session_deleted", "Session is no longer available")
+        return row
+
+    def authorize_owner_session(self, session_id: str, owner_user_id: str) -> str:
+        """P2 boundary for a *verified* internal user ID; not an HTTP login."""
+
+        with self._transaction() as connection:
+            return str(self._require_owner_locked(
+                connection, session_id, owner_user_id
+            )["service_state"])
+
+    def issue_view_credential(
+        self, session_id: str, owner_user_id: str, *, ttl_seconds: int = 300,
+    ) -> tuple[str, str]:
+        """Issue a bearer for this Session's live Canvas only; return it once."""
+
+        if type(ttl_seconds) is not int or not 1 <= ttl_seconds <= 900:
+            raise ServiceStoreError("credential_ttl_invalid", "Invalid display credential lifetime")
+        grant_id = str(uuid.uuid4())
+        token = secrets.token_urlsafe(32)
+        digest = hashlib.sha256(token.encode("ascii")).digest()
+        with self._transaction() as connection:
+            row = self._require_owner_locked(connection, session_id, owner_user_id)
+            if row["service_state"] != "open":
+                raise ServiceStoreError("session_closed", "Live display has ended")
+            connection.execute(
+                """INSERT INTO service_view_credential
+                   (grant_id, session_id, token_digest, expires_at)
+                   VALUES (%s, %s, %s, now() + (%s * interval '1 second'))""",
+                (grant_id, session_id, digest, ttl_seconds),
+            )
+        return grant_id, token
+
+    def authorize_live_canvas(self, session_id: str, token: str) -> None:
+        """Check a display-only bearer; callers must recheck on WSS updates."""
+
+        if not isinstance(token, str) or not 32 <= len(token) <= 128 or not token.isascii():
+            raise ServiceStoreError("session_not_found", "Session not found")
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        with self._transaction() as connection:
+            row = connection.execute(
+                """SELECT 1 FROM service_view_credential AS v
+                   JOIN service_session AS s ON s.session_id = v.session_id
+                   WHERE v.session_id = %s AND v.token_digest = %s
+                     AND v.revoked_at IS NULL AND v.expires_at > now()
+                     AND s.service_state = 'open'""",
+                (session_id, digest),
+            ).fetchone()
+        if row is None:
+            raise ServiceStoreError("session_not_found", "Session not found")
+
+    def revoke_view_credential(
+        self, session_id: str, owner_user_id: str, grant_id: str,
+    ) -> None:
+        if not grant_id:
+            raise ServiceStoreError("credential_invalid", "Display credential is required")
+        with self._transaction() as connection:
+            self._require_owner_locked(connection, session_id, owner_user_id)
+            row = connection.execute(
+                """UPDATE service_view_credential SET revoked_at = COALESCE(revoked_at, now())
+                   WHERE session_id = %s AND grant_id = %s RETURNING grant_id""",
+                (session_id, grant_id),
+            ).fetchone()
+            if row is None:
+                raise ServiceStoreError("session_not_found", "Session not found")
 
     def accept_final(
         self,

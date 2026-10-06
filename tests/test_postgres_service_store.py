@@ -285,7 +285,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
             ).fetchall()
         self.assertEqual([row[0] for row in rows], [
             "0001_account_service.sql", "0002_final_intake_fence.sql",
-            "0003_fair_claim_clock.sql",
+            "0003_fair_claim_clock.sql", "0004_view_credentials.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 
@@ -422,6 +422,91 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.assertEqual(len(self.store.replay(other).state["evidence"]), 1)
         with self.assertRaisesRegex(ServiceStoreError, "not found"):
             self.store.job_state(other, "job-one")
+
+    def test_owner_check_does_not_reveal_other_session(self):
+        self.assertEqual(
+            self.store.authorize_owner_session(self.session_id, "synthetic-owner"), "open"
+        )
+        for session_id, owner in (
+            (self.session_id, "another-owner"),
+            ("missing-session", "synthetic-owner"),
+        ):
+            with self.subTest(session_id=session_id, owner=owner):
+                with self.assertRaises(ServiceStoreError) as caught:
+                    self.store.authorize_owner_session(session_id, owner)
+                self.assertEqual(caught.exception.code, "session_not_found")
+                self.assertEqual(str(caught.exception), "Session not found")
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.authorize_owner_session(self.session_id, "")
+        self.assertEqual(caught.exception.code, "authentication_required")
+
+    def test_view_credential_is_scoped_revocable_and_not_stored_in_plaintext(self):
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.issue_view_credential(self.session_id, "another-owner")
+        self.assertEqual(caught.exception.code, "session_not_found")
+        grant_id, token = self.store.issue_view_credential(
+            self.session_id, "synthetic-owner"
+        )
+        self.assertGreaterEqual(len(token), 32)
+        self.store.authorize_live_canvas(self.session_id, token)
+        with psycopg.connect(TEST_DSN) as connection:
+            row = connection.execute(
+                "SELECT token_digest FROM service_view_credential WHERE grant_id = %s",
+                (grant_id,),
+            ).fetchone()
+        self.assertNotIn(token.encode(), bytes(row[0]))
+        for session_id, candidate in (
+            ("other-session", token),
+            (self.session_id, "wrong-token"),
+            (self.session_id, ""),
+        ):
+            with self.subTest(session_id=session_id, candidate=candidate):
+                with self.assertRaises(ServiceStoreError) as caught:
+                    self.store.authorize_live_canvas(session_id, candidate)
+                self.assertEqual(caught.exception.code, "session_not_found")
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.revoke_view_credential(self.session_id, "another-owner", grant_id)
+        self.assertEqual(caught.exception.code, "session_not_found")
+        self.store.revoke_view_credential(self.session_id, "synthetic-owner", grant_id)
+        self.store.revoke_view_credential(self.session_id, "synthetic-owner", grant_id)
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.authorize_live_canvas(self.session_id, token)
+        self.assertEqual(caught.exception.code, "session_not_found")
+
+    def test_view_credential_expires_and_ends_with_session(self):
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.issue_view_credential(
+                self.session_id, "synthetic-owner", ttl_seconds=901
+            )
+        self.assertEqual(caught.exception.code, "credential_ttl_invalid")
+        grant_id, token = self.store.issue_view_credential(
+            self.session_id, "synthetic-owner", ttl_seconds=1
+        )
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                """UPDATE service_view_credential
+                   SET created_at = now() - interval '2 seconds',
+                       expires_at = now() - interval '1 second'
+                   WHERE grant_id = %s""",
+                (grant_id,),
+            )
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.authorize_live_canvas(self.session_id, token)
+        self.assertEqual(caught.exception.code, "session_not_found")
+        _, active_token = self.store.issue_view_credential(
+            self.session_id, "synthetic-owner"
+        )
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                "UPDATE service_session SET service_state = 'ended' WHERE session_id = %s",
+                (self.session_id,),
+            )
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.authorize_live_canvas(self.session_id, active_token)
+        self.assertEqual(caught.exception.code, "session_not_found")
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.issue_view_credential(self.session_id, "synthetic-owner")
+        self.assertEqual(caught.exception.code, "session_closed")
 
     def test_stale_revision_requires_reanalysis_before_acceptance(self):
         self._final()
