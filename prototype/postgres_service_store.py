@@ -1336,6 +1336,15 @@ class PostgresServiceStore:
                 raise ServiceStoreError(
                     "unresolved_provider_items", "Cannot claim complete Drain with unresolved Provider items"
                 )
+            capture_gaps = connection.execute(
+                """SELECT COUNT(*) AS value FROM service_capture_interval
+                   WHERE session_id = %s AND kind = 'capture_unavailable'""",
+                (session_id,),
+            ).fetchone()["value"]
+            if capture_gaps and not incomplete:
+                raise ServiceStoreError(
+                    "capture_incomplete", "Cannot claim complete Drain with possible audio loss"
+                )
             if end_event.get("event_type") != "session_ended":
                 raise ServiceStoreError("end_event_invalid", "Finalization requires session_ended")
             payload = end_event.get("payload", {})
