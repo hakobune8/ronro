@@ -13,6 +13,7 @@ import psycopg
 
 from prototype.postgres_service_store import PostgresServiceStore
 from prototype.service_analyzer_worker import ServiceAnalyzerWorker
+from prototype.service_final_ingest import ServiceFinalIngestor
 from prototype.schema import SchemaValidator
 from prototype.service_crypto import InMemoryTestKeyRegistry, ServiceCryptoError
 from prototype.service_errors import ServiceStoreError
@@ -151,6 +152,25 @@ class PostgresServiceStoreTests(unittest.TestCase):
             display_projection(replay.state["graph"], replay.presentation)[node["id"]]["text"],
             "案を検討する",
         )
+
+    def test_realtime_final_shape_flows_into_durable_worker_and_replay(self):
+        ingestor = ServiceFinalIngestor(self.store, contract_version="v1")
+        provider_event = {
+            "type": "final_transcript", "text": "合成の案を検討する",
+            "item_id": "synthetic-item", "_transport": {"connection_id": "synthetic-connection"},
+            "_turn": {"range_known": True, "audio_start": 1.0, "audio_end": 2.5},
+        }
+        first = ingestor.accept_realtime_final(self.session_id, provider_event)
+        self.assertTrue(first["created"])
+        self.assertFalse(ingestor.accept_realtime_final(self.session_id, provider_event)["created"])
+        ServiceAnalyzerWorker(self.store, LabelAnalyzer()).process_one(session_id=self.session_id)
+        reopened = PostgresServiceStore(
+            TEST_DSN, self.validator, self.registry, allow_test_key_registry=True,
+        )
+        replay = reopened.replay(self.session_id)
+        self.assertEqual(len(replay.state["evidence"]), 1)
+        self.assertEqual(len(replay.state["graph"]["nodes"]), 1)
+        self.assertEqual(reopened.job_state(self.session_id, first["job_id"]), "completed")
 
     def test_invalid_presentation_hint_does_not_commit_node_or_job(self):
         evidence, _ = self._final()
