@@ -24,6 +24,8 @@ class ServiceOidcTests(unittest.TestCase):
             authorization_endpoint="https://idp.example.test/oauth/v2/authorize",
             token_endpoint="https://idp.example.test/oauth/v2/token",
             jwks_uri="https://idp.example.test/oauth/v2/keys",
+            token_endpoint_auth_method="client_secret_basic",
+            client_secret="synthetic-only-secret",
         )
         self.client = ServiceOidcClient(self.config)
         self.key = RSAKey.generate_key(auto_kid=True)
@@ -56,6 +58,9 @@ class ServiceOidcTests(unittest.TestCase):
         self.client.require_callback_state(attempt, attempt.state)
         with self.assertRaises(ServiceStoreError):
             self.client.require_callback_state(attempt, "wrong-state")
+        self.assertNotIn("synthetic-only-secret", repr(self.config))
+        self.assertEqual(self.client._client().token_endpoint_auth_method,
+                         "client_secret_basic")
 
     def test_configuration_rejects_cross_origin_or_plain_http_endpoints(self):
         values = vars(self.config)
@@ -65,6 +70,8 @@ class ServiceOidcTests(unittest.TestCase):
             {"jwks_uri": "https://idp.example.test.evil.test/keys"},
             {"redirect_uri": "https://attacker.example/callback"},
             {"issuer": "http://idp.example.test"},
+            {"token_endpoint_auth_method": "none"},
+            {"client_secret": None},
         ):
             with self.subTest(replacement=replacement), self.assertRaises(ValueError):
                 OidcConfiguration(**(values | replacement))

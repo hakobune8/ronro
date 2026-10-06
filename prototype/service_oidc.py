@@ -10,7 +10,7 @@ from __future__ import annotations
 import hmac
 import json
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 import requests
@@ -61,12 +61,22 @@ class OidcConfiguration:
     authorization_endpoint: str
     token_endpoint: str
     jwks_uri: str
+    token_endpoint_auth_method: str
+    client_secret: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if (not self.client_id or not self.client_id.isascii()
                 or not self.client_id.isprintable() or self.client_id.strip() != self.client_id
                 or len(self.client_id) > 256):
             raise ValueError("OIDC client ID is invalid")
+        if self.token_endpoint_auth_method not in {"none", "client_secret_basic"}:
+            raise ValueError("Unsupported OIDC client authentication method")
+        if self.token_endpoint_auth_method == "client_secret_basic":
+            if (not isinstance(self.client_secret, str) or not self.client_secret
+                    or not self.client_secret.isprintable() or len(self.client_secret) > 512):
+                raise ValueError("Confidential OIDC client secret is required")
+        elif self.client_secret is not None:
+            raise ValueError("Public PKCE client must not carry a secret")
         origin = _https_origin(self.issuer)
         if self.issuer != origin:
             raise ValueError("OIDC issuer must be a canonical HTTPS origin")
@@ -98,8 +108,10 @@ class ServiceOidcClient:
 
     def _client(self) -> OAuth2Session:
         return OAuth2Session(
-            self.config.client_id, scope="openid", redirect_uri=self.config.redirect_uri,
-            token_endpoint_auth_method="none", code_challenge_method="S256",
+            self.config.client_id, client_secret=self.config.client_secret,
+            scope="openid", redirect_uri=self.config.redirect_uri,
+            token_endpoint_auth_method=self.config.token_endpoint_auth_method,
+            code_challenge_method="S256",
         )
 
     def begin_authorization(self) -> tuple[str, AuthorizationAttempt]:
