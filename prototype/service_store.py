@@ -69,6 +69,7 @@ class SqliteServiceStore:
                     owner_opaque BLOB NOT NULL,
                     service_state TEXT NOT NULL DEFAULT 'open',
                     intake_closed INTEGER NOT NULL DEFAULT 0,
+                    last_claim_at REAL,
                     graph_revision INTEGER NOT NULL DEFAULT 0,
                     final_revision INTEGER,
                     CHECK (graph_revision >= 0)
@@ -128,6 +129,10 @@ class SqliteServiceStore:
             if "intake_closed" not in session_columns:
                 connection.execute(
                     "ALTER TABLE service_session ADD COLUMN intake_closed INTEGER NOT NULL DEFAULT 0"
+                )
+            if "last_claim_at" not in session_columns:
+                connection.execute(
+                    "ALTER TABLE service_session ADD COLUMN last_claim_at REAL"
                 )
 
     @staticmethod
@@ -242,7 +247,8 @@ class SqliteServiceStore:
                            AND prior.state != 'completed'
                            AND pe.utterance_sequence < e.utterance_sequence
                      )
-                   ORDER BY j.session_id, j.rowid LIMIT 1""",
+                   ORDER BY (s.last_claim_at IS NOT NULL), s.last_claim_at,
+                            j.session_id, e.utterance_sequence LIMIT 1""",
                 (session_id, session_id, now),
             ).fetchone()
             if row is None:
@@ -251,6 +257,10 @@ class SqliteServiceStore:
                 """UPDATE service_job SET state = 'processing', attempt = attempt + 1,
                    claim_until = ?, start_revision = ? WHERE session_id = ? AND job_id = ?""",
                 (now + lease_seconds, row["graph_revision"], row["session_id"], row["job_id"]),
+            )
+            connection.execute(
+                "UPDATE service_session SET last_claim_at = ? WHERE session_id = ?",
+                (now, row["session_id"]),
             )
             return {
                 "session_id": row["session_id"],

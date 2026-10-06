@@ -260,6 +260,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
             ).fetchall()
         self.assertEqual([row[0] for row in rows], [
             "0001_account_service.sql", "0002_final_intake_fence.sql",
+            "0003_fair_claim_clock.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 
@@ -316,6 +317,29 @@ class PostgresServiceStoreTests(unittest.TestCase):
             results = list(pool.map(accept, (1, 2)))
         self.assertEqual(sorted(result["sequence"] for result in results), [1, 2])
         self.assertEqual(len(self.store.replay(self.session_id).state["evidence"]), 2)
+
+    def test_global_claim_rotates_across_sessions(self):
+        for sid in ("test-a-fair", "test-b-fair"):
+            self.created_sessions.append(sid)
+            self.store.create_session(sid, "synthetic-owner")
+            self.store.append_events(sid, [
+                event(sid, 1, "session_created", {"title": "合成会議", "goal": "検討"}),
+                event(sid, 2, "session_started", {}),
+            ])
+        for sid, sequence in (("test-a-fair", 1), ("test-a-fair", 2), ("test-b-fair", 1)):
+            evidence, utterance = final(sid, sequence)
+            self.store.accept_final(
+                sid, evidence, utterance, job_id=f"job-{sid}-{sequence}",
+                contract_version="v1", provider_item_id=f"item-{sid}-{sequence}",
+            )
+        first = self.store.claim_job(now=100)
+        self.assertEqual(first["session_id"], "test-a-fair")
+        self.store.accept_job_result(
+            first["session_id"], first["job_id"], attempt=first["attempt"],
+            start_revision=first["start_revision"], accepted_output={}, events=[],
+        )
+        second = self.store.claim_job(now=101)
+        self.assertEqual(second["session_id"], "test-b-fair")
 
     def test_finalizing_fence_survives_analyzer_events_and_late_retry(self):
         accepted = self.store.accept_provider_final(

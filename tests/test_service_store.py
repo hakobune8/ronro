@@ -298,6 +298,28 @@ class ServiceStoreTests(unittest.TestCase):
         )
         self.assertEqual(self.store.claim_job(now=102)["job_id"], "job-two")
 
+    def test_global_claim_prefers_other_session_after_first_completes(self):
+        for sid in ("s-a", "s-b"):
+            self.store.create_session(sid, b"opaque-owner")
+            self.store.append_events(sid, [
+                event(sid, 1, "session_created", {"title": "合成会議", "goal": "検討"}),
+                event(sid, 2, "session_started", {}),
+            ])
+        for sid, sequence in (("s-a", 1), ("s-a", 2), ("s-b", 1)):
+            evidence, utterance = final(sid, sequence)
+            self.store.accept_final(
+                sid, evidence, utterance, job_id=f"job-{sid}-{sequence}",
+                contract_version="v1", provider_item_id=f"item-{sid}-{sequence}",
+            )
+        first = self.store.claim_job(now=100)
+        self.assertEqual(first["session_id"], "s-a")
+        self.store.accept_job_result(
+            "s-a", first["job_id"], attempt=first["attempt"],
+            start_revision=first["start_revision"], accepted_output={}, events=[],
+        )
+        second = self.store.claim_job(now=101)
+        self.assertEqual(second["session_id"], "s-b")
+
     def test_no_new_final_after_canonical_finalizing(self):
         self._accept_first_final()
         self.store.append_events("s-one", [event(

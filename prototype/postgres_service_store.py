@@ -80,9 +80,10 @@ class PostgresServiceStore:
                             "migration_checksum_mismatch", "Applied service migration changed"
                         )
                     continue
-                for statement in source.decode("utf-8").split(";"):
-                    if statement.strip():
-                        connection.execute(statement)
+                # The repository-controlled file may contain comments or SQL
+                # literals with semicolons. PostgreSQL's simple-query protocol
+                # handles the complete file without ad-hoc string splitting.
+                connection.execute(source.decode("utf-8"), prepare=False)
                 connection.execute(
                     "INSERT INTO service_schema_migration (name, checksum) VALUES (%s, %s)",
                     (migration.name, checksum),
@@ -355,7 +356,7 @@ class PostgresServiceStore:
                            AND prior.state != 'completed'
                            AND pe.utterance_sequence < e.utterance_sequence
                      )
-                   ORDER BY j.session_id, e.utterance_sequence
+                   ORDER BY s.last_claim_at NULLS FIRST, j.session_id, e.utterance_sequence
                    LIMIT 1 FOR UPDATE OF j SKIP LOCKED""",
                 (session_id, session_id, current),
             ).fetchone()
@@ -367,6 +368,10 @@ class PostgresServiceStore:
                    WHERE session_id = %s AND job_id = %s""",
                 (current + dt.timedelta(seconds=lease_seconds), row["graph_revision"],
                  row["session_id"], row["job_id"]),
+            )
+            connection.execute(
+                "UPDATE service_session SET last_claim_at = %s WHERE session_id = %s",
+                (current, row["session_id"]),
             )
             return {
                 "session_id": row["session_id"],
