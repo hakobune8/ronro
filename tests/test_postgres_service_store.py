@@ -313,14 +313,32 @@ class PostgresServiceStoreTests(unittest.TestCase):
             self.registry.get_key(sid)
 
     def test_ended_session_releases_admission_slot(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-1", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
         self.store.append_events(self.session_id, [event(
             self.session_id, 3, "session_finalizing", {"last_evidence_sequence": 0},
         )])
+        self.assertEqual(self.store.capture_snapshot(
+            self.session_id, "synthetic-owner"
+        )["state"], "finalizing")
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.acknowledge_capture_transition(
+                self.session_id, generation=1, event="disconnected",
+            )
+        self.assertEqual(caught.exception.code, "capture_transition_invalid")
         self.store.finalize(self.session_id, event(
             self.session_id, 4, "session_ended",
             {"drain_status": "complete", "final_graph_revision": 3,
              "pending_analysis": False},
         ))
+        self.assertEqual(self.store.capture_snapshot(
+            self.session_id, "synthetic-owner"
+        )["state"], "ended")
         sid = f"test-admit-reuse-{uuid.uuid4()}"
         self.created_sessions.append(sid)
         created = event(sid, 1, "session_created", {"title": "新しい合成会議", "goal": "検討"})
@@ -350,6 +368,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.assertEqual([row[0] for row in rows], [
             "0001_account_service.sql", "0002_final_intake_fence.sql",
             "0003_fair_claim_clock.sql", "0004_view_credentials.sql",
+            "0005_capture_transitions.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 
@@ -571,6 +590,129 @@ class PostgresServiceStoreTests(unittest.TestCase):
         with self.assertRaises(ServiceStoreError) as caught:
             self.store.issue_view_credential(self.session_id, "synthetic-owner")
         self.assertEqual(caught.exception.code, "session_closed")
+
+    def test_capture_pause_resume_is_durable_idempotent_and_not_a_gap(self):
+        start = self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-1", expected_version=0,
+        )
+        self.assertEqual(start, {"state": "resuming", "generation": 1, "version": 1})
+        self.assertEqual(self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-1", expected_version=0,
+        ), start)
+        self.assertEqual(self.store.capture_snapshot(
+            self.session_id, "synthetic-owner"
+        ), start)
+        connected = self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        self.assertEqual(connected["state"], "listening")
+        self.assertEqual(self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        ), connected)
+        pausing = self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="pause",
+            operation_key="pause-1", expected_version=connected["version"],
+        )
+        self.assertEqual(pausing["state"], "pausing")
+        paused = self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="paused",
+        )
+        self.assertEqual(paused["state"], "paused")
+        with psycopg.connect(TEST_DSN) as connection:
+            intervals = connection.execute(
+                """SELECT kind, reason_code, closed_at FROM service_capture_interval
+                   WHERE session_id = %s ORDER BY interval_id""",
+                (self.session_id,),
+            ).fetchall()
+        self.assertEqual([(row[0], row[1]) for row in intervals], [
+            ("paused", "user_pause"),
+        ])
+        self.assertIsNone(intervals[0][2])
+        resuming = self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="resume",
+            operation_key="resume-1", expected_version=paused["version"],
+        )
+        self.assertEqual(resuming["state"], "resuming")
+        self.assertEqual(resuming["generation"], 2)
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.acknowledge_capture_transition(
+                self.session_id, generation=1, event="connected",
+            )
+        self.assertEqual(caught.exception.code, "stale_capture_generation")
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=2, event="connected",
+        )
+        with psycopg.connect(TEST_DSN) as connection:
+            intervals = connection.execute(
+                """SELECT kind, closed_at FROM service_capture_interval
+                   WHERE session_id = %s ORDER BY interval_id""",
+                (self.session_id,),
+            ).fetchall()
+        self.assertEqual([row[0] for row in intervals], [
+            "paused", "capture_unavailable",
+        ])
+        self.assertTrue(all(row[1] is not None for row in intervals))
+
+    def test_capture_disconnect_reconnect_and_owner_fence(self):
+        for owner, sid in (("wrong-owner", self.session_id),
+                           ("synthetic-owner", "missing-session")):
+            with self.assertRaises(ServiceStoreError) as caught:
+                self.store.capture_snapshot(sid, owner)
+            self.assertEqual(caught.exception.code, "session_not_found")
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-1", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        reconnecting = self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="disconnected",
+        )
+        self.assertEqual(reconnecting["state"], "reconnecting")
+        self.assertEqual(reconnecting["generation"], 2)
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.acknowledge_capture_transition(
+                self.session_id, generation=1, event="connected",
+            )
+        self.assertEqual(caught.exception.code, "stale_capture_generation")
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=2, event="connected",
+        )
+        with psycopg.connect(TEST_DSN) as connection:
+            intervals = connection.execute(
+                """SELECT kind, reason_code, closed_at FROM service_capture_interval
+                   WHERE session_id = %s""",
+                (self.session_id,),
+            ).fetchall()
+        self.assertEqual([(row[0], row[1]) for row in intervals], [
+            ("capture_unavailable", "transport_disconnected"),
+        ])
+        self.assertIsNotNone(intervals[0][2])
+
+    def test_capture_version_and_operation_key_conflicts_leave_state_unchanged(self):
+        initial = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.request_capture_transition(
+                self.session_id, "synthetic-owner", action="start",
+                operation_key="start-1", expected_version=99,
+            )
+        self.assertEqual(caught.exception.code, "version_mismatch")
+        started = self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="start-1", expected_version=initial["version"],
+        )
+        with self.assertRaises(ServiceStoreError) as caught:
+            self.store.request_capture_transition(
+                self.session_id, "synthetic-owner", action="pause",
+                operation_key="start-1", expected_version=started["version"],
+            )
+        self.assertEqual(caught.exception.code, "operation_key_conflict")
+        self.assertEqual(
+            self.store.capture_snapshot(self.session_id, "synthetic-owner"), started
+        )
 
     def test_stale_revision_requires_reanalysis_before_acceptance(self):
         self._final()

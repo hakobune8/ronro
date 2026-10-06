@@ -63,7 +63,7 @@ P1の保存方式検証とP5の鍵/削除試験は一つの設計依存として
 | P0 | 基準固定済み。 | なし。 |
 | P1 | 暗号化PostgreSQL Store、versioned migration、原子受理・replay、Final相関、lease付きWorkerを合成データで検証。 | 永続Key Registry、認証済みLive経路、監督付きWorker、配備資格・復元・性能実証。 |
 | P2 | 所有者照合とSession限定・短命・取消可能なShared View表示資格をDB境界で検証。 | OIDC基盤の選定と実認証、API/WSS接続、CSRF/Origin、退会・失効、評価API隔離の統合試験。表示資格はまだ公開経路へ接続しない。 |
-| P3 | P1のFinal相関・終了後Event fenceは一部の基礎。 | Capture状態、休憩/復帰、generation、gap、復旧/DrainのEnd-to-End。 |
+| P3 | Service Captureの永続状態、操作Key/CAS、接続generation、休憩区間と取込み不能区間の区別、終了時のCapture fenceを合成データで検証。 | 実WSS/Providerとの接続、frame ledger、未知範囲の欠落判定、Pod/Provider障害復旧とDrainのEnd-to-End。 |
 | P4 | Session間の公平Job claimと、PostgreSQL advisory lockによる原子的な新規Session Admissionを合成データで検証。 | 4会議×2時間超、実運用での容量計測、配備更新・rollback。 |
 | P5 | Session別暗号化の基礎のみ。 | PDF、7日削除、鍵・バックアップの復元不能性。 |
 | P6 | 各段階の安全テストを継続。 | 監視/Alert/Runbook、承認監査、脅威レビュー、Human/負荷/Pilot受入れ。 |

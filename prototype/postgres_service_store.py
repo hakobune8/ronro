@@ -255,6 +255,147 @@ class PostgresServiceStore:
             if row is None:
                 raise ServiceStoreError("session_not_found", "Session not found")
 
+    @staticmethod
+    def _capture_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "state": str(row["capture_state"]),
+            "generation": int(row["capture_generation"]),
+            "version": int(row["version"]),
+        }
+
+    def capture_snapshot(self, session_id: str, owner_user_id: str) -> dict[str, Any]:
+        with self._transaction() as connection:
+            return self._capture_snapshot(
+                self._require_owner_locked(connection, session_id, owner_user_id)
+            )
+
+    def request_capture_transition(
+        self, session_id: str, owner_user_id: str, *, action: str,
+        operation_key: str, expected_version: int,
+    ) -> dict[str, Any]:
+        """Durably request start/pause/resume; transport acknowledgement is separate."""
+
+        if (not isinstance(action, str) or action not in {"start", "pause", "resume"}
+                or not isinstance(operation_key, str)
+                or not 1 <= len(operation_key) <= 128
+                or not operation_key.isascii() or not operation_key.isprintable()):
+            raise ServiceStoreError("capture_request_invalid", "Invalid Capture operation")
+        if type(expected_version) is not int or expected_version < 0:
+            raise ServiceStoreError("capture_version_invalid", "Invalid Session version")
+        with self._transaction() as connection:
+            row = self._require_owner_locked(connection, session_id, owner_user_id)
+            existing = connection.execute(
+                """SELECT action, result_state, result_generation, result_version
+                   FROM service_capture_operation
+                   WHERE session_id = %s AND operation_key = %s""",
+                (session_id, operation_key),
+            ).fetchone()
+            if existing is not None:
+                if existing["action"] != action:
+                    raise ServiceStoreError("operation_key_conflict", "Operation key was reused")
+                return {
+                    "state": existing["result_state"],
+                    "generation": int(existing["result_generation"]),
+                    "version": int(existing["result_version"]),
+                }
+            if row["service_state"] != "open":
+                raise ServiceStoreError("session_closed", "Capture has ended")
+            if row["version"] != expected_version:
+                raise ServiceStoreError("version_mismatch", "Session version changed")
+            transitions = {
+                ("created", "start"): "resuming",
+                ("listening", "pause"): "pausing",
+                ("paused", "resume"): "resuming",
+            }
+            next_state = transitions.get((row["capture_state"], action))
+            if next_state is None:
+                raise ServiceStoreError("capture_transition_invalid", "Capture transition is not allowed")
+            generation = int(row["capture_generation"]) + (action in {"start", "resume"})
+            if action == "resume":
+                connection.execute(
+                    """UPDATE service_capture_interval SET closed_at = now()
+                       WHERE session_id = %s AND kind = 'paused' AND closed_at IS NULL""",
+                    (session_id,),
+                )
+                connection.execute(
+                    """INSERT INTO service_capture_interval
+                       (session_id, generation, kind, reason_code)
+                       VALUES (%s, %s, 'capture_unavailable', 'resume_pending')""",
+                    (session_id, generation),
+                )
+            version = int(row["version"]) + 1
+            connection.execute(
+                """UPDATE service_session SET capture_state = %s,
+                   capture_generation = %s, version = %s WHERE session_id = %s""",
+                (next_state, generation, version, session_id),
+            )
+            connection.execute(
+                """INSERT INTO service_capture_operation
+                   (session_id, operation_key, action, result_state,
+                    result_generation, result_version)
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                (session_id, operation_key, action, next_state, generation, version),
+            )
+            return {"state": next_state, "generation": generation, "version": version}
+
+    def acknowledge_capture_transition(
+        self, session_id: str, *, generation: int, event: str,
+    ) -> dict[str, Any]:
+        """Trusted gateway acknowledgement; never expose this as an unauthenticated API."""
+
+        if not isinstance(event, str) or event not in {"connected", "paused", "disconnected"}:
+            raise ServiceStoreError("capture_event_invalid", "Unknown Capture acknowledgement")
+        with self._transaction() as connection:
+            row = self._lock_session(connection, session_id)
+            if row["service_state"] != "open":
+                raise ServiceStoreError("session_closed", "Capture has ended")
+            if type(generation) is not int or generation != row["capture_generation"]:
+                raise ServiceStoreError("stale_capture_generation", "Capture generation changed")
+            state = row["capture_state"]
+            if event == "connected" and state == "listening":
+                return self._capture_snapshot(row)
+            if event == "paused" and state == "paused":
+                return self._capture_snapshot(row)
+            next_states = {
+                ("resuming", "connected"): "listening",
+                ("reconnecting", "connected"): "listening",
+                ("pausing", "paused"): "paused",
+                ("listening", "disconnected"): "reconnecting",
+                ("resuming", "disconnected"): "reconnecting",
+            }
+            next_state = next_states.get((state, event))
+            if next_state is None:
+                raise ServiceStoreError("capture_transition_invalid", "Capture transition is not allowed")
+            next_generation = generation + (event == "disconnected")
+            if event == "paused":
+                connection.execute(
+                    """INSERT INTO service_capture_interval
+                       (session_id, generation, kind, reason_code)
+                       VALUES (%s, %s, 'paused', 'user_pause')""",
+                    (session_id, generation),
+                )
+            elif event == "disconnected" and state == "listening":
+                connection.execute(
+                    """INSERT INTO service_capture_interval
+                       (session_id, generation, kind, reason_code)
+                       VALUES (%s, %s, 'capture_unavailable', 'transport_disconnected')""",
+                    (session_id, generation),
+                )
+            elif event == "connected":
+                connection.execute(
+                    """UPDATE service_capture_interval SET closed_at = now()
+                       WHERE session_id = %s AND kind = 'capture_unavailable'
+                         AND closed_at IS NULL""",
+                    (session_id,),
+                )
+            version = int(row["version"]) + 1
+            connection.execute(
+                """UPDATE service_session SET capture_state = %s,
+                   capture_generation = %s, version = %s WHERE session_id = %s""",
+                (next_state, next_generation, version, session_id),
+            )
+            return {"state": next_state, "generation": next_generation, "version": version}
+
     def accept_final(
         self,
         session_id: str,
@@ -625,11 +766,21 @@ class PostgresServiceStore:
             )
         self.runner.schema_validator.validate_domain(result.state)
         revision = result.state["graph"]["revision"]
+        intake_closing = any(event.get("event_type") == "session_finalizing" for event in events)
         connection.execute(
             """UPDATE service_session SET graph_revision = %s,
-               intake_closed = intake_closed OR %s WHERE session_id = %s""",
-            (revision, any(event.get("event_type") == "session_finalizing" for event in events), session_id),
+               intake_closed = intake_closed OR %s,
+               capture_state = CASE WHEN %s THEN 'finalizing' ELSE capture_state END,
+               version = version + CASE WHEN %s THEN 1 ELSE 0 END
+               WHERE session_id = %s""",
+            (revision, intake_closing, intake_closing, intake_closing, session_id),
         )
+        if intake_closing:
+            connection.execute(
+                """UPDATE service_capture_interval SET closed_at = now()
+                   WHERE session_id = %s AND closed_at IS NULL""",
+                (session_id,),
+            )
         connection.execute(
             """INSERT INTO service_checkpoint (session_id, revision, state_cipher)
                VALUES (%s, %s, %s)
@@ -716,9 +867,11 @@ class PostgresServiceStore:
             result = self._append_locked(connection, session_id, [end_event])
             revision = int(result.state["graph"]["revision"])
             connection.execute(
-                """UPDATE service_session SET service_state = %s, final_revision = %s
+                """UPDATE service_session SET service_state = %s,
+                   capture_state = %s, final_revision = %s, version = version + 1
                    WHERE session_id = %s""",
-                ("ended_incomplete" if incomplete else "ended", revision, session_id),
+                ("ended_incomplete" if incomplete else "ended",
+                 "ended_incomplete" if incomplete else "ended", revision, session_id),
             )
             return revision
 
