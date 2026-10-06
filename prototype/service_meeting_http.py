@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from .display_labels import display_projection
 from .postgres_service_store import PostgresServiceStore
 from .semantic_canvas import project_semantic_canvas
+from .service_final_record import prepare_final_record, render_final_pdf
 from .service_auth_http import ServiceAuthRequestHandler, _cookie_value
 from .service_browser_security import COOKIE_NAME
 from .service_errors import ServiceStoreError
@@ -25,6 +26,7 @@ from .service_oidc import ServiceOidcClient
 
 
 _SESSION_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})(/canvas)?\Z")
+_PDF_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/final\.pdf\Z")
 _CAPTURE_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/capture\Z")
 _ISSUE_VIEW_PATH = re.compile(r"/api/service/sessions/([A-Za-z0-9_-]{1,128})/view-credentials\Z")
 _REVOKE_VIEW_PATH = re.compile(
@@ -160,6 +162,30 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlsplit(self.path)
+        pdf = _PDF_PATH.fullmatch(parsed.path) if not parsed.query else None
+        if pdf is not None:
+            try:
+                if self.headers.get("Authorization") is not None:
+                    raise ServiceStoreError("session_not_found", "Session not found")
+                owner = self.identity.authenticate(
+                    _cookie_value(self.headers.get("Cookie"), COOKIE_NAME)
+                )
+                replay, revision, intervals = self.content.load_owner_final_record_source(
+                    pdf.group(1), owner,
+                )
+                record = prepare_final_record(
+                    replay, final_revision=revision, capture_intervals=intervals,
+                    schema_validator=self.content.runner.schema_validator,
+                )
+                self._send(
+                    200, render_final_pdf(record), content_type="application/pdf",
+                    attachment_filename="ronro-discussion-map.pdf",
+                )
+            except ServiceStoreError as exc:
+                self._error(exc)
+            except Exception:
+                self._send(503, b'{"error":{"code":"service_unavailable"}}')
+            return
         matched = _SESSION_PATH.fullmatch(parsed.path) if not parsed.query else None
         if matched is None:
             super().do_GET()

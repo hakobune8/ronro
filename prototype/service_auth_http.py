@@ -41,6 +41,7 @@ class ServiceAuthRequestHandler(BaseHTTPRequestHandler):
     def _send(
         self, status: int, body: bytes = b"", *, content_type: str = "application/json; charset=utf-8",
         location: str | None = None, cookies: tuple[str, ...] = (),
+        attachment_filename: str | None = None,
     ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -50,6 +51,8 @@ class ServiceAuthRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         if location is not None:
             self.send_header("Location", location)
+        if attachment_filename is not None:
+            self.send_header("Content-Disposition", f'attachment; filename="{attachment_filename}"')
         for cookie in cookies:
             self.send_header("Set-Cookie", cookie)
         self.end_headers()
@@ -66,6 +69,7 @@ class ServiceAuthRequestHandler(BaseHTTPRequestHandler):
             "session_not_found": 404,
             "session_deleted": 410,
             "session_closed": 409,
+            "session_not_ended": 409,
             "capacity_unavailable": 429,
             "version_mismatch": 409,
             "capture_transition_invalid": 409,

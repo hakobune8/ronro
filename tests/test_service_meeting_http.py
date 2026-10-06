@@ -274,6 +274,29 @@ class ServiceMeetingHttpTests(unittest.TestCase):
             authorization=f"Bearer {token}",
         )[0], 404)
 
+    def test_only_owner_can_download_frozen_final_pdf(self):
+        path = f"/api/service/sessions/{self.session_id}/final.pdf"
+        self.assertEqual(self._request(path, cookie=self.owner_cookie)[0], 409)
+        self.content.append_events(self.session_id, [event(
+            self.session_id, 3, "session_finalizing", {"last_evidence_sequence": 0},
+        )])
+        self.content.finalize(self.session_id, event(
+            self.session_id, 4, "session_ended",
+            {"drain_status": "complete", "final_graph_revision": 3,
+             "pending_analysis": False},
+        ))
+        self.assertEqual(self._request(path)[0], 401)
+        self.assertEqual(self._request(path, cookie=self.other_cookie)[0], 404)
+        self.assertEqual(self._request(path, authorization="Bearer invalid")[0], 404)
+        self.assertEqual(self._request(path + "?token=invalid",
+                                       cookie=self.owner_cookie)[0], 404)
+        status, headers, body = self._request(path, cookie=self.owner_cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "application/pdf")
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertIn("attachment", headers["Content-Disposition"])
+        self.assertTrue(body.startswith(b"%PDF-"))
+
     def test_owner_only_can_issue_and_revoke_live_display_credential(self):
         path = f"/api/service/sessions/{self.session_id}/view-credentials"
         origin = "https://ronro.example.test"
