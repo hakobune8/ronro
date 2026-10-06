@@ -1,8 +1,8 @@
 """Loopback-only owner and live-display routes for Account Service v1.
 
 This is not a deployed Service entrypoint. It cannot accept audio or delete
-content. The end route requires an already stopped Capture and only ticks
-Drain once; background supervision and active-audio stop remain separate.
+content. Active End stages a same-socket stop intent; a trusted Gateway or
+supervisor must reconcile it before Finalizing and Drain.
 The content adapter rejects the ephemeral test registry unless
 explicitly opted in for synthetic tests.
 """
@@ -101,15 +101,18 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
                 payload = self._json_input(512)
                 if set(payload) != {"operation_key", "expected_version"}:
                     raise ServiceStoreError("request_invalid", "End request fields invalid")
-                requested = self.content.request_finalizing(
+                requested = self.content.request_end(
                     end.group(1), owner,
                     operation_key=payload["operation_key"],
                     expected_version=payload["expected_version"],
                 )
-                outcome = self.content.complete_drain_if_ready(end.group(1))
+                if requested["state"] == "pausing":
+                    outcome = {"state": "awaiting_capture_stop"}
+                else:
+                    outcome = self.content.complete_drain_if_ready(end.group(1))
                 response = {"request": requested, "drain": outcome}
                 self._send(
-                    202 if outcome["state"] == "finalizing" else 200,
+                    202 if outcome["state"] in {"finalizing", "awaiting_capture_stop"} else 200,
                     json.dumps(response, separators=(",", ":")).encode("ascii"),
                 )
             except ServiceStoreError as exc:

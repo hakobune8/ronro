@@ -193,6 +193,170 @@ class PostgresServiceStoreTests(unittest.TestCase):
             ).fetchone()[0]
         self.assertGreater(deadline, dt.datetime.now(dt.timezone.utc))
 
+    def test_active_end_waits_for_verified_stop_then_drains_once(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="active-start", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        listening = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        requested = self.store.request_end(
+            self.session_id, "synthetic-owner", operation_key="active-end",
+            expected_version=listening["version"],
+        )
+        self.assertEqual(requested["state"], "pausing")
+        self.assertTrue(requested["stop_required"])
+        self.assertEqual(self.store.request_end(
+            self.session_id, "synthetic-owner", operation_key="active-end",
+            expected_version=listening["version"],
+        ), requested)
+        with self.assertRaises(ServiceStoreError) as conflict:
+            self.store.request_end(
+                self.session_id, "synthetic-owner", operation_key="different-end",
+                expected_version=requested["version"],
+            )
+        self.assertEqual(conflict.exception.code, "operation_key_conflict")
+        self.assertEqual(self.store.complete_end_intent(self.session_id)["state"], "pausing")
+        self.assertFalse(any(item["event_type"] == "session_finalizing"
+                             for item in self.store.replay(self.session_id).events))
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="paused",
+        )
+        self.assertEqual(self.store.complete_end_intent(self.session_id)["state"],
+                         "finalizing")
+        self.assertEqual(self.store.complete_drain_if_ready(self.session_id)["state"],
+                         "ended")
+        self.assertEqual(self.store.request_end(
+            self.session_id, "synthetic-owner", operation_key="active-end",
+            expected_version=listening["version"],
+        )["state"], "ended")
+        self.assertEqual(len([item for item in self.store.replay(self.session_id).events
+                              if item["event_type"] == "session_ended"]), 1)
+
+    def test_unverified_active_stop_becomes_partial_after_db_deadline(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="timeout-start", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        listening = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        self.store.request_end(
+            self.session_id, "synthetic-owner", operation_key="timeout-end",
+            expected_version=listening["version"],
+        )
+        self.assertEqual(ServiceDrainSupervisor(self.store).process_one()["state"],
+                         "pausing")
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                """UPDATE service_end_intent SET stop_deadline_at = now() - interval '1 second'
+                   WHERE session_id = %s""", (self.session_id,),
+            )
+        self.assertEqual(ServiceDrainSupervisor(self.store).process_one()["state"],
+                         "finalizing")
+        self.assertEqual(self.store.complete_drain_if_ready(self.session_id)["state"],
+                         "ended_incomplete")
+        with psycopg.connect(TEST_DSN) as connection:
+            reason = connection.execute(
+                """SELECT reason_code FROM service_capture_interval
+                   WHERE session_id = %s ORDER BY interval_id DESC LIMIT 1""",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertEqual(reason, "end_stop_unverified")
+
+    def test_end_intent_blocks_new_socket_and_resume_after_disconnect(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="fenced-start", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        listening = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        self.store.request_end(
+            self.session_id, "synthetic-owner", operation_key="fenced-end",
+            expected_version=listening["version"],
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="disconnected",
+        )
+        with self.assertRaises(ServiceStoreError) as reconnect:
+            self.store.acquire_capture_lease(
+                self.session_id, generation=2, connection_id="late-new-socket",
+            )
+        self.assertEqual(reconnect.exception.code, "capture_end_pending")
+        self.assertEqual(ServiceDrainSupervisor(self.store).process_one()["state"],
+                         "finalizing")
+        self.assertEqual(self.store.complete_drain_if_ready(self.session_id)["state"],
+                         "ended_incomplete")
+
+    def test_end_intent_blocks_resume_after_verified_stop(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="resume-start", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        listening = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        self.store.request_end(
+            self.session_id, "synthetic-owner", operation_key="resume-end",
+            expected_version=listening["version"],
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="paused",
+        )
+        paused = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        with self.assertRaises(ServiceStoreError) as resumed:
+            self.store.request_capture_transition(
+                self.session_id, "synthetic-owner", action="resume",
+                operation_key="resume-after-end", expected_version=paused["version"],
+            )
+        self.assertEqual(resumed.exception.code, "capture_end_pending")
+
+    def test_end_during_connecting_fences_intake_and_records_gap(self):
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="connecting-start", expected_version=0,
+        )
+        pending = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        self.assertEqual(self.store.request_end(
+            self.session_id, "synthetic-owner", operation_key="connecting-end",
+            expected_version=pending["version"],
+        )["state"], "finalizing")
+        self.assertEqual(self.store.complete_drain_if_ready(self.session_id)["state"],
+                         "ended_incomplete")
+
+    def test_stalled_active_stop_does_not_starve_another_meeting_drain(self):
+        other = f"test-{uuid.uuid4()}"
+        self.created_sessions.append(other)
+        self.store.create_session(other, "synthetic-owner")
+        self.store.append_events(other, [
+            event(other, 1, "session_created", {"title": "別の合成会議", "goal": "検討"}),
+            event(other, 2, "session_started", {}),
+        ])
+        self._begin_supervised_drain(other, "other-meeting")
+        self.store.request_capture_transition(
+            self.session_id, "synthetic-owner", action="start",
+            operation_key="stalled-start", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        listening = self.store.capture_snapshot(self.session_id, "synthetic-owner")
+        self.store.request_end(
+            self.session_id, "synthetic-owner", operation_key="stalled-end",
+            expected_version=listening["version"],
+        )
+        outcome = ServiceDrainSupervisor(self.store).process_one()
+        self.assertEqual((outcome["session_id"], outcome["state"]), (other, "ended"))
+        self.assertEqual(self.store.capture_snapshot(
+            self.session_id, "synthetic-owner",
+        )["state"], "pausing")
+
     def test_capture_lease_is_cross_store_and_expiry_fences_old_audio(self):
         self.store.request_capture_transition(
             self.session_id, "synthetic-owner", action="start",
@@ -886,6 +1050,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
             "0009_service_identity.sql",
             "0010_oidc_browser_binding.sql", "0011_capture_connection_lease.sql",
             "0012_drain_supervision.sql",
+            "0013_active_end_intent.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 

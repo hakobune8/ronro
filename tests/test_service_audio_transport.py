@@ -21,11 +21,13 @@ from prototype.live_turns import TurnLedger
 from prototype.postgres_service_store import PostgresServiceStore
 from prototype.schema import SchemaValidator
 from prototype.service_audio_transport import ServiceAudioGateway, serve_service_audio_candidate
+from prototype.service_analyzer_worker import ServiceAnalyzerWorker
 from prototype.service_browser_security import COOKIE_NAME, ServiceBrowserSecurity
 from prototype.service_crypto import InMemoryTestKeyRegistry
 from prototype.service_identity_store import ServiceIdentityStore
 from prototype.service_oidc import OidcConfiguration, ServiceOidcClient
 from tests.test_service_store import event
+from tests.test_service_analyzer_worker import LabelAnalyzer
 
 
 TEST_DSN = os.getenv("RONRO_TEST_POSTGRES_DSN")
@@ -181,6 +183,51 @@ class ServiceAudioTransportTests(unittest.IsolatedAsyncioTestCase):
             })
             await asyncio.wait_for(socket.wait_closed(), timeout=3)
         self.assertEqual(self.content.capture_snapshot(self.session_id, self.owner)["state"], "paused")
+
+    async def test_active_end_waits_for_same_socket_last_frame_then_finalizes(self):
+        async with await self._connect() as socket:
+            self.assertEqual(json.loads(await socket.recv())["type"], "capture_ready")
+            await socket.send(encode_audio_frame(AudioChunk(0, 0.0, b"\x01\x00" * 2400)))
+            self.assertEqual(json.loads(await socket.recv())["type"], "frame_received")
+            self.assertEqual(json.loads(await socket.recv())["type"], "final_accepted")
+            listening = self.content.capture_snapshot(self.session_id, self.owner)
+            self.assertEqual(self.content.request_end(
+                self.session_id, self.owner, operation_key="end-live-socket",
+                expected_version=listening["version"],
+            )["state"], "pausing")
+            await socket.send(json.dumps({"type": "capture_stop", "last_sequence": 0}))
+            self.assertEqual(json.loads(await socket.recv()), {
+                "type": "capture_paused", "generation": 1, "end_state": "finalizing",
+            })
+            await asyncio.wait_for(socket.wait_closed(), timeout=3)
+        self.assertEqual(self.content.complete_drain_if_ready(self.session_id)["state"],
+                         "finalizing")
+        ServiceAnalyzerWorker(self.content, LabelAnalyzer()).process_one(
+            session_id=self.session_id,
+        )
+        self.assertEqual(self.content.complete_drain_if_ready(self.session_id)["state"],
+                         "ended")
+
+    async def test_active_end_without_verified_stop_records_gap_on_disconnect(self):
+        async with await self._connect() as socket:
+            self.assertEqual(json.loads(await socket.recv())["type"], "capture_ready")
+            listening = self.content.capture_snapshot(self.session_id, self.owner)
+            self.content.request_end(
+                self.session_id, self.owner, operation_key="end-without-stop",
+                expected_version=listening["version"],
+            )
+            await socket.close()
+            await asyncio.wait_for(socket.wait_closed(), timeout=3)
+        for _ in range(30):
+            if self.content.capture_snapshot(self.session_id, self.owner)["state"] == "reconnecting":
+                break
+            await asyncio.sleep(0.05)
+        self.assertEqual(self.content.capture_snapshot(self.session_id, self.owner)["state"],
+                         "reconnecting")
+        self.assertEqual(self.content.complete_end_intent(self.session_id)["state"],
+                         "finalizing")
+        self.assertEqual(self.content.complete_drain_if_ready(self.session_id)["state"],
+                         "ended_incomplete")
 
     async def test_pause_resume_keeps_graph_and_uses_new_audio_generation(self):
         frame = encode_audio_frame(AudioChunk(0, 0.0, b"\x01\x00" * 2400))

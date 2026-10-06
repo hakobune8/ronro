@@ -19,10 +19,14 @@ class ServiceDrainSupervisor:
         self.poll_seconds = poll_seconds
 
     def process_one(self) -> dict[str, Any] | None:
-        return self.store.supervise_next_drain()
+        end = self.store.supervise_next_end_intent()
+        if end is not None and end["state"] != "pausing":
+            return end
+        # A slow/missing browser stop must not starve other meetings' Drain.
+        return self.store.supervise_next_drain() or end
 
     def run_until_stopped(self, stop: threading.Event) -> None:
         while not stop.is_set():
             outcome = self.process_one()
-            if outcome is None or outcome["state"] == "finalizing":
+            if outcome is None or outcome["state"] in {"pausing", "finalizing"}:
                 stop.wait(self.poll_seconds)

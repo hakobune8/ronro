@@ -341,8 +341,12 @@ class ServiceAudioGateway:
                             session_id, generation=generation, event="paused",
                             connection_id=connection_id,
                         )
+                        ending = await asyncio.to_thread(
+                            self.content.complete_end_intent, session_id,
+                        )
                         await connection.send(json.dumps({
                             "type": "capture_paused", "generation": generation,
+                            **({"end_state": ending["state"]} if ending is not None else {}),
                         }))
                     break
                 turns = getattr(provider, "turns", None)

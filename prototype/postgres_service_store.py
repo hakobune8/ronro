@@ -31,6 +31,7 @@ from .service_presentation import validate_presentation_delta
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 DEFAULT_DRAIN_DEADLINE_SECONDS = 300
+END_STOP_DEADLINE_SECONDS = 90
 
 
 class PostgresServiceStore:
@@ -373,6 +374,12 @@ class PostgresServiceStore:
             row = self._lock_session(connection, session_id)
             if row["service_state"] != "open" or row["capture_generation"] != generation:
                 raise ServiceStoreError("stale_capture_generation", "Capture generation changed")
+            ending = connection.execute(
+                "SELECT 1 FROM service_end_intent WHERE session_id = %s",
+                (session_id,),
+            ).fetchone()
+            if ending is not None:
+                raise ServiceStoreError("capture_end_pending", "Session End is pending")
             incumbent = connection.execute(
                 """SELECT generation, expires_at > now() AS live
                    FROM service_capture_connection_lease
@@ -512,6 +519,11 @@ class PostgresServiceStore:
                 }
             if row["service_state"] != "open":
                 raise ServiceStoreError("session_closed", "Capture has ended")
+            if connection.execute(
+                "SELECT 1 FROM service_end_intent WHERE session_id = %s",
+                (session_id,),
+            ).fetchone() is not None:
+                raise ServiceStoreError("capture_end_pending", "Session End is pending")
             if row["version"] != expected_version:
                 raise ServiceStoreError("version_mismatch", "Session version changed")
             transitions = {
@@ -659,55 +671,187 @@ class PostgresServiceStore:
             raise ServiceStoreError("capture_version_invalid", "Invalid Session version")
         with self._transaction() as connection:
             row = self._require_owner_locked(connection, session_id, owner_user_id)
-            replay = self._replay_locked(connection, session_id)
-            prior = next(
-                (item for item in reversed(replay.events)
-                 if item["event_type"] == "session_finalizing"), None,
+            return self._request_finalizing_locked(
+                connection, session_id, row, operation_key=operation_key,
+                expected_version=expected_version,
             )
-            if prior is not None:
-                if prior.get("correlation_id") != operation_key:
+
+    def _request_finalizing_locked(
+        self, connection: psycopg.Connection, session_id: str, row: dict[str, Any],
+        *, operation_key: str, expected_version: int,
+    ) -> dict[str, Any]:
+        intent = connection.execute(
+            "SELECT operation_key FROM service_end_intent WHERE session_id = %s",
+            (session_id,),
+        ).fetchone()
+        if intent is not None and intent["operation_key"] != operation_key:
+            raise ServiceStoreError("operation_key_conflict", "End operation differs")
+        replay = self._replay_locked(connection, session_id)
+        prior = next(
+            (item for item in reversed(replay.events)
+             if item["event_type"] == "session_finalizing"), None,
+        )
+        if prior is not None:
+            if prior.get("correlation_id") != operation_key:
+                raise ServiceStoreError("operation_key_conflict", "End operation differs")
+            return {
+                "state": str(row["service_state"] if row["service_state"] != "open"
+                             else row["capture_state"]),
+                "version": int(row["version"]),
+                "graph_revision": int(row["graph_revision"]),
+            }
+        self._require_open(row)
+        if row["version"] != expected_version:
+            raise ServiceStoreError("version_mismatch", "Session version changed")
+        if row["capture_state"] not in {"paused", "reconnecting"}:
+            raise ServiceStoreError(
+                "capture_transition_invalid", "Stop audio before ending the Session"
+            )
+        evidence_count = connection.execute(
+            """SELECT COALESCE(MAX(utterance_sequence), 0) AS value
+               FROM service_evidence WHERE session_id = %s""",
+            (session_id,),
+        ).fetchone()["value"]
+        end_request = {
+            "event_id": str(uuid.uuid4()), "session_id": session_id,
+            "sequence": len(replay.events) + 1,
+            "event_type": "session_finalizing",
+            "occurred_at": dt.datetime.now(dt.timezone.utc).isoformat(
+                timespec="milliseconds"
+            ).replace("+00:00", "Z"),
+            "actor": "system", "source_evidence_ids": [],
+            "correlation_id": operation_key,
+            "payload": {"last_evidence_sequence": int(evidence_count)},
+        }
+        result = self._append_locked(connection, session_id, [end_request])
+        connection.execute(
+            """UPDATE service_session
+               SET drain_deadline_at = now() + %s * interval '1 second',
+                   drain_last_checked_at = NULL
+               WHERE session_id = %s""",
+            (self.drain_deadline_seconds, session_id),
+        )
+        return {
+            "state": "finalizing", "version": int(row["version"]) + 1,
+            "graph_revision": int(result.state["graph"]["revision"]),
+        }
+
+    def request_end(
+        self, session_id: str, owner_user_id: str, *,
+        operation_key: str, expected_version: int,
+    ) -> dict[str, Any]:
+        """Owner End: stage a same-socket stop when Capture is still active."""
+
+        if (not isinstance(operation_key, str) or not 1 <= len(operation_key) <= 128
+                or not operation_key.isascii() or not operation_key.isprintable()):
+            raise ServiceStoreError("capture_request_invalid", "Invalid end operation")
+        if type(expected_version) is not int or expected_version < 0:
+            raise ServiceStoreError("capture_version_invalid", "Invalid Session version")
+        with self._transaction() as connection:
+            row = self._require_owner_locked(connection, session_id, owner_user_id)
+            intent = connection.execute(
+                "SELECT operation_key FROM service_end_intent WHERE session_id = %s",
+                (session_id,),
+            ).fetchone()
+            if intent is not None:
+                if intent["operation_key"] != operation_key:
                     raise ServiceStoreError("operation_key_conflict", "End operation differs")
-                return {
-                    "state": str(row["service_state"] if row["service_state"] != "open"
-                                 else row["capture_state"]),
-                    "version": int(row["version"]),
-                    "graph_revision": int(row["graph_revision"]),
-                }
-            self._require_open(row)
+                if row["capture_state"] == "pausing":
+                    return {"state": "pausing", "generation": int(row["capture_generation"]),
+                            "version": int(row["version"]), "stop_required": True}
+                # A stop acknowledgement or disconnect may have happened
+                # between the owner's retries. Complete the same operation.
+                return self._request_finalizing_locked(
+                    connection, session_id, row, operation_key=operation_key,
+                    expected_version=int(row["version"]),
+                )
+            if row["service_state"] != "open":
+                return self._request_finalizing_locked(
+                    connection, session_id, row, operation_key=operation_key,
+                    expected_version=expected_version,
+                )
+            if row["capture_state"] == "finalizing":
+                return self._request_finalizing_locked(
+                    connection, session_id, row, operation_key=operation_key,
+                    expected_version=expected_version,
+                )
             if row["version"] != expected_version:
                 raise ServiceStoreError("version_mismatch", "Session version changed")
-            if row["capture_state"] not in {"paused", "reconnecting"}:
-                raise ServiceStoreError(
-                    "capture_transition_invalid", "Stop audio before ending the Session"
+            state = row["capture_state"]
+            if state in {"listening", "pausing"}:
+                if state == "listening":
+                    connection.execute(
+                        """UPDATE service_session SET capture_state = 'pausing',
+                           version = version + 1 WHERE session_id = %s""",
+                        (session_id,),
+                    )
+                connection.execute(
+                    """INSERT INTO service_end_intent
+                       (session_id, operation_key, generation, stop_deadline_at)
+                       VALUES (%s, %s, %s, now() + %s * interval '1 second')""",
+                    (session_id, operation_key, row["capture_generation"],
+                     END_STOP_DEADLINE_SECONDS),
                 )
-            evidence_count = connection.execute(
-                """SELECT COALESCE(MAX(utterance_sequence), 0) AS value
-                   FROM service_evidence WHERE session_id = %s""",
-                (session_id,),
-            ).fetchone()["value"]
-            end_request = {
-                "event_id": str(uuid.uuid4()), "session_id": session_id,
-                "sequence": len(replay.events) + 1,
-                "event_type": "session_finalizing",
-                "occurred_at": dt.datetime.now(dt.timezone.utc).isoformat(
-                    timespec="milliseconds"
-                ).replace("+00:00", "Z"),
-                "actor": "system", "source_evidence_ids": [],
-                "correlation_id": operation_key,
-                "payload": {"last_evidence_sequence": int(evidence_count)},
-            }
-            result = self._append_locked(connection, session_id, [end_request])
-            connection.execute(
-                """UPDATE service_session
-                   SET drain_deadline_at = now() + %s * interval '1 second',
-                       drain_last_checked_at = NULL
-                   WHERE session_id = %s""",
-                (self.drain_deadline_seconds, session_id),
+                return {"state": "pausing", "generation": int(row["capture_generation"]),
+                        "version": int(row["version"]) + (state == "listening"),
+                        "stop_required": True}
+            if state == "resuming":
+                # There may be PCM not yet accepted by a Provider. Never
+                # claim a clean stop when the same-socket handshake is absent.
+                self._mark_capture_discontinuity_locked(
+                    connection, session_id, row, "end_before_capture_ready",
+                )
+                row = self._lock_session(connection, session_id)
+            return self._request_finalizing_locked(
+                connection, session_id, row, operation_key=operation_key,
+                expected_version=int(row["version"]),
             )
-            return {
-                "state": "finalizing", "version": int(row["version"]) + 1,
-                "graph_revision": int(result.state["graph"]["revision"]),
-            }
+
+    def complete_end_intent(self, session_id: str) -> dict[str, Any] | None:
+        """Trusted Gateway/supervisor reconciliation after a verified stop."""
+
+        with self._transaction() as connection:
+            row = self._lock_session(connection, session_id)
+            intent = connection.execute(
+                """SELECT operation_key, stop_deadline_at <= now() AS expired
+                   FROM service_end_intent WHERE session_id = %s""",
+                (session_id,),
+            ).fetchone()
+            if intent is None:
+                return None
+            if row["service_state"] == "open" and row["capture_state"] == "pausing":
+                if not intent["expired"]:
+                    return {"state": "pausing", "stop_required": True}
+                self._mark_capture_discontinuity_locked(
+                    connection, session_id, row, "end_stop_unverified",
+                )
+                row = self._lock_session(connection, session_id)
+            return self._request_finalizing_locked(
+                connection, session_id, row, operation_key=intent["operation_key"],
+                expected_version=int(row["version"]),
+            )
+
+    def supervise_next_end_intent(self) -> dict[str, Any] | None:
+        """Fairly reconcile one pending End; timeout cannot imply clean audio."""
+
+        with self._transaction() as connection:
+            pending = connection.execute(
+                """SELECT i.session_id FROM service_end_intent AS i
+                   JOIN service_session AS s ON s.session_id = i.session_id
+                   WHERE s.service_state = 'open'
+                     AND s.capture_state IN ('pausing', 'paused', 'reconnecting')
+                   ORDER BY i.last_checked_at NULLS FIRST, i.session_id
+                   LIMIT 1 FOR UPDATE OF i SKIP LOCKED""",
+            ).fetchone()
+            if pending is None:
+                return None
+            session_id = str(pending["session_id"])
+            connection.execute(
+                """UPDATE service_end_intent SET last_checked_at = now()
+                   WHERE session_id = %s""", (session_id,),
+            )
+        outcome = self.complete_end_intent(session_id)
+        return {"session_id": session_id, **outcome} if outcome is not None else None
 
     @staticmethod
     def _mark_capture_discontinuity_locked(

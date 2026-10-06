@@ -208,7 +208,7 @@ class ServiceMeetingHttpTests(unittest.TestCase):
         self.assertEqual(status, 202)
         self.assertEqual(json.loads(body)["state"], "resuming")
 
-    def test_owner_end_route_requires_stopped_audio_and_is_idempotent(self):
+    def test_owner_end_route_after_stopped_audio_is_idempotent(self):
         path = f"/api/service/sessions/{self.session_id}/end"
         origin = "https://ronro.example.test"
 
@@ -231,8 +231,6 @@ class ServiceMeetingHttpTests(unittest.TestCase):
             self.session_id, generation=started["generation"], event="connected",
         )
         listening = self.content.capture_snapshot(self.session_id, self.owner)
-        self.assertEqual(request(cookie=self.owner_cookie, csrf=self.owner_csrf,
-                                 version=listening["version"])[0], 409)
         self.content.request_capture_transition(
             self.session_id, self.owner, action="pause",
             operation_key="pause-before-end", expected_version=listening["version"],
@@ -253,6 +251,37 @@ class ServiceMeetingHttpTests(unittest.TestCase):
                                  version=paused["version"], key="different")[0], 409)
         self.assertEqual(len([item for item in self.content.replay(self.session_id).events
                               if item["event_type"] == "session_ended"]), 1)
+
+    def test_owner_end_route_stages_active_stop_before_finalizing(self):
+        path = f"/api/service/sessions/{self.session_id}/end"
+        self.content.request_capture_transition(
+            self.session_id, self.owner, action="start",
+            operation_key="start-active-end", expected_version=0,
+        )
+        self.content.acknowledge_capture_transition(
+            self.session_id, generation=1, event="connected",
+        )
+        listening = self.content.capture_snapshot(self.session_id, self.owner)
+        def request(key="end-active"):
+            return self._request(
+                path, method="POST", cookie=self.owner_cookie,
+                origin="https://ronro.example.test", csrf=self.owner_csrf,
+                content_type="application/json", body=json.dumps({
+                    "operation_key": key, "expected_version": listening["version"],
+                }).encode(),
+            )
+        status, _, body = request()
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body)["drain"]["state"], "awaiting_capture_stop")
+        self.assertEqual(request()[0], 202)
+        self.assertEqual(request("other-end")[0], 409)
+        self.assertFalse(any(item["event_type"] == "session_finalizing"
+                             for item in self.content.replay(self.session_id).events))
+        self.content.acknowledge_capture_transition(
+            self.session_id, generation=1, event="paused",
+        )
+        self.content.complete_end_intent(self.session_id)
+        self.assertEqual(request()[0], 200)
 
     def _analyzed_node(self):
         evidence, utterance = final(self.session_id, 1)
