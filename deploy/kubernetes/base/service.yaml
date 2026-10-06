@@ -8,7 +8,7 @@ spec:
   type: ClusterIP
   selector:
     app.kubernetes.io/name: ronro
-    app.kubernetes.io/part-of: ronro-pilot
+    app.kubernetes.io/part-of: ronro-service-demo
   ports:
     - name: http
       port: 8000

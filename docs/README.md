@@ -9,6 +9,10 @@
 - 配備・確認：[Kubernetes Pilot Deployment](deployment/kubernetes-pilot-deployment.md)、[Pilot Day Checklist](deployment/kubernetes-pilot-checklist.md)
 - 名称と互換性：[論路 Naming Decision](product/ronro-naming.md)
 - 安全上の注意：[Security Policy](../SECURITY.md)
+- サービス化に向けた課題整理：[RFC-0007](rfc/0007-service-readiness-improvement-inventory.md)（Draft。設計・提供の承認ではありません）
+- サービス化の設計案：[RFC-0008](rfc/0008-account-based-service-architecture.md)（Human Review待ち。未実装）
+- サービス化の実装設計案：[Account Service v1](implementation/account-service-v1-design.md)（Human Review待ち。現行Pilotには未適用）
+- サービス化の実装計画：[Account Service v1 Plan](implementation/account-service-v1-implementation-plan.md)（開発順序と受入れゲート。未実装）
 
 画面画像は制御された合成会議による表示例であり、実会議の結果やAnalyzerの精度を示すものではありません。現行Semantic Canvasの段階別の例は[パイロットガイド](pilot/ronro-live-pilot-guide.md)にもあります。
 

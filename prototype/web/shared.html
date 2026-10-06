@@ -332,6 +332,12 @@
     const params = new URLSearchParams(window.location.search);
     const demoFixture = params.get('fixture');
     const demoSequence = params.get('sequence');
+    const serviceShared = params.get('service') === '1';
+    const serviceSession = new URLSearchParams((window.location.hash || '').slice(1)).get('session');
+    const serviceSessionKey = 'ronro.service-demo.session';
+    if (serviceShared && serviceSession && /^[A-Za-z0-9_-]{1,128}$/.test(serviceSession)) {
+      sessionStorage.setItem(serviceSessionKey, serviceSession);
+    }
     // Focused Flow is the candidate default; the prior six-card projection
     // remains available as a comparison/fallback, not as the primary meeting view.
     const semanticFocused = params.get('view') !== 'grid';
@@ -387,12 +393,14 @@
       if (isDemo) return { text: '● 更新しました', className: 'updated' };
       if (live.error || live.queue?.delayed_state === 'critical') return { text: '● 遅れています', className: 'delayed' };
       if (state === 'finalizing') return { text: '● 仕上げています', className: 'busy' };
+      if (state === 'paused') return { text: '● 休憩中', className: 'busy' };
       if (['capturing', 'active', 'connected'].includes(state)) {
         if (live.websocket_state === 'disconnected') return { text: '● 音声を再接続しています', className: 'busy' };
         if (live.analyzer_status === 'analyzing' || live.stt_state === 'committing') return { text: '● 整理中…', className: 'busy' };
         return { text: '● 聞いています', className: '' };
       }
       if (state === 'ended') return { text: '● 会議を終了しました', className: 'updated' };
+      if (state === 'ended_incomplete') return { text: '● 終了しました・確認が必要です', className: 'delayed' };
       if (state === 'ended_with_incomplete_processing') return { text: '● 終了しました・確認が必要です', className: 'delayed' };
       return { text: '● 待機中', className: '' };
     }
@@ -708,7 +716,7 @@
     function renderSemanticCanvas(snapshot, graph, fresh) {
       const canvas = snapshot.map.semantic_canvas;
       const state = snapshot?.live_state?.runtime_state || 'active';
-      const final = state === 'ended';
+      const final = state === 'ended' || state === 'ended_incomplete';
       const camera = final ? canvas.final_camera : canvas.live_camera;
       const byId = new Map(canvas.nodes.map(node => [node.id,node]));
       const near = new Set(canvas.near_ids);
@@ -723,7 +731,8 @@
         return `<div class="canvas-node ${escapeHtml(node.type)}${stateClass} ${isFocus ? 'focus' : soft ? 'mid' : ''} ${node.root_state === 'unconfirmed' ? 'unconfirmed' : ''}" style="left:${node.x}px;top:${node.y}px" data-node-id="${escapeHtml(node.id)}"><span class="canvas-role">${escapeHtml(canvasRole(node))}</span>${canvasTimeMarkup(node)}<span class="canvas-label">${canvasDisplayLabelMarkup(node.label)}</span></div>`;
       }).join('');
       const detail = !final && focus ? `<aside class="canvas-detail${fresh.has(focus.id) ? ' just-updated' : ''}">${canvasTimeMarkup(focus, 'canvas-detail-time')}<p>${escapeHtml(focus.canonical)}</p><div class="detail-overflow">続きあり</div></aside>` : '';
-      const note = state === 'ended_with_incomplete_processing' ? '処理が完了していません。内容の確認が必要です。'
+      const note = state === 'ended_incomplete' || state === 'ended_with_incomplete_processing'
+        ? '一部の音声を記録できなかった可能性があります。'
         : '';
       const markup = `<section class="canvas-stage" aria-label="議論の論点図"><div class="canvas-world"><svg class="canvas-edges" aria-hidden="true"></svg>${nodeMarkup}</div><div class="canvas-periphery"></div><svg class="canvas-final-topology" aria-hidden="true"></svg><svg class="canvas-final-relations" aria-hidden="true"></svg><div class="canvas-final-markers"></div>${canvas.nodes.length ? '' : '<div class="canvas-empty">議論を整理しています</div>'}${note ? `<div class="canvas-final-note">${note}</div>` : ''}${detail}</section>`;
       const main = $('shared-main');
@@ -864,7 +873,7 @@
       const graph = snapshot?.state?.graph;
       const shared = snapshot?.map?.shared;
       const state = snapshot?.live_state?.runtime_state || (isDemo ? 'active' : 'idle');
-      const ready = Boolean(graph && shared);
+      const ready = Boolean(graph && (shared || snapshot?.map?.semantic_canvas));
       const idle = !ready || state === 'idle';
       document.querySelector('.shared-shell').classList.toggle('discussion-active', !idle);
       document.querySelector('.shared-shell').classList.toggle('canvas-active', !idle && semanticCanvas && Boolean(snapshot?.map?.semantic_canvas));
@@ -881,7 +890,9 @@
         previousCanvasKey = null;
         main.classList.add('no-rail');
         main.classList.remove('focused-main', 'focused-sparse');
-        main.innerHTML = '<section class="passive"><h1>会議の開始を待っています</h1><p>スマートフォンで <a href="/session">会議をはじめる</a></p></section>';
+        main.innerHTML = serviceShared
+          ? '<section class="passive"><h1>会議の開始を待っています</h1><p><a href="/service-demo">会議の操作画面へ</a></p></section>'
+          : '<section class="passive"><h1>会議の開始を待っています</h1><p>スマートフォンで <a href="/session">会議をはじめる</a></p></section>';
         $('flow-list').innerHTML = '';
         $('discussion-flow-list').innerHTML = '';
         document.querySelector('.flow-band').hidden = true;
@@ -958,19 +969,56 @@
       return response.json();
     }
 
+    async function fetchService() {
+      const session = serviceSession || sessionStorage.getItem(serviceSessionKey);
+      if (!session || !/^[A-Za-z0-9_-]{1,128}$/.test(session)) return null;
+      const base = `/api/service/sessions/${encodeURIComponent(session)}`;
+      const [meetingResponse, canvasResponse] = await Promise.all([
+        fetch(base, {cache:'no-store', credentials:'same-origin'}),
+        fetch(`${base}/canvas`, {cache:'no-store', credentials:'same-origin'}),
+      ]);
+      if (!meetingResponse.ok || !canvasResponse.ok) {
+        throw new Error(`session unavailable (${meetingResponse.status}/${canvasResponse.status})`);
+      }
+      const [meeting, canvas] = await Promise.all([meetingResponse.json(), canvasResponse.json()]);
+      if (canvas.session_id !== session || meeting.graph_revision !== canvas.revision) {
+        throw new Error('session revision changed during refresh');
+      }
+      const runtime = ['ended','ended_incomplete'].includes(meeting.state) ? meeting.state
+        : meeting.capture_state === 'finalizing' ? 'finalizing'
+        : meeting.capture_state === 'paused' ? 'paused'
+        : meeting.capture_state === 'listening' || meeting.capture_state === 'reconnecting' ? 'active'
+        : 'starting';
+      return {
+        state: {session: {id:session, title:canvas.session_title},
+          graph: {session_id:session, revision:canvas.revision, nodes:canvas.nodes}},
+        map: {semantic_canvas:canvas, display_labels:{}},
+        live_state: {runtime_state:runtime,
+          websocket_state:meeting.capture_state === 'reconnecting' ? 'disconnected' : 'connected'},
+      };
+    }
+
     async function refresh() {
       try {
-        const snapshot = demoFixture ? await fetchDemo() : await fetchLive();
+        const snapshot = serviceShared ? await fetchService()
+          : demoFixture ? await fetchDemo() : await fetchLive();
         renderShared(snapshot, Boolean(demoFixture));
       } catch (_) {
-        if (!demoFixture) {
+        if (serviceShared) {
+          $('shared-status').textContent = '● 会議を確認できません';
+          $('shared-status').className = 'shared-status delayed';
+          $('shared-main').innerHTML = '<section class="passive"><h1>論点図を表示できません</h1><p>会議の操作画面から開き直してください。</p><p><a href="/service-demo">会議の操作画面へ</a></p></section>';
+        } else if (!demoFixture) {
           $('shared-status').textContent = '● 接続を確認しています';
           $('shared-status').className = 'shared-status delayed';
         }
       }
     }
     refresh();
-    if (!demoFixture) window.setInterval(refresh, 1000);
+    if (serviceShared) window.setInterval(refresh, 2500);
+    else {
+      if (!demoFixture) window.setInterval(refresh, 1000);
+    }
   </script>
 </body>
 </html>

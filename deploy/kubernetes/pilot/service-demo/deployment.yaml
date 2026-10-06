@@ -1,0 +1,142 @@
+# Isolated Account Service Pilot demo. Apply only after creating the dedicated
+# ronro-service-demo-db Secret. Do not attach an evaluation or backup PVC.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ronro-service-demo
+  namespace: ronro-pilot
+  labels:
+    app.kubernetes.io/name: ronro
+    app.kubernetes.io/part-of: ronro-service-demo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ronro
+      app.kubernetes.io/part-of: ronro-service-demo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ronro
+        app.kubernetes.io/part-of: ronro-service-demo
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ronro-ghcr-pull
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ronro
+          image: ghcr.io/hakobune8/ronro@sha256:ab5214726924a6b6c9fb67a45eb7f562c15a3cee9f6b77ddb3ba53ef4cee1b6b
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "prototype.service_pilot_demo"]
+          ports:
+            - name: http
+              containerPort: 8000
+            - name: websocket
+              containerPort: 8765
+          envFrom:
+            - configMapRef:
+                name: ronro-pilot-config
+            - secretRef:
+                name: ronro-openai
+          env:
+            - name: RONRO_SERVICE_PILOT_DEMO
+              value: enabled
+            - name: RONRO_SERVICE_EPHEMERAL_STORAGE_ACK
+              value: enabled
+            - name: RONRO_SERVICE_PUBLIC_ORIGIN
+              value: https://ronro.hakobune8.com
+            - name: RONRO_SERVICE_POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: ronro-service-demo-db
+                  key: dsn
+            - name: RONRO_SERVICE_OIDC_ISSUER
+              value: https://id.hakobune8.com
+            - name: RONRO_SERVICE_OIDC_CLIENT_ID
+              value: "393875378680168498"
+            - name: RONRO_SERVICE_OIDC_AUTHORIZATION_ENDPOINT
+              value: https://id.hakobune8.com/oauth/v2/authorize
+            - name: RONRO_SERVICE_OIDC_TOKEN_ENDPOINT
+              value: https://id.hakobune8.com/oauth/v2/token
+            - name: RONRO_SERVICE_OIDC_JWKS_URI
+              value: https://id.hakobune8.com/oauth/v2/keys
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            httpGet:
+              path: /api/service/healthz
+              port: http
+            initialDelaySeconds: 4
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/service/healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+        - name: postgres
+          image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+          imagePullPolicy: IfNotPresent
+          args: ["-c", "listen_addresses=127.0.0.1"]
+          env:
+            - name: POSTGRES_DB
+              value: ronro_pilot_demo
+            - name: POSTGRES_USER
+              value: ronro_demo
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ronro-service-demo-db
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "ronro_demo", "-d", "ronro_pilot_demo"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: demo-db
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: demo-db
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

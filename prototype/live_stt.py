@@ -270,6 +270,17 @@ def adapt_realtime_event(raw: Mapping[str, Any], *, seen_final_item_ids: set[str
     """Map provider messages into the internal runtime event vocabulary."""
 
     event_type = raw.get("type")
+    if event_type == "input_audio_buffer.committed":
+        # Service persistence needs the Provider-assigned item identity. Keep
+        # this metadata-only event distinct from a transcription Final; Pilot
+        # consumers may continue to ignore it.
+        return {
+            "type": "provider_item_committed",
+            "item_id": raw.get("item_id"),
+            "event_id": raw.get("event_id"),
+            "previous_item_id": raw.get("previous_item_id"),
+            "raw_type": event_type,
+        }
     if event_type == "conversation.item.input_audio_transcription.delta":
         return {
             "type": "partial_transcript",
@@ -603,6 +614,8 @@ class OpenAIRealtimeTranscriptionClient:
                     "semantic_vad" if self.config.finalization_mode == "semantic_vad" else "server_vad"
                 )
         runtime_event = adapt_realtime_event(raw, seen_final_item_ids=self._seen_final_item_ids)
+        if raw_type == "input_audio_buffer.committed":
+            runtime_event["_turn"] = self.turns.context(raw.get("item_id"))
         provider_error = raw.get('error') if isinstance(raw.get('error'), Mapping) else {}
         if raw_type == 'error' and provider_error.get('code') == 'input_audio_buffer_commit_empty':
             if self.turns.reconcile_empty_commit(provider_error.get('event_id')):
