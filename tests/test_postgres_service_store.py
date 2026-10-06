@@ -14,6 +14,7 @@ import psycopg
 
 from prototype.postgres_service_store import PostgresServiceStore
 from prototype.service_analyzer_worker import ServiceAnalyzerWorker
+from prototype.service_drain_supervisor import ServiceDrainSupervisor
 from prototype.service_final_ingest import ServiceFinalIngestor
 from prototype.service_realtime_items import ServiceRealtimeItemIngestor
 from prototype.service_final_record import prepare_final_record, render_final_pdf
@@ -84,6 +85,113 @@ class PostgresServiceStoreTests(unittest.TestCase):
                 chunk=AudioChunk(sequence, sequence / 10,
                                  b"\x01\x00" * 2400),
             )
+
+    def _begin_supervised_drain(self, session_id: str, suffix: str) -> None:
+        started = self.store.request_capture_transition(
+            session_id, "synthetic-owner", action="start",
+            operation_key=f"start-{suffix}", expected_version=0,
+        )
+        self.store.acknowledge_capture_transition(
+            session_id, generation=started["generation"], event="connected",
+        )
+        listening = self.store.capture_snapshot(session_id, "synthetic-owner")
+        self.store.request_capture_transition(
+            session_id, "synthetic-owner", action="pause",
+            operation_key=f"pause-{suffix}", expected_version=listening["version"],
+        )
+        self.store.acknowledge_capture_transition(
+            session_id, generation=started["generation"], event="paused",
+        )
+        paused = self.store.capture_snapshot(session_id, "synthetic-owner")
+        self.store.request_finalizing(
+            session_id, "synthetic-owner", operation_key=f"end-{suffix}",
+            expected_version=paused["version"],
+        )
+
+    def test_supervisor_waits_for_job_then_ends_once(self):
+        self._final()
+        self._begin_supervised_drain(self.session_id, "worker")
+        supervisor = ServiceDrainSupervisor(self.store)
+        with psycopg.connect(TEST_DSN) as connection:
+            deadline = connection.execute(
+                "SELECT drain_deadline_at FROM service_session WHERE session_id = %s",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertGreater(deadline, dt.datetime.now(dt.timezone.utc))
+        self.assertEqual(supervisor.process_one(), {
+            "session_id": self.session_id, "state": "finalizing",
+            "pending_jobs": 1, "pending_items": 0,
+        })
+        ServiceAnalyzerWorker(self.store, LabelAnalyzer()).process_one(
+            session_id=self.session_id,
+        )
+        ended = supervisor.process_one()
+        self.assertEqual(ended["state"], "ended")
+        self.assertEqual(supervisor.process_one(), None)
+        self.assertEqual(len([item for item in self.store.replay(self.session_id).events
+                              if item["event_type"] == "session_ended"]), 1)
+
+    def test_supervisor_uses_db_deadline_for_partial_end(self):
+        self._final()
+        self._begin_supervised_drain(self.session_id, "deadline")
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                """UPDATE service_session SET drain_deadline_at = now() - interval '1 second'
+                   WHERE session_id = %s""", (self.session_id,),
+            )
+        ended = ServiceDrainSupervisor(self.store).process_one()
+        self.assertEqual(ended["state"], "ended_incomplete")
+        self.assertEqual(self.store.replay(self.session_id).events[-1]["payload"]["drain_status"],
+                         "partial")
+        self.assertIsNone(self.store.claim_job(session_id=self.session_id))
+
+    def test_supervisor_rotates_pending_sessions(self):
+        other = f"test-{uuid.uuid4()}"
+        self.created_sessions.append(other)
+        self.store.create_session(other, "synthetic-owner")
+        self.store.append_events(other, [
+            event(other, 1, "session_created", {"title": "別の合成会議", "goal": "検討"}),
+            event(other, 2, "session_started", {}),
+        ])
+        self._final()
+        self._begin_supervised_drain(self.session_id, "first")
+        self._begin_supervised_drain(other, "second")
+        supervisor = ServiceDrainSupervisor(self.store)
+        first = supervisor.process_one()
+        second = supervisor.process_one()
+        self.assertNotEqual(first["session_id"], second["session_id"])
+        self.assertIn("ended", {first["state"], second["state"]})
+        self.assertIn("finalizing", {first["state"], second["state"]})
+
+    def test_two_supervisors_do_not_duplicate_end_event(self):
+        self._begin_supervised_drain(self.session_id, "parallel")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(
+                lambda _: ServiceDrainSupervisor(self.store).process_one(), range(2),
+            ))
+        self.assertEqual(len([item for item in outcomes if item is not None]), 1)
+        self.assertEqual(self.store.capture_snapshot(
+            self.session_id, "synthetic-owner",
+        )["state"], "ended")
+        self.assertEqual(len([item for item in self.store.replay(self.session_id).events
+                              if item["event_type"] == "session_ended"]), 1)
+
+    def test_supervisor_recovers_older_finalizing_without_deadline(self):
+        self._final()
+        self._begin_supervised_drain(self.session_id, "recovered")
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                """UPDATE service_session SET drain_deadline_at = NULL
+                   WHERE session_id = %s""", (self.session_id,),
+            )
+        self.assertEqual(ServiceDrainSupervisor(self.store).process_one()["state"],
+                         "finalizing")
+        with psycopg.connect(TEST_DSN) as connection:
+            deadline = connection.execute(
+                "SELECT drain_deadline_at FROM service_session WHERE session_id = %s",
+                (self.session_id,),
+            ).fetchone()[0]
+        self.assertGreater(deadline, dt.datetime.now(dt.timezone.utc))
 
     def test_capture_lease_is_cross_store_and_expiry_fences_old_audio(self):
         self.store.request_capture_transition(
@@ -777,6 +885,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
             "0007_provider_item_lifecycle.sql", "0008_session_retention.sql",
             "0009_service_identity.sql",
             "0010_oidc_browser_binding.sql", "0011_capture_connection_lease.sql",
+            "0012_drain_supervision.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 

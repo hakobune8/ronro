@@ -30,6 +30,7 @@ from .service_presentation import validate_presentation_delta
 
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
+DEFAULT_DRAIN_DEADLINE_SECONDS = 300
 
 
 class PostgresServiceStore:
@@ -43,16 +44,21 @@ class PostgresServiceStore:
         *,
         allow_test_key_registry: bool = False,
         require_provider_items: bool = True,
+        drain_deadline_seconds: int = DEFAULT_DRAIN_DEADLINE_SECONDS,
     ) -> None:
         if isinstance(key_registry, InMemoryTestKeyRegistry) and not allow_test_key_registry:
             raise ServiceStoreError("unsafe_key_registry", "Ephemeral keys cannot back a live service")
         if not dsn:
             raise ServiceStoreError("database_unconfigured", "PostgreSQL DSN is required")
+        if (type(drain_deadline_seconds) is not int
+                or not 30 <= drain_deadline_seconds <= 3600):
+            raise ServiceStoreError("drain_policy_invalid", "Invalid Drain deadline")
         self.dsn = dsn
         self.runner = ReplayRunner(schema_validator)
         self.codec = SessionEnvelopeCodec(key_registry)
         self.key_registry = key_registry
         self.require_provider_items = require_provider_items
+        self.drain_deadline_seconds = drain_deadline_seconds
 
     def _provider_item_digest(
         self, session_id: str, connection_id: str, item_id: str,
@@ -691,6 +697,13 @@ class PostgresServiceStore:
                 "payload": {"last_evidence_sequence": int(evidence_count)},
             }
             result = self._append_locked(connection, session_id, [end_request])
+            connection.execute(
+                """UPDATE service_session
+                   SET drain_deadline_at = now() + %s * interval '1 second',
+                       drain_last_checked_at = NULL
+                   WHERE session_id = %s""",
+                (self.drain_deadline_seconds, session_id),
+            )
             return {
                 "state": "finalizing", "version": int(row["version"]) + 1,
                 "graph_revision": int(result.state["graph"]["revision"]),
@@ -1600,64 +1613,111 @@ class PostgresServiceStore:
     ) -> dict[str, Any]:
         """Trusted worker tick: freeze only when settled, or explicitly partial.
 
-        The caller decides the bounded drain deadline. This method never
-        infers that silence, an HTTP end request, or a timeout means complete.
+        The optional override is for trusted callers and synthetic tests;
+        normal supervision checks the persisted deadline against DB time.
+        Silence, an HTTP end request, or a timeout never means complete.
         """
 
         if type(deadline_elapsed) is not bool:
             raise ServiceStoreError("drain_request_invalid", "Invalid Drain deadline state")
         with self._transaction() as connection:
             session = self._lock_session(connection, session_id)
-            if session["service_state"] in {"ended", "ended_incomplete"}:
-                return {
-                    "state": str(session["service_state"]),
-                    "final_revision": int(session["final_revision"]),
-                }
-            self._require_open(session)
-            if session["capture_state"] != "finalizing":
-                raise ServiceStoreError("session_not_finalizing", "Session has not stopped intake")
-            pending_jobs = int(connection.execute(
-                """SELECT COUNT(*) AS value FROM service_job
-                   WHERE session_id = %s AND state != 'completed'""",
-                (session_id,),
-            ).fetchone()["value"])
-            pending_items = int(connection.execute(
-                """SELECT COUNT(*) AS value FROM service_provider_item
-                   WHERE session_id = %s AND status != 'evidence_accepted'""",
-                (session_id,),
-            ).fetchone()["value"])
-            if (pending_jobs or pending_items) and not deadline_elapsed:
-                return {"state": "finalizing", "pending_jobs": pending_jobs,
-                        "pending_items": pending_items}
-            gaps = int(connection.execute(
-                """SELECT COUNT(*) AS value FROM service_capture_interval
-                   WHERE session_id = %s AND kind = 'capture_unavailable'""",
-                (session_id,),
-            ).fetchone()["value"])
-            incomplete = bool(pending_jobs or pending_items or gaps)
-            last_sequence = int(connection.execute(
-                """SELECT COALESCE(MAX(sequence), 0) AS value FROM service_event
-                   WHERE session_id = %s""",
-                (session_id,),
-            ).fetchone()["value"])
-            end_event = {
-                "event_id": str(uuid.uuid4()), "session_id": session_id,
-                "sequence": last_sequence + 1, "event_type": "session_ended",
-                "occurred_at": dt.datetime.now(dt.timezone.utc).isoformat(
-                    timespec="milliseconds"
-                ).replace("+00:00", "Z"),
-                "actor": "system", "source_evidence_ids": [],
-                "payload": {
-                    "drain_status": "partial" if incomplete else "complete",
-                    "final_graph_revision": int(session["graph_revision"]),
-                    "pending_analysis": bool(pending_jobs),
-                },
-            }
-            revision = self._finalize_locked(
-                connection, session_id, session, end_event, incomplete=incomplete,
+            return self._complete_drain_locked(
+                connection, session_id, session, deadline_elapsed=deadline_elapsed,
             )
-            return {"state": "ended_incomplete" if incomplete else "ended",
-                    "final_revision": revision}
+
+    def supervise_next_drain(self) -> dict[str, Any] | None:
+        """One fair, DB-clock-controlled tick for a trusted Drain supervisor.
+
+        The lock prevents two supervisors from selecting the same Session in
+        the same transaction. A pending Session rotates to the end of the
+        queue; a crash leaves its durable deadline intact for another worker.
+        """
+
+        with self._transaction() as connection:
+            session = connection.execute(
+                """SELECT * FROM service_session
+                   WHERE service_state = 'open' AND capture_state = 'finalizing'
+                   ORDER BY drain_last_checked_at NULLS FIRST, session_id
+                   LIMIT 1 FOR UPDATE SKIP LOCKED""",
+            ).fetchone()
+            if session is None:
+                return None
+            session_id = str(session["session_id"])
+            # Older accepted finalizing Events have no deadline column value.
+            # Give them a full bounded window from first supervisor recovery.
+            connection.execute(
+                """UPDATE service_session
+                   SET drain_deadline_at = COALESCE(
+                           drain_deadline_at, now() + %s * interval '1 second'),
+                       drain_last_checked_at = now()
+                   WHERE session_id = %s""",
+                (self.drain_deadline_seconds, session_id),
+            )
+            expired = bool(connection.execute(
+                """SELECT now() >= drain_deadline_at AS expired
+                   FROM service_session WHERE session_id = %s""",
+                (session_id,),
+            ).fetchone()["expired"])
+            outcome = self._complete_drain_locked(
+                connection, session_id, session, deadline_elapsed=expired,
+            )
+            return {"session_id": session_id, **outcome}
+
+    def _complete_drain_locked(
+        self, connection: psycopg.Connection, session_id: str,
+        session: dict[str, Any], *, deadline_elapsed: bool,
+    ) -> dict[str, Any]:
+        if session["service_state"] in {"ended", "ended_incomplete"}:
+            return {
+                "state": str(session["service_state"]),
+                "final_revision": int(session["final_revision"]),
+            }
+        self._require_open(session)
+        if session["capture_state"] != "finalizing":
+            raise ServiceStoreError("session_not_finalizing", "Session has not stopped intake")
+        pending_jobs = int(connection.execute(
+            """SELECT COUNT(*) AS value FROM service_job
+               WHERE session_id = %s AND state != 'completed'""",
+            (session_id,),
+        ).fetchone()["value"])
+        pending_items = int(connection.execute(
+            """SELECT COUNT(*) AS value FROM service_provider_item
+               WHERE session_id = %s AND status != 'evidence_accepted'""",
+            (session_id,),
+        ).fetchone()["value"])
+        if (pending_jobs or pending_items) and not deadline_elapsed:
+            return {"state": "finalizing", "pending_jobs": pending_jobs,
+                    "pending_items": pending_items}
+        gaps = int(connection.execute(
+            """SELECT COUNT(*) AS value FROM service_capture_interval
+               WHERE session_id = %s AND kind = 'capture_unavailable'""",
+            (session_id,),
+        ).fetchone()["value"])
+        incomplete = bool(pending_jobs or pending_items or gaps)
+        last_sequence = int(connection.execute(
+            """SELECT COALESCE(MAX(sequence), 0) AS value FROM service_event
+               WHERE session_id = %s""",
+            (session_id,),
+        ).fetchone()["value"])
+        end_event = {
+            "event_id": str(uuid.uuid4()), "session_id": session_id,
+            "sequence": last_sequence + 1, "event_type": "session_ended",
+            "occurred_at": dt.datetime.now(dt.timezone.utc).isoformat(
+                timespec="milliseconds"
+            ).replace("+00:00", "Z"),
+            "actor": "system", "source_evidence_ids": [],
+            "payload": {
+                "drain_status": "partial" if incomplete else "complete",
+                "final_graph_revision": int(session["graph_revision"]),
+                "pending_analysis": bool(pending_jobs),
+            },
+        }
+        revision = self._finalize_locked(
+            connection, session_id, session, end_event, incomplete=incomplete,
+        )
+        return {"state": "ended_incomplete" if incomplete else "ended",
+                "final_revision": revision}
 
     def retention_deadline(self, session_id: str, owner_user_id: str) -> dt.datetime:
         """Read the accepted deadline for a verified owner; no deletion here."""

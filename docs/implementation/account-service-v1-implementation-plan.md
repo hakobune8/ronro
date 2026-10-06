@@ -74,4 +74,8 @@ P1の保存方式検証とP5の鍵/削除試験は一つの設計依存として
 
 ローカル候補では、HTTPのpause要求だけでは音声停止を確定しない。同じ音声WebSocket上で最後のPCM frameの後に`capture_stop`と最終sequenceを送り、Gatewayが受理台帳の末尾と照合し、Provider itemを有界に収束させた後に`capture_paused`を返す。停止制御が届かない／番号が一致しない／itemが未解決なら`paused`とはせず、再接続と欠落可能性を記録する。`pausing`中も停止制御より前に到着したframeを順序どおり処理する。
 
-Ownerの`POST /api/service/sessions/{id}/end`は停止確認済み`paused`、または既に取込み不能を記録した`reconnecting`からのみ受け付ける。Canonical `session_finalizing`とintake fenceを一トランザクションで確定し、Job/Provider itemが残る間は最終revisionを固定しない。すべて解決すれば`ended`、欠落区間があれば`ended_incomplete`とする。期限切れによる未解決Job/itemの不完全終了は、信頼されたWorkerが期限到来を確認してDrain tickを呼ぶ設計であり、HTTPクライアントは期限成立を指定できない。Gateway間の接続占有はPostgreSQLの30秒leaseを5秒ごとに更新し、期限切れなら取込み不能を記録してgenerationを進める。接続IDは会議鍵によるdigestのみDB保存し、PCMは保存しない。現時点では常駐Worker、Active音声から直接Endへの協調停止、実Provider/Browser統合、実複数Pod・Pod障害復旧のEnd-to-Endは未実装である。
+Ownerの`POST /api/service/sessions/{id}/end`は停止確認済み`paused`、または既に取込み不能を記録した`reconnecting`からのみ受け付ける。Canonical `session_finalizing`とintake fenceを一トランザクションで確定し、Job/Provider itemが残る間は最終revisionを固定しない。すべて解決すれば`ended`、欠落区間があれば`ended_incomplete`とする。期限切れによる未解決Job/itemの不完全終了は、信頼されたWorkerが期限到来を確認してDrain tickを呼ぶ設計であり、HTTPクライアントは期限成立を指定できない。Gateway間の接続占有はPostgreSQLの30秒leaseを5秒ごとに更新し、期限切れなら取込み不能を記録してgenerationを進める。接続IDは会議鍵によるdigestのみDB保存し、PCMは保存しない。現時点では常駐Workerの配備・起動監督、Active音声から直接Endへの協調停止、実Provider/Browser統合、実複数Pod・Pod障害復旧のEnd-to-Endは未実装である。
+
+### P3候補のDrain監督
+
+`ServiceDrainSupervisor`候補は`finalizing`会議をDB行ロック付きで公平に選び、DB時刻でJob／Provider item解決または保存済み期限を判定する。終了要求と期限は同じトランザクションで確定する。期限は候補既定300秒（Store設定で30〜3600秒）；無音や会議時間の上限ではなく、明示的な終了要求後のDrainにだけ適用する。未解決のまま期限が来た場合は`ended_incomplete`とし、`ended`と偽らない。Supervisor再起動後も期限と最終revisionはDBから再開し、同時Workerは`SKIP LOCKED`とSession直列化で二重終了しない。現段階の検証は合成PostgreSQLであり、プロセスの起動／監視、実Providerと実BrowserのEnd-to-Endは未達である。
