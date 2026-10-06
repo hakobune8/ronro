@@ -23,6 +23,24 @@ class ServiceAnalyzerWorker:
         claim = self.store.claim_job(session_id=session_id)
         if claim is None:
             return None
+        try:
+            return self._process_claim(claim)
+        except Exception as exc:
+            # Persist only a stable error code; exception messages and Analyzer
+            # traces may contain meeting content. A lost worker process instead
+            # leaves the lease to expire and be reclaimed.
+            code = getattr(exc, "code", "analyzer_worker_error")
+            try:
+                self.store.fail_job(
+                    claim["session_id"], claim["job_id"], attempt=claim["attempt"],
+                    error={"code": code if isinstance(code, str) else "analyzer_worker_error"},
+                )
+            except ServiceStoreError as mark_error:
+                if mark_error.code not in {"stale_claim", "session_closed"}:
+                    raise
+            raise
+
+    def _process_claim(self, claim: dict[str, Any]) -> dict[str, Any]:
         sid = claim["session_id"]
         before = self.store.replay(sid)
         if before.state["graph"]["revision"] != claim["start_revision"]:

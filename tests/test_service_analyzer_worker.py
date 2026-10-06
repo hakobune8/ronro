@@ -76,7 +76,10 @@ class ServiceAnalyzerWorkerTests(unittest.TestCase):
         with self.assertRaisesRegex(ServiceStoreError, "another Job"):
             worker.process_one(session_id="synthetic-session")
         self.assertEqual(len(self.store.replay("synthetic-session").events), 2)
-        self.assertEqual(self.store.job_state("synthetic-session", "synthetic-job"), "processing")
+        self.assertEqual(self.store.job_state("synthetic-session", "synthetic-job"), "failed")
+        self.store.retry_job("synthetic-session", "synthetic-job")
+        ServiceAnalyzerWorker(self.store, LabelAnalyzer()).process_one(session_id="synthetic-session")
+        self.assertEqual(self.store.job_state("synthetic-session", "synthetic-job"), "completed")
 
 
 if __name__ == "__main__":
