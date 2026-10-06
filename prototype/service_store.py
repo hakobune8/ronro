@@ -17,13 +17,7 @@ from typing import Any, Iterator, Sequence
 
 from .replay import ReplayResult, ReplayRunner
 from .schema import SchemaValidator
-from .materializer import initial_state
-
-
-class ServiceStoreError(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        self.code = code
-        super().__init__(message)
+from .service_errors import ServiceStoreError
 
 
 def _json(value: Any) -> str:
@@ -98,6 +92,7 @@ class SqliteServiceStore:
                     claim_until REAL,
                     start_revision INTEGER,
                     accepted_output_json TEXT,
+                    error_json TEXT,
                     PRIMARY KEY (session_id, job_id),
                     UNIQUE (session_id, evidence_id, contract_version),
                     FOREIGN KEY (session_id, evidence_id)
@@ -204,7 +199,10 @@ class SqliteServiceStore:
                 (session_id, job_id, evidence["id"], contract_version),
             )
 
-    def claim_job(self, *, now: float | None = None, lease_seconds: float = 30) -> dict[str, Any] | None:
+    def claim_job(
+        self, *, session_id: str | None = None, now: float | None = None,
+        lease_seconds: float = 30,
+    ) -> dict[str, Any] | None:
         if lease_seconds <= 0:
             raise ValueError("lease_seconds must be positive")
         now = time.time() if now is None else now
@@ -215,6 +213,7 @@ class SqliteServiceStore:
                    JOIN service_evidence AS e ON e.session_id = j.session_id
                        AND e.evidence_id = j.evidence_id
                    WHERE s.service_state = 'open'
+                     AND (? IS NULL OR j.session_id = ?)
                      AND (j.state = 'pending' OR (j.state = 'processing' AND j.claim_until < ?))
                      AND NOT EXISTS (
                          SELECT 1 FROM service_job AS prior
@@ -225,7 +224,7 @@ class SqliteServiceStore:
                            AND pe.utterance_sequence < e.utterance_sequence
                      )
                    ORDER BY j.session_id, j.rowid LIMIT 1""",
-                (now,),
+                (session_id, session_id, now),
             ).fetchone()
             if row is None:
                 return None
@@ -279,6 +278,7 @@ class SqliteServiceStore:
                 "INSERT INTO service_event(session_id, sequence, event_id, event_json) VALUES (?, ?, ?, ?)",
                 (session_id, event["sequence"], event["event_id"], _json(event)),
             )
+        self.runner.schema_validator.validate_domain(result.state)
         connection.execute(
             """UPDATE service_session SET graph_revision = ? WHERE session_id = ?""",
             (result.state["graph"]["revision"], session_id),
@@ -379,3 +379,37 @@ class SqliteServiceStore:
             if row is None:
                 raise ServiceStoreError("job_not_found", "Job not found")
             return str(row["state"])
+
+    def fail_job(self, session_id: str, job_id: str, *, attempt: int, error: dict[str, Any]) -> None:
+        with self._transaction() as connection:
+            self._require_open(connection, session_id)
+            row = connection.execute(
+                "SELECT state, attempt FROM service_job WHERE session_id = ? AND job_id = ?",
+                (session_id, job_id),
+            ).fetchone()
+            if row is None:
+                raise ServiceStoreError("job_not_found", "Job not found")
+            if row["state"] != "processing" or row["attempt"] != attempt:
+                raise ServiceStoreError("stale_claim", "Job is not owned by this attempt")
+            connection.execute(
+                """UPDATE service_job SET state = 'failed', claim_until = NULL, error_json = ?
+                   WHERE session_id = ? AND job_id = ?""",
+                (_json(error), session_id, job_id),
+            )
+
+    def retry_job(self, session_id: str, job_id: str) -> None:
+        with self._transaction() as connection:
+            self._require_open(connection, session_id)
+            row = connection.execute(
+                "SELECT state FROM service_job WHERE session_id = ? AND job_id = ?",
+                (session_id, job_id),
+            ).fetchone()
+            if row is None:
+                raise ServiceStoreError("job_not_found", "Job not found")
+            if row["state"] != "failed":
+                raise ServiceStoreError("job_not_failed", "Only a failed Job can be retried")
+            connection.execute(
+                """UPDATE service_job SET state = 'pending', error_json = NULL
+                   WHERE session_id = ? AND job_id = ?""",
+                (session_id, job_id),
+            )

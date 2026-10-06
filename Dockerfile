@@ -25,6 +25,7 @@ RUN pip install --no-cache-dir --disable-pip-version-check -r requirements-dev.t
 
 COPY prototype ./prototype
 COPY schemas ./schemas
+COPY migrations ./migrations
 COPY evaluation/fixtures ./evaluation/fixtures
 
 RUN chown -R appuser:appuser /app

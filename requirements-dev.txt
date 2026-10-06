@@ -1,2 +1,4 @@
 jsonschema>=4.26.0,<5
 websockets>=17.1,<18
+psycopg[binary]>=3.2,<4
+cryptography>=45,<51

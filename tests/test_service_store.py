@@ -7,7 +7,8 @@ import unittest
 from pathlib import Path
 
 from prototype.schema import SchemaValidator
-from prototype.service_store import ServiceStoreError, SqliteServiceStore
+from prototype.service_errors import ServiceStoreError
+from prototype.service_store import SqliteServiceStore
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -66,6 +67,21 @@ class ServiceStoreTests(unittest.TestCase):
     def test_unencrypted_contract_backend_requires_explicit_synthetic_flag(self):
         with self.assertRaisesRegex(ServiceStoreError, "not a production"):
             SqliteServiceStore(self.path, self.validator)
+
+    def test_failed_job_can_retry_without_accepting_old_attempt(self):
+        self._accept_first_final()
+        first = self.store.claim_job(session_id="s-one", now=100)
+        self.store.fail_job("s-one", "job-one", attempt=first["attempt"], error={"code": "temporary"})
+        self.assertEqual(self.store.job_state("s-one", "job-one"), "failed")
+        self.assertIsNone(self.store.claim_job(session_id="s-one", now=101))
+        self.store.retry_job("s-one", "job-one")
+        second = self.store.claim_job(session_id="s-one", now=102)
+        self.assertEqual(second["attempt"], first["attempt"] + 1)
+        with self.assertRaisesRegex(ServiceStoreError, "not owned"):
+            self.store.accept_job_result(
+                "s-one", "job-one", attempt=first["attempt"],
+                start_revision=first["start_revision"], accepted_output={}, events=[],
+            )
 
     def _accept_first_final(self):
         evidence, utterance = final("s-one", 1)
