@@ -1165,6 +1165,7 @@ class PostgresServiceStoreTests(unittest.TestCase):
             "0012_drain_supervision.sql",
             "0013_active_end_intent.sql",
             "0014_session_deletion_job.sql",
+            "0015_withdrawal_receipt.sql",
         ])
         self.assertTrue(all(len(row[1]) == 64 for row in rows))
 

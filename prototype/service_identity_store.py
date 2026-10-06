@@ -246,6 +246,28 @@ class ServiceIdentityStore:
                 (user_id,),
             )
 
+    def withdrawal_receipt(
+        self, *, token: str | None, origin: str | None,
+        csrf_token: str | None,
+    ) -> int:
+        """Authenticate only a recent account-DELETE retry, not normal access."""
+
+        self.browser_security.require_same_origin(origin)
+        if not self._valid_opaque(token):
+            raise ServiceStoreError("auth_required", "Authentication required")
+        digest = self._digest("web-session", token.encode("ascii"))
+        with psycopg.connect(self.dsn, row_factory=dict_row) as connection:
+            row = connection.execute(
+                """SELECT csrf_digest, fenced_sessions
+                   FROM service_withdrawal_receipt
+                   WHERE token_digest = %s AND expires_at > now()""",
+                (digest,),
+            ).fetchone()
+        if row is None:
+            raise ServiceStoreError("auth_required", "Authentication required")
+        self.browser_security.require_csrf(csrf_token, bytes(row["csrf_digest"]))
+        return int(row["fenced_sessions"])
+
     def purge_expired_auth_records(self) -> tuple[int, int]:
         """Remove expired login attempts and Web Sessions, not meeting data."""
 
@@ -256,4 +278,7 @@ class ServiceIdentityStore:
             sessions = connection.execute(
                 "DELETE FROM service_web_session WHERE expires_at <= now()"
             ).rowcount
+            connection.execute(
+                "DELETE FROM service_withdrawal_receipt WHERE expires_at <= now()"
+            )
         return attempts, sessions

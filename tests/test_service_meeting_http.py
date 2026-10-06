@@ -60,6 +60,7 @@ class ServiceMeetingHttpTests(unittest.TestCase):
         self.other_session_id = self._session(self.other, "別の合成会議")
         owner_token, self.owner_csrf = self.identity.issue_web_session(self.owner)
         other_token, self.other_csrf = self.identity.issue_web_session(self.other)
+        self.owner_token = owner_token
         self.owner_cookie = f"{COOKIE_NAME}={owner_token}"
         self.other_cookie = f"{COOKIE_NAME}={other_token}"
         self.server = create_service_meeting_server(self.identity, self.oidc, self.content)
@@ -71,8 +72,13 @@ class ServiceMeetingHttpTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join(timeout=2)
         with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                "DELETE FROM service_withdrawal_receipt WHERE token_digest = %s",
+                (self.identity._digest("web-session", self.owner_token.encode()),),
+            )
             for session_id in self.sessions:
                 connection.execute("DELETE FROM service_session WHERE session_id = %s", (session_id,))
+                connection.execute("DELETE FROM service_deletion_job WHERE session_id = %s", (session_id,))
             for user_id in self.users:
                 connection.execute("DELETE FROM service_user WHERE user_id = %s", (user_id,))
 
@@ -313,6 +319,51 @@ class ServiceMeetingHttpTests(unittest.TestCase):
         self.assertEqual(self._request(
             f"{path}/canvas", cookie=self.owner_cookie,
         )[0], 404)
+
+    def test_account_withdrawal_revokes_identity_and_fences_only_owned_meetings(self):
+        path = "/api/service/account"
+        origin = "https://ronro.example.test"
+        self.assertEqual(self._request(path, method="DELETE", origin=origin)[0], 401)
+        self.assertEqual(self._request(
+            path, method="DELETE", cookie=self.owner_cookie, origin=origin,
+        )[0], 403)
+        self.assertEqual(self._request(
+            path, method="DELETE", cookie=self.owner_cookie,
+            origin="https://wrong.example.test", csrf=self.owner_csrf,
+        )[0], 403)
+        status, headers, body = self._request(
+            path, method="DELETE", cookie=self.owner_cookie, origin=origin,
+            csrf=self.owner_csrf,
+        )
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body), {"state": "deleting", "fenced_sessions": 1})
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(self._request(
+            path, method="DELETE", cookie=self.owner_cookie, origin=origin,
+            csrf=self.owner_csrf,
+        )[0], 202)
+        self.assertEqual(self._request(
+            path, method="DELETE", cookie=self.owner_cookie, origin=origin,
+            csrf="incorrect-csrf",
+        )[0], 403)
+        self.assertEqual(self._request(
+            f"/api/service/sessions/{self.session_id}", cookie=self.owner_cookie,
+        )[0], 401)
+        self.assertEqual(self._request(
+            f"/api/service/sessions/{self.other_session_id}", cookie=self.other_cookie,
+        )[0], 200)
+        self.assertEqual(ServiceDeletionWorker(self.content).process_one()["session_id"],
+                         self.session_id)
+        with psycopg.connect(TEST_DSN) as connection:
+            connection.execute(
+                "UPDATE service_withdrawal_receipt SET expires_at = now() - interval '1 second'"
+                " WHERE token_digest = %s",
+                (self.identity._digest("web-session", self.owner_cookie.split("=", 1)[1].encode()),),
+            )
+        self.assertEqual(self._request(
+            path, method="DELETE", cookie=self.owner_cookie, origin=origin,
+            csrf=self.owner_csrf,
+        )[0], 401)
 
     def _analyzed_node(self):
         evidence, utterance = final(self.session_id, 1)

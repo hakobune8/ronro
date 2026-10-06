@@ -66,6 +66,7 @@ class ServiceAuthRequestHandler(BaseHTTPRequestHandler):
             "csrf_rejected": 403,
             "account_disabled": 403,
             "account_unavailable": 403,
+            "owner_lookup_unavailable": 503,
             "session_not_found": 404,
             "session_deleted": 410,
             "session_closed": 409,

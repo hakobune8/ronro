@@ -150,7 +150,7 @@ class PostgresServiceStore:
 
     def open_session(
         self, session_id: str, owner_user_id: str, created_event: dict[str, Any],
-        *, max_open_sessions: int = 4,
+        *, max_open_sessions: int = 4, require_active_user: bool = False,
     ) -> ReplayResult:
         """Admit and atomically establish owner, Session, and first Event.
 
@@ -171,6 +171,16 @@ class PostgresServiceStore:
             # Serialize new-Session admission across every application replica.
             # This lock is distinct from the migration lock.
             connection.execute("SELECT pg_advisory_xact_lock(824563, 2)")
+            if require_active_user:
+                # The browser's earlier authentication can race withdrawal.
+                # Hold the user row until the new meeting is committed so a
+                # withdrawal either sees this meeting or wins first.
+                user = connection.execute(
+                    "SELECT disabled_at FROM service_user WHERE user_id = %s FOR UPDATE",
+                    (owner_user_id,),
+                ).fetchone()
+                if user is None or user["disabled_at"] is not None:
+                    raise ServiceStoreError("account_unavailable", "Account is unavailable")
             active = connection.execute(
                 "SELECT COUNT(*) AS value FROM service_session WHERE service_state = 'open'"
             ).fetchone()["value"]

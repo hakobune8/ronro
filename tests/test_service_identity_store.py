@@ -16,7 +16,10 @@ from joserfc.jwk import RSAKey
 from prototype.postgres_service_store import PostgresServiceStore
 from prototype.schema import SchemaValidator
 from prototype.service_browser_security import ServiceBrowserSecurity
+from prototype.service_account_withdrawal import ServiceAccountWithdrawal
 from prototype.service_crypto import InMemoryTestKeyRegistry
+from prototype.service_crypto import ServiceCryptoError
+from prototype.service_deletion_worker import ServiceDeletionWorker
 from prototype.service_errors import ServiceStoreError
 from prototype.service_identity_store import ServiceIdentityStore
 from prototype.service_oidc import AuthorizationAttempt, OidcConfiguration, ServiceOidcClient
@@ -51,14 +54,120 @@ class ServiceIdentityStoreTests(unittest.TestCase):
         )
         self.created_users = []
         self.created_sessions = []
+        self.receipt_digests = []
         self.browser_binding = "B" * 43
 
     def tearDown(self):
         with psycopg.connect(TEST_DSN) as connection:
+            for digest in self.receipt_digests:
+                connection.execute(
+                    "DELETE FROM service_withdrawal_receipt WHERE token_digest = %s", (digest,),
+                )
             for session_id in self.created_sessions:
                 connection.execute("DELETE FROM service_session WHERE session_id = %s", (session_id,))
+                connection.execute("DELETE FROM service_deletion_job WHERE session_id = %s", (session_id,))
             for user_id in self.created_users:
                 connection.execute("DELETE FROM service_user WHERE user_id = %s", (user_id,))
+
+    def test_withdrawal_fences_owned_sessions_and_rejects_new_admission(self):
+        owner = self._user(f"withdrawing-{uuid.uuid4()}")
+        other = self._user(f"remaining-{uuid.uuid4()}")
+        owned_ids = [f"test-withdraw-{uuid.uuid4()}" for _ in range(2)]
+        other_id = f"test-other-{uuid.uuid4()}"
+        for session_id in [*owned_ids, other_id]:
+            self.created_sessions.append(session_id)
+            self.content.create_session(
+                session_id, owner if session_id in owned_ids else other,
+            )
+        token, csrf = self.store.issue_web_session(owner)
+        self.receipt_digests.append(self.store._digest("web-session", token.encode()))
+        other_token, _ = self.store.issue_web_session(other)
+        grant_id, bearer = self.content.issue_view_credential(owned_ids[0], owner)
+        self.assertIsNotNone(grant_id)
+        withdrawal = ServiceAccountWithdrawal(self.store, self.content)
+        self.assertEqual(withdrawal.withdraw(
+            token=token, origin=self.browser.public_origin, csrf_token=csrf,
+        ), 2)
+        with self.assertRaises(ServiceStoreError) as auth:
+            self.store.authenticate(token)
+        self.assertEqual(auth.exception.code, "auth_required")
+        self.assertEqual(self.store.authenticate(other_token), other)
+        with self.assertRaises(ServiceStoreError):
+            self.content.authorize_live_canvas(owned_ids[0], bearer)
+        with psycopg.connect(TEST_DSN) as connection:
+            rows = connection.execute(
+                "SELECT session_id, reason FROM service_deletion_job WHERE session_id = ANY(%s)",
+                (owned_ids,),
+            ).fetchall()
+        self.assertEqual({(sid, reason) for sid, reason in rows},
+                         {(sid, "account_withdrawal") for sid in owned_ids})
+        candidate = f"test-after-withdrawal-{uuid.uuid4()}"
+        with self.assertRaises(ServiceStoreError) as admission:
+            self.content.open_session(
+                candidate, owner,
+                {"session_id": candidate, "event_type": "session_created", "sequence": 1},
+                require_active_user=True,
+            )
+        self.assertEqual(admission.exception.code, "account_unavailable")
+        worker = ServiceDeletionWorker(self.content)
+        self.assertEqual({worker.process_one()["session_id"] for _ in range(2)}, set(owned_ids))
+        with psycopg.connect(TEST_DSN) as connection:
+            remaining = connection.execute(
+                "SELECT session_id FROM service_session WHERE session_id = %s", (other_id,),
+            ).fetchone()
+        self.assertEqual(remaining[0], other_id)
+
+    def test_withdrawal_rolls_back_if_any_owner_cannot_be_checked(self):
+        owner = self._user(f"withdrawing-{uuid.uuid4()}")
+        other = self._user(f"unreadable-{uuid.uuid4()}")
+        owned_id = f"test-owned-{uuid.uuid4()}"
+        unreadable_id = f"test-unreadable-{uuid.uuid4()}"
+        for session_id, user_id in ((owned_id, owner), (unreadable_id, other)):
+            self.created_sessions.append(session_id)
+            self.content.create_session(session_id, user_id)
+        token, csrf = self.store.issue_web_session(owner)
+        self.content.key_registry.delete_key(unreadable_id)
+        with self.assertRaises(ServiceStoreError) as failure:
+            ServiceAccountWithdrawal(self.store, self.content).withdraw(
+                token=token, origin=self.browser.public_origin, csrf_token=csrf,
+            )
+        self.assertEqual(failure.exception.code, "owner_lookup_unavailable")
+        self.assertEqual(self.store.authenticate(token), owner)
+        self.assertEqual(self.content.authorize_owner_session(owned_id, owner), "open")
+        with psycopg.connect(TEST_DSN) as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM service_deletion_job WHERE session_id = %s", (owned_id,),
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_withdrawal_wins_over_stale_authenticated_create(self):
+        owner = self._user(f"admission-race-{uuid.uuid4()}")
+        candidate = f"test-after-revocation-{uuid.uuid4()}"
+        with psycopg.connect(TEST_DSN) as blocker:
+            blocker.execute(
+                "SELECT user_id FROM service_user WHERE user_id = %s FOR UPDATE",
+                (owner,),
+            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    self.content.open_session, candidate, owner,
+                    {"session_id": candidate, "event_type": "session_created", "sequence": 1},
+                    require_active_user=True,
+                )
+                blocker.execute("DELETE FROM service_user WHERE user_id = %s", (owner,))
+                blocker.commit()
+                with self.assertRaises(ServiceStoreError) as rejected:
+                    future.result(timeout=5)
+        self.assertEqual(rejected.exception.code, "account_unavailable")
+        with self.assertRaises(ServiceCryptoError) as key:
+            self.content.key_registry.get_key(candidate)
+        self.assertEqual(key.exception.code, "key_unavailable")
+        with psycopg.connect(TEST_DSN) as connection:
+            row = connection.execute(
+                "SELECT session_id FROM service_session WHERE session_id = %s",
+                (candidate,),
+            ).fetchone()
+        self.assertIsNone(row)
 
     def _verified(self, subject: str):
         _, attempt = self.oidc.begin_authorization()

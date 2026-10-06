@@ -21,7 +21,8 @@ from .postgres_service_store import PostgresServiceStore
 from .semantic_canvas import project_semantic_canvas
 from .service_final_record import prepare_final_record, render_final_pdf
 from .service_auth_http import ServiceAuthRequestHandler, _cookie_value
-from .service_browser_security import COOKIE_NAME
+from .service_browser_security import COOKIE_NAME, LOGIN_COOKIE_NAME
+from .service_account_withdrawal import ServiceAccountWithdrawal
 from .service_errors import ServiceStoreError
 from .service_identity_store import ServiceIdentityStore
 from .service_oidc import ServiceOidcClient
@@ -150,7 +151,9 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
                     "actor": "system", "source_evidence_ids": [],
                     "payload": {"title": title, "goal": goal},
                 }
-                replay = self.content.open_session(session_id, owner, created)
+                replay = self.content.open_session(
+                    session_id, owner, created, require_active_user=True,
+                )
                 self._send(201, json.dumps({
                     "session_id": session_id,
                     "graph_revision": replay.state["graph"]["revision"],
@@ -176,6 +179,37 @@ class ServiceMeetingRequestHandler(ServiceAuthRequestHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802
         parsed = urlsplit(self.path)
+        if parsed.path == "/api/service/account" and not parsed.query:
+            try:
+                if (self.headers.get("Transfer-Encoding") is not None or
+                        self.headers.get("Content-Length") not in (None, "0") or
+                        self.headers.get("Authorization") is not None):
+                    raise ServiceStoreError("request_invalid", "Unexpected request body")
+                token = _cookie_value(self.headers.get("Cookie"), COOKIE_NAME)
+                origin = self.headers.get("Origin")
+                csrf = self.headers.get("X-Ronro-CSRF")
+                try:
+                    count = ServiceAccountWithdrawal(self.identity, self.content).withdraw(
+                        token=token, origin=origin, csrf_token=csrf,
+                    )
+                except ServiceStoreError as exc:
+                    if exc.code != "auth_required":
+                        raise
+                    count = self.identity.withdrawal_receipt(
+                        token=token, origin=origin, csrf_token=csrf,
+                    )
+                self._send(
+                    202, json.dumps({"state": "deleting", "fenced_sessions": count}).encode("ascii"),
+                    cookies=(
+                        f"{COOKIE_NAME}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
+                        f"{LOGIN_COOKIE_NAME}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
+                    ),
+                )
+            except ServiceStoreError as exc:
+                self._error(exc)
+            except Exception:
+                self._send(503, b'{"error":{"code":"service_unavailable"}}')
+            return
         session = _SESSION_PATH.fullmatch(parsed.path) if not parsed.query else None
         if session is not None and session.group(2) is None:
             try:
