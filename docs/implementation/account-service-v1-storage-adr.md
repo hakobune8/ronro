@@ -1,6 +1,6 @@
 # Account Service v1 — Content Store ADR (P1)
 
-Status: Content-store choice accepted for implementation; Key Registry deployment and 7-day irrecoverability remain unverified.
+Status: Content-store choice accepted for implementation; Key Registry selection/deployment and 7-day irrecoverability remain unverified. 既存OpenBaoを検証候補とするHuman判断を記録した。
 
 ## Decision
 
@@ -43,6 +43,8 @@ The first P5 retention increment stamps `ended_at` and `expires_at = ended_at + 
 The P5 offline PDF boundary reads only an owner-authorized ended Session at its fixed final revision. It validates Domain schema and a fresh Event replay before rendering. Its first-page map uses the same deterministic Semantic Canvas coordinates as Live, with semantic zoom for outcomes and their local backbone; subsequent sections distinguish confirmed/candidate Decisions, active Open Items, Actions, explicit owner/due, and full Canonical Node text. The print renderer makes no LLM call, reads no raw transcript into the PDF, and marks `ended_incomplete` or captured unavailability as a possible gap without confusing deliberate pause. Synthetic A4 page rendering is visual-QA evidence for the renderer only. It has no HTTP route, private object-store lifecycle, or recipient delivery yet; those remain P2/P5 gates.
 
 The `SessionKeyRegistry` protocol is a separate boundary. `InMemoryTestKeyRegistry` exists only for synthetic tests and is rejected unless the PostgreSQL adapter is explicitly placed in test mode. Before any real meeting uses this adapter, implement a durable, separately operated Key Registry and prove both key availability under node loss and key destruction within seven days including its own copies. A content-DB backup alone is neither recovery proof nor deletion proof.
+
+既存OpenBaoをKey Registryの検証候補とする。これは採用確定や本番鍵作成の承認ではない。既存インフラのOpenBao運用資料は現在の配置を単一ノードPoC（`replicas: 1`）と明記し、暗号化Raft snapshotを復旧手段とする。これはRONROの可用性や7日削除を満たす証拠ではない。OpenBao [KV v2](https://openbao.org/docs/secrets/kv/kv-v2/)の通常削除は復元可能で、version destroy/metadata deleteと区別が必要である。さらに[Raft snapshot restore](https://openbao.org/docs/next/commands/operator/raft/)で削除前の鍵が復元され得るため、**現行snapshotの保管期限・全コピー・復号可能性を照合できるまで7日以内の復元不能化を宣言しない**。Transit/KVの採用、RONRO専用の最小権限認証・path/mount、会議別鍵の全コピー、破棄手順、OpenBao自身のbackupとnode loss復旧、7日後の復元否定を分離して検証する。この判断前に実会議データを新Storeへ投入しない。
 
 ## Current evidence and remaining work
 

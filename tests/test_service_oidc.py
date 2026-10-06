@@ -24,8 +24,7 @@ class ServiceOidcTests(unittest.TestCase):
             authorization_endpoint="https://idp.example.test/oauth/v2/authorize",
             token_endpoint="https://idp.example.test/oauth/v2/token",
             jwks_uri="https://idp.example.test/oauth/v2/keys",
-            token_endpoint_auth_method="client_secret_basic",
-            client_secret="synthetic-only-secret",
+            token_endpoint_auth_method="none",
         )
         self.client = ServiceOidcClient(self.config)
         self.key = RSAKey.generate_key(auto_kid=True)
@@ -58,9 +57,9 @@ class ServiceOidcTests(unittest.TestCase):
         self.client.require_callback_state(attempt, attempt.state)
         with self.assertRaises(ServiceStoreError):
             self.client.require_callback_state(attempt, "wrong-state")
-        self.assertNotIn("synthetic-only-secret", repr(self.config))
         self.assertEqual(self.client._client().token_endpoint_auth_method,
-                         "client_secret_basic")
+                         "none")
+        self.assertIsNone(self.config.client_secret)
 
     def test_configuration_rejects_cross_origin_or_plain_http_endpoints(self):
         values = vars(self.config)
@@ -70,11 +69,20 @@ class ServiceOidcTests(unittest.TestCase):
             {"jwks_uri": "https://idp.example.test.evil.test/keys"},
             {"redirect_uri": "https://attacker.example/callback"},
             {"issuer": "http://idp.example.test"},
-            {"token_endpoint_auth_method": "none"},
-            {"client_secret": None},
+            {"token_endpoint_auth_method": "client_secret_basic"},
+            {"client_secret": "unwanted-secret"},
         ):
             with self.subTest(replacement=replacement), self.assertRaises(ValueError):
                 OidcConfiguration(**(values | replacement))
+
+    def test_confidential_client_remains_explicit_optional_mode(self):
+        config = OidcConfiguration(**(vars(self.config) | {
+            "token_endpoint_auth_method": "client_secret_basic",
+            "client_secret": "synthetic-only-secret",
+        }))
+        self.assertEqual(ServiceOidcClient(config)._client().token_endpoint_auth_method,
+                         "client_secret_basic")
+        self.assertNotIn("synthetic-only-secret", repr(config))
 
     def test_valid_signed_id_token_returns_only_issuer_and_subject(self):
         self.assertEqual(

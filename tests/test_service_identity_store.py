@@ -37,8 +37,7 @@ class ServiceIdentityStoreTests(unittest.TestCase):
             authorization_endpoint="https://idp.example.test/oauth/v2/authorize",
             token_endpoint="https://idp.example.test/oauth/v2/token",
             jwks_uri="https://idp.example.test/oauth/v2/keys",
-            token_endpoint_auth_method="client_secret_basic",
-            client_secret="synthetic-only-secret",
+            token_endpoint_auth_method="none",
         ))
         self.content = PostgresServiceStore(
             TEST_DSN, SchemaValidator(ROOT / "schemas"), InMemoryTestKeyRegistry(),
