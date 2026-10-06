@@ -12,7 +12,7 @@ WebログインはAuthorization Code + PKCEを使う。サーバーは事前に�
 
 ブラウザのログイン期限切れ・再認証は、すでに受理済みの会議Sessionを自動終了させない。操作再開には再認証を要求し、音声取込みの継続/欠落はP3のCapture状態とgapで説明する。期限切れを黙って`ended`と扱わない。会議時間が約2時間を超えても終了を強制しない。
 
-現時点の`prototype/service_browser_security.py`はOrigin/CSRF/Cookie形式の独立した検証境界だけであり、ログイン、Web Session、route保護を実装したものではない。既存Pilot経路・公開サービスには接続しない。
+`prototype/service_browser_security.py`はOrigin/CSRF/Cookie形式の独立した検証境界を持つ。`prototype/service_oidc.py`は専用ClientのCode + S256 PKCE認可URL、state/nonce照合、固定HTTPS JWKSからのRS256 ID Token検証を持つ。合成鍵の単体テストは通っているが、認可試行の一回限りの永続化、RONRO専用Client登録、実ZITADELでのToken交換、Web Session、route保護はまだ未実装である。既存Pilot経路・公開サービスには接続しない。
 
 ## 実装前に固定・検証する設定
 

@@ -3,3 +3,5 @@ websockets>=17.1,<18
 psycopg[binary]>=3.2,<4
 cryptography>=45,<51
 reportlab>=4.4,<5
+Authlib>=1.8,<2
+requests>=2.32,<3
