@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import tempfile
+import threading
+import sqlite3
+import json
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from prototype.analyzer import CandidateEvent, FakeAnalyzer
@@ -34,6 +38,23 @@ class UnsafeAnalyzer:
             source_evidence_ids=("another-evidence",),
             payload={"node_type": "idea", "label": "不正な案"},
         )]
+
+
+class BlockingAnalyzer(LabelAnalyzer):
+    def __init__(self):
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def analyze(self, utterance, current_graph, recent_events):
+        self.started.set()
+        if not self.release.wait(timeout=3):
+            raise RuntimeError("synthetic analyzer was not released")
+        return super().analyze(utterance, current_graph, recent_events)
+
+
+class FailingLeaseStore(SqliteServiceStore):
+    def renew_job_lease(self, *args, **kwargs):
+        raise RuntimeError("synthetic transcript-like details must not be stored")
 
 
 class ServiceAnalyzerWorkerTests(unittest.TestCase):
@@ -80,6 +101,42 @@ class ServiceAnalyzerWorkerTests(unittest.TestCase):
         self.store.retry_job("synthetic-session", "synthetic-job")
         ServiceAnalyzerWorker(self.store, LabelAnalyzer()).process_one(session_id="synthetic-session")
         self.assertEqual(self.store.job_state("synthetic-session", "synthetic-job"), "completed")
+
+    def test_slow_analyzer_renews_lease_until_acceptance(self):
+        analyzer = BlockingAnalyzer()
+        worker = ServiceAnalyzerWorker(
+            self.store, analyzer, lease_seconds=0.3, heartbeat_interval_seconds=0.05,
+        )
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(worker.process_one, session_id="synthetic-session")
+            self.assertTrue(analyzer.started.wait(timeout=2))
+            threading.Event().wait(0.55)
+            self.assertIsNone(self.store.claim_job(session_id="synthetic-session"))
+            analyzer.release.set()
+            self.assertEqual(future.result(timeout=3)["event_count"], 1)
+        self.assertEqual(self.store.job_state("synthetic-session", "synthetic-job"), "completed")
+
+    def test_failed_lease_renewal_blocks_acceptance_and_records_only_code(self):
+        store = FailingLeaseStore(self.path, self.validator, synthetic_data_only=True)
+        analyzer = BlockingAnalyzer()
+        worker = ServiceAnalyzerWorker(
+            store, analyzer, lease_seconds=0.3, heartbeat_interval_seconds=0.05,
+        )
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(worker.process_one, session_id="synthetic-session")
+            self.assertTrue(analyzer.started.wait(timeout=2))
+            threading.Event().wait(0.12)
+            analyzer.release.set()
+            with self.assertRaisesRegex(ServiceStoreError, "lease was not verified"):
+                future.result(timeout=3)
+        self.assertEqual(len(store.replay("synthetic-session").events), 2)
+        self.assertEqual(store.job_state("synthetic-session", "synthetic-job"), "failed")
+        with sqlite3.connect(self.path) as connection:
+            error = json.loads(connection.execute(
+                "SELECT error_json FROM service_job WHERE session_id = ?",
+                ("synthetic-session",),
+            ).fetchone()[0])
+        self.assertEqual(error, {"code": "lease_renewal_failed"})
 
 
 if __name__ == "__main__":

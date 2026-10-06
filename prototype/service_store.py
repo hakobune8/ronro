@@ -261,6 +261,30 @@ class SqliteServiceStore:
                 "attempt": row["attempt"] + 1,
             }
 
+    def renew_job_lease(
+        self, session_id: str, job_id: str, *, attempt: int,
+        lease_seconds: float = 30, now: float | None = None,
+    ) -> None:
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
+        current = time.time() if now is None else now
+        with self._transaction() as connection:
+            self._require_open(connection, session_id)
+            row = connection.execute(
+                """SELECT state, attempt FROM service_job
+                   WHERE session_id = ? AND job_id = ?""",
+                (session_id, job_id),
+            ).fetchone()
+            if row is None:
+                raise ServiceStoreError("job_not_found", "Job not found")
+            if row["state"] != "processing" or row["attempt"] != attempt:
+                raise ServiceStoreError("stale_claim", "Job is not owned by this attempt")
+            connection.execute(
+                """UPDATE service_job SET claim_until = ?
+                   WHERE session_id = ? AND job_id = ?""",
+                (current + lease_seconds, session_id, job_id),
+            )
+
     def _replay_locked(self, connection: sqlite3.Connection, session_id: str) -> ReplayResult:
         evidence_rows = connection.execute(
             """SELECT evidence_json, utterance_json FROM service_evidence

@@ -18,7 +18,7 @@ from prototype.schema import SchemaValidator
 from prototype.service_crypto import InMemoryTestKeyRegistry, ServiceCryptoError
 from prototype.service_errors import ServiceStoreError
 from tests.test_service_store import WHEN, event, final, presentation_hint
-from tests.test_service_analyzer_worker import LabelAnalyzer
+from tests.test_service_analyzer_worker import BlockingAnalyzer, LabelAnalyzer
 from prototype.display_labels import display_projection
 
 
@@ -152,6 +152,21 @@ class PostgresServiceStoreTests(unittest.TestCase):
             display_projection(replay.state["graph"], replay.presentation)[node["id"]]["text"],
             "案を検討する",
         )
+
+    def test_slow_durable_worker_heartbeats_in_postgres(self):
+        self._final()
+        analyzer = BlockingAnalyzer()
+        worker = ServiceAnalyzerWorker(
+            self.store, analyzer, lease_seconds=0.4, heartbeat_interval_seconds=0.08,
+        )
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(worker.process_one, session_id=self.session_id)
+            self.assertTrue(analyzer.started.wait(timeout=2))
+            threading.Event().wait(0.7)
+            self.assertIsNone(self.store.claim_job(session_id=self.session_id))
+            analyzer.release.set()
+            self.assertEqual(future.result(timeout=3)["event_count"], 1)
+        self.assertEqual(self.store.job_state(self.session_id, "job-one"), "completed")
 
     def test_realtime_final_shape_flows_into_durable_worker_and_replay(self):
         ingestor = ServiceFinalIngestor(self.store, contract_version="v1")
@@ -371,6 +386,20 @@ class PostgresServiceStoreTests(unittest.TestCase):
                 start_revision=claim["start_revision"], accepted_output={}, events=[],
             )
         self.assertEqual(self.store.job_state(self.session_id, "job-one"), "processing")
+
+    def test_renewed_lease_prevents_early_reclaim_and_fences_old_attempt(self):
+        self._final()
+        first = self.store.claim_job(session_id=self.session_id, now=100, lease_seconds=10)
+        self.store.renew_job_lease(
+            self.session_id, "job-one", attempt=first["attempt"], now=105, lease_seconds=10,
+        )
+        self.assertIsNone(self.store.claim_job(session_id=self.session_id, now=111, lease_seconds=10))
+        second = self.store.claim_job(session_id=self.session_id, now=116, lease_seconds=10)
+        self.assertEqual(second["attempt"], first["attempt"] + 1)
+        with self.assertRaisesRegex(ServiceStoreError, "not owned"):
+            self.store.renew_job_lease(
+                self.session_id, "job-one", attempt=first["attempt"], now=117,
+            )
 
     def test_failed_job_error_is_encrypted_and_retry_is_fenced(self):
         self._final()

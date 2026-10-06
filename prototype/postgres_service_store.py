@@ -377,6 +377,36 @@ class PostgresServiceStore:
                 "attempt": row["attempt"] + 1,
             }
 
+    def renew_job_lease(
+        self, session_id: str, job_id: str, *, attempt: int,
+        lease_seconds: float = 30, now: float | None = None,
+    ) -> None:
+        """Fence a long Analyzer call to its current Worker attempt."""
+
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
+        current = (
+            dt.datetime.now(dt.timezone.utc)
+            if now is None else dt.datetime.fromtimestamp(now, dt.timezone.utc)
+        )
+        with self._transaction() as connection:
+            session = self._lock_session(connection, session_id)
+            self._require_open(session)
+            row = connection.execute(
+                """SELECT state, attempt FROM service_job
+                   WHERE session_id = %s AND job_id = %s FOR UPDATE""",
+                (session_id, job_id),
+            ).fetchone()
+            if row is None:
+                raise ServiceStoreError("job_not_found", "Job not found")
+            if row["state"] != "processing" or row["attempt"] != attempt:
+                raise ServiceStoreError("stale_claim", "Job is not owned by this attempt")
+            connection.execute(
+                """UPDATE service_job SET claim_until = %s
+                   WHERE session_id = %s AND job_id = %s""",
+                (current + dt.timedelta(seconds=lease_seconds), session_id, job_id),
+            )
+
     def _replay_locked(self, connection: psycopg.Connection, session_id: str) -> ReplayResult:
         evidence_rows = connection.execute(
             """SELECT evidence_id, evidence_cipher, utterance_cipher

@@ -95,6 +95,20 @@ class ServiceStoreTests(unittest.TestCase):
                 start_revision=first["start_revision"], accepted_output={}, events=[],
             )
 
+    def test_renewed_lease_prevents_early_reclaim_and_fences_old_attempt(self):
+        self._accept_first_final()
+        first = self.store.claim_job(session_id="s-one", now=100, lease_seconds=10)
+        self.store.renew_job_lease(
+            "s-one", "job-one", attempt=first["attempt"], now=105, lease_seconds=10,
+        )
+        self.assertIsNone(self.store.claim_job(session_id="s-one", now=111, lease_seconds=10))
+        second = self.store.claim_job(session_id="s-one", now=116, lease_seconds=10)
+        self.assertEqual(second["attempt"], first["attempt"] + 1)
+        with self.assertRaisesRegex(ServiceStoreError, "not owned"):
+            self.store.renew_job_lease(
+                "s-one", "job-one", attempt=first["attempt"], now=117,
+            )
+
     def _accept_first_final(self):
         evidence, utterance = final("s-one", 1)
         self.store.accept_final(
