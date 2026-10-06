@@ -12,10 +12,12 @@ from pathlib import Path
 import psycopg
 
 from prototype.postgres_service_store import PostgresServiceStore
+from prototype.service_analyzer_worker import ServiceAnalyzerWorker
 from prototype.schema import SchemaValidator
 from prototype.service_crypto import InMemoryTestKeyRegistry, ServiceCryptoError
 from prototype.service_errors import ServiceStoreError
 from tests.test_service_store import WHEN, event, final, presentation_hint
+from tests.test_service_analyzer_worker import LabelAnalyzer
 from prototype.display_labels import display_projection
 
 
@@ -130,6 +132,23 @@ class PostgresServiceStoreTests(unittest.TestCase):
         self.assertEqual(replay.presentation, hints)
         self.assertEqual(
             display_projection(replay.state["graph"], replay.presentation)[next(iter(hints))]["text"],
+            "案を検討する",
+        )
+
+    def test_durable_worker_reopens_with_canonical_and_presentation(self):
+        self._final()
+        worker = ServiceAnalyzerWorker(self.store, LabelAnalyzer())
+        accepted = worker.process_one(session_id=self.session_id)
+        self.assertEqual(accepted["event_count"], 1)
+        self.assertIsNone(worker.process_one(session_id=self.session_id))
+        reopened = PostgresServiceStore(
+            TEST_DSN, self.validator, self.registry, allow_test_key_registry=True,
+        )
+        replay = reopened.replay(self.session_id)
+        node = replay.state["graph"]["nodes"][0]
+        self.assertEqual(node["label"], "合成の案を検討する")
+        self.assertEqual(
+            display_projection(replay.state["graph"], replay.presentation)[node["id"]]["text"],
             "案を検討する",
         )
 

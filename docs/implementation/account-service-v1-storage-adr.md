@@ -19,6 +19,7 @@ The `SessionKeyRegistry` protocol is a separate boundary. `InMemoryTestKeyRegist
 ## Current evidence and remaining work
 
 - Local PostgreSQL integration uses synthetic data only: encrypted rows, reopen/replay, duplicate Final, atomic rollback, Session isolation, stale revision, failed-Job retry, incomplete end, and checkpoint rebuild. A content-DB dump restored into a separate database replayed the same Events while the test key was available; after deleting that key, the restored content was unreadable. This does **not** prove a durable Key Registry or the seven-day production deadline.
-- This is not yet wired to Live STT, Analyzer Worker, authenticated HTTP/WSS, PDF, or deletion. The current Pilot remains on its existing path.
+- A one-Job `ServiceAnalyzerWorker` now exercises the existing Analyzer interface outside the DB transaction, validates/stages Candidate Events, and atomically accepts Events plus non-Canonical presentation hints. Synthetic SQLite and PostgreSQL tests demonstrate this boundary and process reopening. It is not a continuously running, production-supervised Worker; on failure a leased Job remains claimable after expiry. The current Pilot remains on its existing path.
+- This is not yet wired to Live STT, authenticated HTTP/WSS, PDF, or deletion.
 - P1 still requires a durable Key Registry integration, live ingest/Worker adapter, migration/version procedure, backup restore with keys, and performance testing. P2–P6 remain separate gates.
 - In a two-system create (Key Registry then content DB), an uncertain DB commit must not trigger immediate key deletion. Orphan-key reconciliation is required before service exposure.
