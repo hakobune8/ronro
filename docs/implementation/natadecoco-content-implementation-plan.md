@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| Status | In progress — Core baseline/package PRと独立Content scaffold PRを作成。Platform変更は保留。配備・実音声は未着手 |
+| Status | In progress — Core baseline/packageと独立Content scaffold・合成Canvas・Core wheel pinのDraft PRを作成。Platform変更は保留。配備・実音声は未着手 |
 | Updated | 2026-10-07 |
 | Source | [RFC-0009](../rfc/0009-ronro-as-natadecoco-local-ai-content.md)、[接続・状態・音声・PDFの詳細契約](../architecture/natadecoco-content-contract.md)、[UI / Artworkブリーフ](../product/natadecoco-ronro-ux-artwork-brief.md) |
 
@@ -12,9 +12,9 @@
 
 ### 2026-10-07 実装順の変更: Contentを先行
 
-利用者の判断により、`natade-coco-edge`の変更を進めず、独立Content repositoryを先に立ち上げる。Platform認可案の[PR #828](https://github.com/SSLHQ/natade-coco-edge/pull/828)は未マージのまま閉じ、終了ガード案も公開しない。新しい[Content draft PR #10](https://github.com/hakobune8/natade-coco-ronro/pull/10)はGDKテンプレートの独立初期化のみで、現時点のゲーム画面はRONROの機能ではない。
+利用者の判断により、`natade-coco-edge`の変更を進めず、独立Content repositoryを先に立ち上げる。Platform認可案の[PR #828](https://github.com/SSLHQ/natade-coco-edge/pull/828)は未マージのまま閉じ、終了ガード案も公開しない。[Content draft PR #10](https://github.com/hakobune8/natade-coco-ronro/pull/10)はGDKテンプレートの独立初期化、[PR #11](https://github.com/hakobune8/natade-coco-ronro/pull/11)は公開安全な合成R4 Canvas preview、[PR #12](https://github.com/hakobune8/natade-coco-ronro/pull/12)はCore wheelのsource SHA・SHA-256固定である。これらはstacked draftであり、実会議の音声・Analyzer・Host操作・PDF取得には未接続。#11の本番表示経路は明示的な準備中画面で、合成データを実会議として見せない。現時点のControllerはテンプレートの方向キーで、RONRO仕様ではない。
 
-次の順序は (1) Core wheelの検証、(2) Contentで合成データ専用Canvas/Controllerのローカルプレビュー、(3) 現行GDK/Platformだけで可能なphone PTT・Session動作の契約試験、(4) 実音声・Host操作・PDF受取に必要な権限/終了保護の不足を再評価、である。**Platform変更なしに実現できない保証をContent内の見かけのrole判定で代替しない。** 不足が残れば実音声を伴うSpot配備は停止し、最小のPlatform変更またはUX/受取手順の改訂を別途判断する。したがって、下表のPR3/4は現在の着手順から外した保留案であり、PR7の合成データ骨組みはPR3/4を前提としない。PR8以降の実音声受入れには依然として認可/終了の実効保証が必要である。
+次の順序は (1) Core wheelの検証・固定（**完了、ただしContent runtime接続は未実装**）、(2) Contentで合成データ専用Canvasのローカルプレビュー（**完了**）とCore-backed backend/Controller preview、(3) 現行GDK/Platformだけで可能なphone PTT・Session動作の契約試験、(4) 実音声・Host操作・PDF受取に必要な権限/終了保護の不足を再評価、である。**Platform変更なしに実現できない保証をContent内の見かけのrole判定で代替しない。** 不足が残れば実音声を伴うSpot配備は停止し、最小のPlatform変更またはUX/受取手順の改訂を別途判断する。したがって、下表のPR3/4は現在の着手順から外した保留案であり、PR7の合成データ骨組みはPR3/4を前提としない。PR8以降の実音声受入れには依然として認可/終了の実効保証が必要である。
 
 **今回の初期実装完了**は、Cloud STT/Analyzerを明示したSpot Content（PR1–10とUI/Artwork PR、PR10a）が検証用Spot実機でE2E動作し、重大欠陥がなく、後続改善を台帳に整理した時点。PR11–13のLocal STT/Analyzer/secure enforcementは別Phaseであり、初期実装完了や機密会議利用許可と混同しない。
 
