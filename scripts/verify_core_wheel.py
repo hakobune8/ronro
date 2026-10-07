@@ -140,6 +140,8 @@ def _source_result(payload: dict) -> dict:
     ledger.complete(STTFinal(source, "item-1", "合成発話"))
     ready = ledger.next_ready_final()
     ledger.acknowledge("item-1")
+    ledger.close_capture(0)
+    ledger.mark_provider_drained()
     return {"state": canonical_json(replay.state), "canvas": record["canvas"],
             "projection": map_projection(replay.state, replay.events, StableLayout())["semantic_canvas"],
             "pdf_sha256": hashlib.sha256(pdf).hexdigest(), "audio_frame_hex": frame.hex(),
@@ -165,6 +167,8 @@ ledger.commit(core.STTCommitted(source, 'item-1', core.AudioRange(0, 2)))
 ledger.complete(core.STTFinal(source, 'item-1', '合成発話'))
 ready = ledger.next_ready_final()
 ledger.acknowledge('item-1')
+ledger.close_capture(0)
+ledger.mark_provider_drained()
 print(json.dumps({'state': core.canonical_json(replay.state), 'canvas': record['canvas'],
                   'projection': core.map_projection(replay.state, replay.events,
                                                     core.StableLayout())['semantic_canvas'],
