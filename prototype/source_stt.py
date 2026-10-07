@@ -117,6 +117,8 @@ class LiveSTTProvider(Protocol):
 
 @dataclass(frozen=True)
 class STTDrain:
+    capture_closed: bool
+    provider_drained: bool
     unresolved_item_ids: tuple[str, ...]
     unclaimed_audio: tuple[AudioRange, ...]
     uncommitted_audio: AudioRange | None
@@ -124,8 +126,9 @@ class STTDrain:
 
     @property
     def complete(self) -> bool:
-        return not (self.unresolved_item_ids or self.unclaimed_audio
-                    or self.uncommitted_audio or self.source_failure_codes)
+        return (self.capture_closed and self.provider_drained
+                and not (self.unresolved_item_ids or self.unclaimed_audio
+                         or self.uncommitted_audio or self.source_failure_codes))
 
 
 @dataclass
@@ -164,6 +167,7 @@ class SourceSTTLedger:
         self._unclaimed: list[AudioRange] = []
         self._source_failures: list[str] = []
         self._closed = False
+        self._provider_drained = False
 
     @property
     def accepted_sample_end(self) -> int:
@@ -190,6 +194,8 @@ class SourceSTTLedger:
         self._next_sequence += 1
 
     def commit(self, value: STTCommitted) -> None:
+        if self._provider_drained:
+            raise STTIntegrityError("Provider item arrived after drain")
         if value.source != self.source or not value.item_id or len(value.item_id) > 256:
             raise STTIntegrityError("committed item has wrong source or no identity")
         if value.item_id in self._items:
@@ -211,6 +217,8 @@ class SourceSTTLedger:
                         for start, end, signal in self._frames if end > span.end_sample]
 
     def complete(self, value: STTFinal) -> bool:
+        if self._provider_drained:
+            raise STTIntegrityError("Final arrived after Provider drain")
         if (value.source != self.source or not value.item_id or len(value.item_id) > 256
                 or not isinstance(value.text, str) or len(value.text) > 16_000):
             raise STTIntegrityError("Final has wrong source or invalid identity/text")
@@ -234,6 +242,8 @@ class SourceSTTLedger:
 
     def fail(self, value: STTFailure) -> None:
         """Record an explicit incomplete item/source without ending the meeting."""
+        if self._provider_drained:
+            raise STTIntegrityError("Provider failure arrived after drain")
         if value.source != self.source:
             raise STTIntegrityError("Provider failure belongs to another source")
         if value.item_id is None:
@@ -275,6 +285,12 @@ class SourceSTTLedger:
             raise STTIntegrityError("capture stop does not match accepted audio")
         self._closed = True
 
+    def mark_provider_drained(self) -> None:
+        """Call only after the Provider's finish and event stream have ended."""
+        if not self._closed:
+            raise STTIntegrityError("Provider cannot drain before capture closes")
+        self._provider_drained = True
+
     def drain(self) -> STTDrain:
         uncommitted = None
         if self._sample_end > self._committed_end:
@@ -282,6 +298,8 @@ class SourceSTTLedger:
             if self._has_signal(span):
                 uncommitted = span
         return STTDrain(
+            capture_closed=self._closed,
+            provider_drained=self._provider_drained,
             unresolved_item_ids=tuple(key for key, item in self._items.items()
                                       if not item.acknowledged or item.unresolved_empty
                                       or item.unresolved_failure),

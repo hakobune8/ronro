@@ -36,6 +36,10 @@ class SourceSTTLedgerTests(unittest.TestCase):
         self.assertEqual(first.next_ready_final().text, "発話A")
         self.assertEqual(second.next_ready_final().text, "発話B")
         first.acknowledge("item-1")
+        self.assertFalse(first.drain().complete)
+        first.close_capture(0)
+        self.assertFalse(first.drain().complete)
+        first.mark_provider_drained()
         self.assertTrue(first.drain().complete)
         self.assertFalse(second.drain().complete)
 
@@ -69,6 +73,8 @@ class SourceSTTLedgerTests(unittest.TestCase):
         self.assertFalse(ledger.complete(final))
         with self.assertRaises(STTIntegrityError):
             ledger.complete(STTFinal(SOURCE_A, "item", "異なる発話"))
+        ledger.close_capture(0)
+        ledger.mark_provider_drained()
         self.assertTrue(ledger.drain().complete)
 
     def test_empty_completion_does_not_end_session_or_create_evidence(self) -> None:
@@ -77,7 +83,8 @@ class SourceSTTLedgerTests(unittest.TestCase):
         ledger.commit(committed(SOURCE_A, "silent", 0, 2400))
         ledger.complete(STTFinal(SOURCE_A, "silent", "  "))
         self.assertIsNone(ledger.next_ready_final())
-        self.assertTrue(ledger.drain().complete)
+        self.assertEqual(ledger.drain().unresolved_item_ids, ())
+        self.assertFalse(ledger.drain().complete)  # Capture remains open.
         ledger.append(frame(1, 2400, signal=True))
         ledger.commit(committed(SOURCE_A, "possible", 2400, 4800))
         ledger.complete(STTFinal(SOURCE_A, "possible", ""))
@@ -140,6 +147,8 @@ class SourceSTTLedgerTests(unittest.TestCase):
         silent.commit(committed(SOURCE_B, "second", 2400, 4800))
         silent.complete(STTFinal(SOURCE_B, "second", "発話"))
         silent.acknowledge("second")
+        silent.close_capture(1)
+        silent.mark_provider_drained()
         self.assertTrue(silent.drain().complete)
 
     def test_connection_generation_is_part_of_source_identity(self) -> None:
@@ -172,6 +181,20 @@ class SourceSTTLedgerTests(unittest.TestCase):
         self.assertEqual(ledger.drain().source_failure_codes, ("transport_unavailable",))
         with self.assertRaises(STTIntegrityError):
             STTFailure(SOURCE_A, "secret=provider-token")
+
+    def test_drain_requires_capture_and_provider_completion(self) -> None:
+        ledger = SourceSTTLedger(SOURCE_A)
+        with self.assertRaises(STTIntegrityError):
+            ledger.mark_provider_drained()
+        self.assertFalse(ledger.drain().complete)
+        ledger.close_capture(-1)
+        self.assertFalse(ledger.drain().complete)
+        ledger.mark_provider_drained()
+        self.assertTrue(ledger.drain().complete)
+        with self.assertRaises(STTIntegrityError):
+            ledger.commit(committed(SOURCE_A, "late", 0, 2400))
+        with self.assertRaises(STTIntegrityError):
+            ledger.complete(STTFinal(SOURCE_A, "late", "遅延Final"))
 
 
 if __name__ == "__main__":
