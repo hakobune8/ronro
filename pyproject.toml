@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ronro-core"
+version = "0.1.0.dev0"
+description = "RONRO canonical discussion graph and projection core"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = [
+  "jsonschema>=4.26,<5",
+  "reportlab>=4.4,<6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["ronro_core"]
+
+# The prototype modules remain the single implementation source during the
+# migration. Only this audited allowlist is copied into the Core wheel.
+[tool.hatch.build.targets.wheel.force-include]
+"prototype/errors.py" = "ronro_core/_impl/errors.py"
+"prototype/service_errors.py" = "ronro_core/_impl/service_errors.py"
+"prototype/schema.py" = "ronro_core/_impl/schema.py"
+"prototype/store.py" = "ronro_core/_impl/store.py"
+"prototype/materializer.py" = "ronro_core/_impl/materializer.py"
+"prototype/fixtures.py" = "ronro_core/_impl/fixtures.py"
+"prototype/replay.py" = "ronro_core/_impl/replay.py"
+"prototype/commands.py" = "ronro_core/_impl/commands.py"
+"prototype/relation_correction.py" = "ronro_core/_impl/relation_correction.py"
+"prototype/display_labels.py" = "ronro_core/_impl/display_labels.py"
+"prototype/semantic_projection.py" = "ronro_core/_impl/semantic_projection.py"
+"prototype/semantic_canvas.py" = "ronro_core/_impl/semantic_canvas.py"
+"prototype/shared_projection.py" = "ronro_core/_impl/shared_projection.py"
+"prototype/layout.py" = "ronro_core/_impl/layout.py"
+"prototype/service_final_record.py" = "ronro_core/_impl/service_final_record.py"
+"schemas" = "ronro_core/schemas"
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+  "pyproject.toml", "README.md", "LICENSE", "ronro_core", "schemas",
+  "prototype/commands.py", "prototype/display_labels.py", "prototype/errors.py",
+  "prototype/fixtures.py", "prototype/layout.py", "prototype/materializer.py",
+  "prototype/relation_correction.py", "prototype/replay.py", "prototype/schema.py",
+  "prototype/semantic_canvas.py", "prototype/semantic_projection.py",
+  "prototype/service_errors.py", "prototype/service_final_record.py",
+  "prototype/shared_projection.py", "prototype/store.py",
+]

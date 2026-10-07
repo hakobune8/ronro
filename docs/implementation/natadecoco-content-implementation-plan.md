@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| Status | In progress — PR1のCore回帰契約から着手。PR2以降・配備は未着手 |
+| Status | In progress — PR1はローカル検証済み。PR2のCore wheel候補を検証中。Platform/Content変更・配備は未着手 |
 | Updated | 2026-10-07 |
 | Source | [RFC-0009](../rfc/0009-ronro-as-natadecoco-local-ai-content.md)、[接続・状態・音声・PDFの詳細契約](../architecture/natadecoco-content-contract.md)、[UI / Artworkブリーフ](../product/natadecoco-ronro-ux-artwork-brief.md) |
 
@@ -32,6 +32,8 @@
 | 13: Secure enforcement | `natade-coco-edge` Fleet/Network と Content | PR11/12後。Content Pod/Local AIのdeny-by-default、限定Spot内通信、DNS/IPv6/hostNetwork/Sidecar/端末経路、監査とfail-closed mode claimを実装。 | CNI実測の拒否試験、policy drift、model pre-load、Offline再起動、端末経路、raw audio/log/cache非保存、旧Game回帰。 | 実効分離の証拠が揃った場合のみ`local-secure`/`offline`表示。端末OS全体の無通信を保証しない。 |
 
 ## Gateと運用上の失敗定義
+
+PR2の配布境界は`pyproject.toml`の明示allowlistで`prototype`中の純粋な実装15モジュールとCanonical Schema 5件だけを`ronro_core` wheelへ写す。`prototype`ファイルが実装の正本であり、配布物は`ronro_core`の公開APIから使う。`prototype/server`、Pilot録音、Account/Postgres、OpenAI秘密設定はwheel/sdistに含めない。`scripts/verify_core_wheel.py`はwheelの全ファイルを検査し、クリーンなPython 3.12環境で同じ合成Event列からGraph/Canvas/PDFが一致することを確認する。`scripts/build_core_wheel.py`は**クリーンなコミット**からだけビルドし、Git SHAとwheel SHA-256をsidecarへ記録する。Source checkoutの`ronro_core`は配布時に選択モジュールを組み込むため、Contentからはeditable/source importではなく検証済みwheelをpinする。CIの`.github/workflows/core-wheel.yml`はPRで配布境界を再検査する。
 
 - **G0 / Architecture**: 本RFC・補助設計・Platform ownerによる認可/終了ガード承認。`getUserMedia`/AudioWorklet/同一origin WSS、Runtime 1.1+を実機確認。失敗ならPR7以降を止める。
 - **G1 / Cloud-demo candidate**: PR1–10（7a/9a含む）。8台接続だけでなく8 source音声、2時間超、Host中断/再開/終了、PDF受取/削除、Replay、誤Host操作拒否、Launcher ArtworkとUIの合成データQAを確認。予期しないTerminate・黙ったEvidence loss・不正確認・Owner/Due捏造・訂正無視はFAIL。Cloud Providerへの送信を参加者に明示。
