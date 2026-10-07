@@ -13,12 +13,15 @@ from pathlib import Path
 
 
 _EXPORTS = {
+    "AudioChunk": "live_audio", "AudioFrameError": "live_audio",
     "EventStore": "store", "GraphMaterializer": "materializer",
     "HumanCommandHandler": "commands", "ReplayResult": "replay",
     "ReplayRunner": "replay", "SchemaValidator": "schema",
     "StableLayout": "layout", "canonical_json": "replay",
     "display_projection": "display_labels", "initial_state": "materializer",
     "interpret_relation_correction": "relation_correction", "map_projection": "layout",
+    "decode_audio_frame": "live_audio", "encode_audio_frame": "live_audio",
+    "float32_to_pcm16le": "live_audio", "resample_mono": "live_audio",
     "prepare_final_record": "service_final_record",
     "project_semantic_canvas": "semantic_canvas",
     "render_final_pdf": "service_final_record",
@@ -41,9 +44,10 @@ def bundled_schema_dir() -> Path:
 
 
 __all__ = [
-    "EventStore", "GraphMaterializer", "HumanCommandHandler", "ReplayResult",
+    "AudioChunk", "AudioFrameError", "EventStore", "GraphMaterializer", "HumanCommandHandler", "ReplayResult",
     "ReplayRunner", "SchemaValidator", "StableLayout", "bundled_schema_dir",
-    "canonical_json", "display_projection", "initial_state",
+    "canonical_json", "decode_audio_frame", "display_projection", "encode_audio_frame",
+    "float32_to_pcm16le", "initial_state",
     "interpret_relation_correction", "map_projection", "prepare_final_record",
-    "project_semantic_canvas", "render_final_pdf",
+    "project_semantic_canvas", "render_final_pdf", "resample_mono",
 ]

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ronro-core"
-version = "0.1.0.dev0"
+version = "0.1.0.dev1"
 description = "RONRO canonical discussion graph and projection core"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -34,6 +34,7 @@ packages = ["ronro_core"]
 "prototype/semantic_canvas.py" = "ronro_core/_impl/semantic_canvas.py"
 "prototype/shared_projection.py" = "ronro_core/_impl/shared_projection.py"
 "prototype/layout.py" = "ronro_core/_impl/layout.py"
+"prototype/live_audio.py" = "ronro_core/_impl/live_audio.py"
 "prototype/service_final_record.py" = "ronro_core/_impl/service_final_record.py"
 "schemas" = "ronro_core/schemas"
 
@@ -41,7 +42,7 @@ packages = ["ronro_core"]
 only-include = [
   "pyproject.toml", "README.md", "LICENSE", "ronro_core", "schemas",
   "prototype/commands.py", "prototype/display_labels.py", "prototype/errors.py",
-  "prototype/fixtures.py", "prototype/layout.py", "prototype/materializer.py",
+  "prototype/fixtures.py", "prototype/layout.py", "prototype/live_audio.py", "prototype/materializer.py",
   "prototype/relation_correction.py", "prototype/replay.py", "prototype/schema.py",
   "prototype/semantic_canvas.py", "prototype/semantic_projection.py",
   "prototype/service_errors.py", "prototype/service_final_record.py",

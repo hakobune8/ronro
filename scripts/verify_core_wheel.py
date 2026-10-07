@@ -23,13 +23,14 @@ sys.path.insert(0, str(ROOT))
 from evaluation.tooling.semantic_hypothesis_review import build_case
 from prototype.commands import HumanCommandHandler
 from prototype.layout import StableLayout, map_projection
+from prototype.live_audio import AudioChunk, encode_audio_frame
 from prototype.replay import ReplayRunner, canonical_json
 from prototype.schema import SchemaValidator
 from prototype.service_final_record import prepare_final_record, render_final_pdf
 
 
 IMPLEMENTATION = (
-    "commands", "display_labels", "errors", "fixtures", "layout",
+    "commands", "display_labels", "errors", "fixtures", "layout", "live_audio",
     "materializer", "relation_correction", "replay", "schema",
     "semantic_canvas", "semantic_projection", "service_errors",
     "service_final_record", "shared_projection", "store",
@@ -130,9 +131,10 @@ def _source_result(payload: dict) -> dict:
     record = prepare_final_record(replay, final_revision=replay.state["graph"]["revision"],
                                   schema_validator=validator)
     pdf = render_final_pdf(record)
+    frame = encode_audio_frame(AudioChunk(7, 0.25, b"\x10\x00\xf0\xff"))
     return {"state": canonical_json(replay.state), "canvas": record["canvas"],
             "projection": map_projection(replay.state, replay.events, StableLayout())["semantic_canvas"],
-            "pdf_sha256": hashlib.sha256(pdf).hexdigest()}
+            "pdf_sha256": hashlib.sha256(pdf).hexdigest(), "audio_frame_hex": frame.hex()}
 
 
 WHEEL_CHECK = """
@@ -144,10 +146,14 @@ replay = core.ReplayRunner(validator).replay_events(**payload)
 record = core.prepare_final_record(replay, final_revision=replay.state['graph']['revision'],
                                    schema_validator=validator)
 pdf = core.render_final_pdf(record)
+frame = core.encode_audio_frame(core.AudioChunk(7, 0.25, b'\\x10\\x00\\xf0\\xff'))
+decoded = core.decode_audio_frame(frame)
+assert decoded.sequence == 7 and decoded.audio_start_seconds == 0.25
 print(json.dumps({'state': core.canonical_json(replay.state), 'canvas': record['canvas'],
                   'projection': core.map_projection(replay.state, replay.events,
                                                     core.StableLayout())['semantic_canvas'],
-                  'pdf_sha256': hashlib.sha256(pdf).hexdigest()}, ensure_ascii=False, sort_keys=True))
+                  'pdf_sha256': hashlib.sha256(pdf).hexdigest(),
+                  'audio_frame_hex': frame.hex()}, ensure_ascii=False, sort_keys=True))
 """
 
 
@@ -169,9 +175,9 @@ def main() -> None:
     if process.returncode:
         raise AssertionError(f"Clean-environment Core failed: {process.stderr.strip()}")
     if json.loads(process.stdout) != source:
-        raise AssertionError("Core wheel Graph/Canvas/PDF differs from repository source")
+        raise AssertionError("Core wheel Graph/Canvas/PDF/audio frame differs from repository source")
     print(f"Core wheel verified: {len(IMPLEMENTATION)} modules, {len(SCHEMAS)} schemas, "
-          "identical Graph/Canvas/PDF")
+          "identical Graph/Canvas/PDF/audio frame")
 
 
 if __name__ == "__main__":
