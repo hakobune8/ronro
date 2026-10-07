@@ -27,13 +27,14 @@ from prototype.live_audio import AudioChunk, encode_audio_frame
 from prototype.replay import ReplayRunner, canonical_json
 from prototype.schema import SchemaValidator
 from prototype.service_final_record import prepare_final_record, render_final_pdf
+from prototype.source_stt import AudioRange, SourceSTTLedger, STTCommitted, STTFinal, STTSource
 
 
 IMPLEMENTATION = (
     "commands", "display_labels", "errors", "fixtures", "layout", "live_audio",
     "materializer", "relation_correction", "replay", "schema",
     "semantic_canvas", "semantic_projection", "service_errors",
-    "service_final_record", "shared_projection", "store",
+    "service_final_record", "shared_projection", "source_stt", "store",
 )
 SCHEMAS = (
     "analyzer-output-v2.schema.json", "analyzer-output-v3.schema.json",
@@ -132,9 +133,17 @@ def _source_result(payload: dict) -> dict:
                                   schema_validator=validator)
     pdf = render_final_pdf(record)
     frame = encode_audio_frame(AudioChunk(7, 0.25, b"\x10\x00\xf0\xff"))
+    source = STTSource("synthetic", "run-1", "player-1", "generation-1")
+    ledger = SourceSTTLedger(source)
+    ledger.append(AudioChunk(0, 0.0, b"\x10\x00\xf0\xff"))
+    ledger.commit(STTCommitted(source, "item-1", AudioRange(0, 2)))
+    ledger.complete(STTFinal(source, "item-1", "合成発話"))
+    ready = ledger.next_ready_final()
+    ledger.acknowledge("item-1")
     return {"state": canonical_json(replay.state), "canvas": record["canvas"],
             "projection": map_projection(replay.state, replay.events, StableLayout())["semantic_canvas"],
-            "pdf_sha256": hashlib.sha256(pdf).hexdigest(), "audio_frame_hex": frame.hex()}
+            "pdf_sha256": hashlib.sha256(pdf).hexdigest(), "audio_frame_hex": frame.hex(),
+            "stt_final": ready.text if ready else None, "stt_drain_complete": ledger.drain().complete}
 
 
 WHEEL_CHECK = """
@@ -149,11 +158,19 @@ pdf = core.render_final_pdf(record)
 frame = core.encode_audio_frame(core.AudioChunk(7, 0.25, b'\\x10\\x00\\xf0\\xff'))
 decoded = core.decode_audio_frame(frame)
 assert decoded.sequence == 7 and decoded.audio_start_seconds == 0.25
+source = core.STTSource('synthetic', 'run-1', 'player-1', 'generation-1')
+ledger = core.SourceSTTLedger(source)
+ledger.append(core.AudioChunk(0, 0.0, b'\\x10\\x00\\xf0\\xff'))
+ledger.commit(core.STTCommitted(source, 'item-1', core.AudioRange(0, 2)))
+ledger.complete(core.STTFinal(source, 'item-1', '合成発話'))
+ready = ledger.next_ready_final()
+ledger.acknowledge('item-1')
 print(json.dumps({'state': core.canonical_json(replay.state), 'canvas': record['canvas'],
                   'projection': core.map_projection(replay.state, replay.events,
                                                     core.StableLayout())['semantic_canvas'],
                   'pdf_sha256': hashlib.sha256(pdf).hexdigest(),
-                  'audio_frame_hex': frame.hex()}, ensure_ascii=False, sort_keys=True))
+                  'audio_frame_hex': frame.hex(), 'stt_final': ready.text if ready else None,
+                  'stt_drain_complete': ledger.drain().complete}, ensure_ascii=False, sort_keys=True))
 """
 
 
