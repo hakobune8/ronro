@@ -31,7 +31,8 @@ from prototype.source_stt import AudioRange, SourceSTTLedger, STTCommitted, STTF
 
 
 IMPLEMENTATION = (
-    "commands", "display_labels", "errors", "fixtures", "layout", "live_audio",
+    "analysis_engine", "candidate_event", "commands", "display_labels", "errors",
+    "fixtures", "layout", "live_audio",
     "materializer", "relation_correction", "replay", "schema",
     "semantic_canvas", "semantic_projection", "service_errors",
     "service_final_record", "shared_projection", "source_stt", "store",
@@ -153,6 +154,20 @@ import hashlib, json, sys
 import ronro_core as core
 payload = json.load(sys.stdin)
 validator = core.SchemaValidator(core.bundled_schema_dir())
+analyzer = core.RealAnalyzer(
+    provider=core.StaticJsonProvider([{'events': []}]),
+    schema_validator=validator, prompt_version=core.PROMPT_VERSION_V10,
+    output_schema_version='v3',
+)
+utterance = {'id': 'synthetic-utterance', 'session_id': payload['session_id'],
+             'sequence': 1, 'evidence_ids': ['synthetic-evidence'],
+             'text': '合成会議で点検方法を確認します。',
+             'started_at': '2026-09-23T01:05:00Z', 'ended_at': '2026-09-23T01:05:00Z'}
+assert analyzer.analyze(utterance, {'nodes': [], 'edges': [], 'current_topic': {}}, []) == []
+assert analyzer.last_trace['status'] == 'noop'
+assert core.CandidateEvent('e', payload['session_id'], 'node_detected',
+                           '2026-09-23T01:05:00Z', ('synthetic-evidence',),
+                           {'node_type': 'idea', 'label': '合成論点'}).to_event(9)['sequence'] == 9
 replay = core.ReplayRunner(validator).replay_events(**payload)
 record = core.prepare_final_record(replay, final_revision=replay.state['graph']['revision'],
                                    schema_validator=validator)

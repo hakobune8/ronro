@@ -11,48 +11,15 @@ from __future__ import annotations
 
 import copy
 import re
-from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
+from .candidate_event import CandidateEvent
 from .errors import PrototypeError
 from .fixtures import Fixture
 from .materializer import initial_state
 from .replay import ReplayResult, ReplayRunner
 from .schema import SchemaValidator
 from .display_labels import record_hint
-
-
-@dataclass(frozen=True)
-class CandidateEvent:
-    """An Analyzer-produced event intent before canonical sequencing.
-
-    ``event_id`` is deterministic and is allocated by the producer/template;
-    ``sequence`` is intentionally absent until the Event Store boundary.  The
-    resulting dictionary from :meth:`to_event` is a canonical Event Schema
-    document.
-    """
-
-    event_id: str
-    session_id: str
-    event_type: str
-    occurred_at: str
-    source_evidence_ids: tuple[str, ...]
-    payload: dict[str, Any]
-    actor: str = "analyzer"
-    presentation: dict[str, Any] | None = None
-
-    def to_event(self, sequence: int) -> dict[str, Any]:
-        event = {
-            "event_id": self.event_id,
-            "session_id": self.session_id,
-            "sequence": sequence,
-            "event_type": self.event_type,
-            "occurred_at": self.occurred_at,
-            "actor": self.actor,
-            "source_evidence_ids": list(self.source_evidence_ids),
-            "payload": copy.deepcopy(self.payload),
-        }
-        return event
 
 
 class FakeAnalyzer:
