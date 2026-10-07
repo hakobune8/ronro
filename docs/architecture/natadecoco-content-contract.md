@@ -45,6 +45,8 @@ Content Endは`active|paused → finalizing → handoff|failed`の冪等操作�
 
 Host専用のContent Command認可には、Controller moduleの見かけの`role`を信用しない。Contentの`POST /api/session/{run}/pause|resume|end|corrections|purge`と`GET /api/session/{run}/final.pdf`は、`requestGameResource`で付くPlatform player Bearerを検証し、Platform内部のoperation-scoped認可照会で**現時点の**session/run/player参加とhost leaseを確認する。この照会は既存Session Managerのactive-player verifyとLauncherのhost player bindingをPlatform側で合成する最小追加契約であり、ContentへHost cookieや管理者tokenを渡さない。参加者には`audio-ticket`発行だけ許可。host transfer、kick、token失効、run差替え時は直ちに再認可が失敗する。display credentialはaudio/host/PDFへ使わない。内部照会はService-to-Service認証・最小応答・閉域経路とする。Platform側に同等の既存公開契約があれば重複実装しない。
 
+Player音声入場だけは、現行Session Manager `POST /api/v1/sessions/{sessionID}/players/{playerID}/verify`でBearerを検証した後、Launcher `GET /launcher-api/v1/session`で**同じ**playing RONRO session/run・接続Playerを照合するContent側の境界を[PR #18](https://github.com/hakobune8/natade-coco-ronro/pull/18)で実装した。これはHost leaseの証明ではなく、ticket発行と消費時の照合コードまでである。配備環境でのAPI到達性・応答契約、WSSでの継続再検証、active source上限は未受入れ。Host用のoperation-scoped認可と終了ガードをこのPlayer確認で代用しない。
+
 Contentの外部HTTP契約は`/games/ronro/`配下に置く（ここで`ronro`はManifestの実IDで置換）。Player BearerをURL/Local Storage/JS moduleへ露出させず、Controller moduleは`requestGameResource`からだけ呼ぶ。既存Player JWTにはrun IDやHost roleがないため、署名検証だけでは足りない。Command bodyは`command_id`（retry時に同一値）、`expected_content_revision`、必要な訂正対象だけとし、session/run/player/roleは認可済みPlatform contextから得る。重複Commandは同じ結果、revision競合は409、権限不足は403、認可照会不能は503で**状態変更しない**。Host UIのrole表示は操作可否の案内にのみ使う。訂正Commandは既存Human-origin Event境界を通し、Graphを直接書き換えない。
 
 | Endpoint（概念path） | Caller / response | 権限・条件 |
