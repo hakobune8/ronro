@@ -12,9 +12,9 @@
 
 ### 2026-10-07 実装順の変更: Contentを先行
 
-利用者の判断により、`natade-coco-edge`の変更を進めず、独立Content repositoryを先に立ち上げる。Platform認可案の[PR #828](https://github.com/SSLHQ/natade-coco-edge/pull/828)は未マージのまま閉じ、終了ガード案も公開しない。旧Content PR #10–12は[統合Draft PR #13](https://github.com/hakobune8/natade-coco-ronro/pull/13)に集約して閉じ、Core側も[統合Draft PR #29](https://github.com/hakobune8/ronro/pull/29)に集約した。Core wheelのsource SHA・SHA-256固定、公開安全な合成R4 Canvas previewに加え、[Content PR #14](https://github.com/hakobune8/natade-coco-ronro/pull/14)で受理済みEventからCoreのGraph/Canvas/PDFを駆動するadapterを`develop`に統合した。[Content PR #15](https://github.com/hakobune8/natade-coco-ronro/pull/15)では固定wheelを検証し、Python runtimeでCoreを起動して静的Display/Controllerとhealthを同一Serviceで配信する。ローカルとCIで非root・読み取り専用・外部ネットワークなしの起動を確認したが、会議Eventの外部write、音声・Analyzer・Host操作・PDF取得は未接続。合成データを実会議として見せない。現時点のControllerはテンプレートの方向キーで、RONRO仕様ではない。
+利用者の判断により、`natade-coco-edge`の変更を進めず、独立Content repositoryを先に立ち上げる。Platform認可案の[PR #828](https://github.com/SSLHQ/natade-coco-edge/pull/828)は未マージのまま閉じ、終了ガード案も公開しない。旧Content PR #10–12は[統合Draft PR #13](https://github.com/hakobune8/natade-coco-ronro/pull/13)に集約して閉じ、Core側も[統合Draft PR #29](https://github.com/hakobune8/ronro/pull/29)に集約した。Core wheelのsource SHA・SHA-256固定、公開安全な合成R4 Canvas previewに加え、[Content PR #14](https://github.com/hakobune8/natade-coco-ronro/pull/14)で受理済みEventからCoreのGraph/Canvas/PDFを駆動するadapterを`develop`に統合した。[Content PR #15](https://github.com/hakobune8/natade-coco-ronro/pull/15)では固定wheelを検証し、Python runtimeでCoreを起動して静的Display/Controllerとhealthを同一Serviceで配信する。[Content PR #16](https://github.com/hakobune8/natade-coco-ronro/pull/16)では押下中だけマイクを開き、release・画面非表示・画面離脱時にtrackを止める開発用PTTプレビューを`develop`に統合した。切断・中断で止める純粋な状態契約もテストしたが、実通信は未接続。プレビューはPCMを読み取らず送信・保存しない。本番Controllerは引き続きPlatformの方向キーテンプレートへ遷移する。会議Eventの外部write、実音声・Analyzer・Host操作・PDF取得は未接続。合成データを実会議として見せない。
 
-次の順序は (1) Core wheelの検証・固定（**完了**）、(2) Contentで合成Canvas・Core-backed Event/Replay/PDF adapterの契約試験とPython runtimeによるCore起動・静的画面配信（**ローカル/CIで完了**）、(3) ControllerのRONRO用previewと現行GDK/Platformで可能なphone PTT・Session動作の契約試験、(4) 実音声・Host操作・PDF受取に必要な権限/終了保護の不足を再評価、である。**Platform変更なしに実現できない保証をContent内の見かけのrole判定で代替しない。** 不足が残れば実音声を伴うSpot配備は停止し、最小のPlatform変更またはUX/受取手順の改訂を別途判断する。したがって、下表のPR3/4は現在の着手順から外した保留案であり、PR7の合成データ骨組みはPR3/4を前提としない。PR8以降の実音声受入れには依然として認可/終了の実効保証が必要である。
+次の順序は (1) Core wheelの検証・固定（**完了**）、(2) Contentで合成Canvas・Core-backed Event/Replay/PDF adapterの契約試験とPython runtimeによるCore起動・静的画面配信（**ローカル/CIで完了**）、(3) ControllerのRONRO用PTT開発プレビュー（**ローカル/CIで完了**）と現行GDK/Platformで可能なphone PTT・Session動作の契約試験、(4) 実音声・Host操作・PDF受取に必要な権限/終了保護の不足を再評価、である。**Platform変更なしに実現できない保証をContent内の見かけのrole判定で代替しない。** 不足が残れば実音声を伴うSpot配備は停止し、最小のPlatform変更またはUX/受取手順の改訂を別途判断する。したがって、下表のPR3/4は現在の着手順から外した保留案であり、PR7の合成データ骨組みはPR3/4を前提としない。PR8以降の実音声受入れには依然として認可/終了の実効保証が必要である。
 
 **今回の初期実装完了**は、Cloud STT/Analyzerを明示したSpot Content（PR1–10とUI/Artwork PR、PR10a）が検証用Spot実機でE2E動作し、重大欠陥がなく、後続改善を台帳に整理した時点。PR11–13のLocal STT/Analyzer/secure enforcementは別Phaseであり、初期実装完了や機密会議利用許可と混同しない。
 
@@ -55,4 +55,4 @@ PR10aの証跡とともに、未解決項目を少なくとも「問題/発生�
 
 ## 最初のPR
 
-最初のPRであった**PR1: `ronro`の公開安全なEvent/Replay/Canvas/PDF契約テスト固定**は`develop`へ統合済み。外部Platformや機密音声を変えずに移行前後の意味差分を検知できる基準を与えた。次のContent側PRは、テンプレートの方向キーControllerをRONRO用previewへ置き換え、現行GDKのController/Session契約で安全に確認できる範囲をテストする。実音声やHost権限の受入れ・配備は自動承認しない。
+最初のPRであった**PR1: `ronro`の公開安全なEvent/Replay/Canvas/PDF契約テスト固定**は`develop`へ統合済み。外部Platformや機密音声を変えずに移行前後の意味差分を検知できる基準を与えた。Content側のPTT開発用プレビューはPR #16で統合済み。次は現行GDK/PlatformのController/Session契約と音声ticket・Host権限の実効保証を確認し、実音声を送る前に不足を明確にする。実音声やHost権限の受入れ・配備は自動承認しない。
