@@ -2,13 +2,19 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| Status | In progress — PR1はローカル検証済み。PR2のCore wheel候補を検証中。Platform/Content変更・配備は未着手 |
+| Status | In progress — Core baseline/package PRと独立Content scaffold PRを作成。Platform変更は保留。配備・実音声は未着手 |
 | Updated | 2026-10-07 |
 | Source | [RFC-0009](../rfc/0009-ronro-as-natadecoco-local-ai-content.md)、[接続・状態・音声・PDFの詳細契約](../architecture/natadecoco-content-contract.md)、[UI / Artworkブリーフ](../product/natadecoco-ronro-ux-artwork-brief.md) |
 
 ## 実装順序とブランチ境界
 
 各行は原則1 PR。新Content repo名の第一候補は`hakobune8/natade-coco-ronro`。GDK/Platformへの変更は既存Gameの後方互換テストを通してからContentへ取り込む。PlatformとContentを未検証のまま同時配備しない。Coreの正本は`ronro`だけで、依存はContent→versioned Core/GDKの一方向。現行Pilot/Account Serviceや既存評価Artifactを暗黙に移行・削除しない。
+
+### 2026-10-07 実装順の変更: Contentを先行
+
+利用者の判断により、`natade-coco-edge`の変更を進めず、独立Content repositoryを先に立ち上げる。Platform認可案の[PR #828](https://github.com/SSLHQ/natade-coco-edge/pull/828)は未マージのまま閉じ、終了ガード案も公開しない。新しい[Content draft PR #10](https://github.com/hakobune8/natade-coco-ronro/pull/10)はGDKテンプレートの独立初期化のみで、現時点のゲーム画面はRONROの機能ではない。
+
+次の順序は (1) Core wheelの検証、(2) Contentで合成データ専用Canvas/Controllerのローカルプレビュー、(3) 現行GDK/Platformだけで可能なphone PTT・Session動作の契約試験、(4) 実音声・Host操作・PDF受取に必要な権限/終了保護の不足を再評価、である。**Platform変更なしに実現できない保証をContent内の見かけのrole判定で代替しない。** 不足が残れば実音声を伴うSpot配備は停止し、最小のPlatform変更またはUX/受取手順の改訂を別途判断する。したがって、下表のPR3/4は現在の着手順から外した保留案であり、PR7の合成データ骨組みはPR3/4を前提としない。PR8以降の実音声受入れには依然として認可/終了の実効保証が必要である。
 
 **今回の初期実装完了**は、Cloud STT/Analyzerを明示したSpot Content（PR1–10とUI/Artwork PR、PR10a）が検証用Spot実機でE2E動作し、重大欠陥がなく、後続改善を台帳に整理した時点。PR11–13のLocal STT/Analyzer/secure enforcementは別Phaseであり、初期実装完了や機密会議利用許可と混同しない。
 
@@ -20,7 +26,7 @@
 | 4: Platform termination guard | `natade-coco-edge` / Launcher, Session, manifest/schema、GDK validator/docs | PR3後。Content opt-inだけに終了readiness guardと期限後のorphan終了を追加。`playing`中のContent End/Drain/PDF受取を許し、purgedで初めて通常`/control/end`を通す。管理者強制終了は監査。Gameの`finishGame`/rankingsは無変更。 | 途中End拒否、PDF準備後も未受取End拒否、受取終了/TTLで許可、backend timeout fail-closed、forced termination監査、旧Game終了回帰。 | PDF受取前の誤Endで記録を失わず、期限後にContent/Platform双方が閉じる。 |
 | 5: Phone/browser contract | `natade-coco-gdk`＋Platform test harness / Controller module | PR3と並行。8枠、途中Join、同一origin `requestGameResource`→audio-ticket→WSS、iOS/AndroidのPTT user gesture/mic/AudioWorklet/visibility/lockを契約テストと実機Spikeで検証。拡張が必要なら後方互換で最小化。 | 1/4/8参加、9台目拒否、開始遅延、release/cancel/lock/background/disconnect停止、Join QR→local Wi-Fi→Join、120分超。自然な相槌・言い直し・同時発話を含む模擬会議で操作負担を観察。 | 技術上の実効値と失敗時UI契約が確定。接続枠試験を8音声処理の証明にしない。PTTが会話を止める兆候があればCapture方式の設計判断へ戻る。 |
 | 6: Provider boundary | `ronro` / Live STT, Analyzer | PR1/2後。source別stream/turn/item/range/Drain contractと`AnalyzerProvider`のSchema版境界を抽出し、現行Remote Adapterを移す。Canonical Eventを不要に変えない。 | 空/極短押下、duplicate/out-of-order、古いFinalと新音声、gap、pause/resume、遅延Analyzer、訂正優先、同一Event Replay、現行Pilot回帰。 | STT/Analyzerの交換点が明確で、source取り違え・空commit起因のSession Endなし。 |
-| 7: Content skeleton | `natade-coco-ronro` / GDK manifest, Container, Python runtime | PR2/3/4/5後。独立repoをGDKで初期化し、Core packageとplatform setをpin。Game互換Manifest最大8、`while-playing`/`keep-alive`/opt-in guardを宣言。Pythonと静的Display/Controllerを同一8080 Serviceで配信。 | `make validate/test/lint/build`相当、旧Game非影響、route/health、digest/SBOM/attestation、local smoke。 | ControllerとDisplayが同一Session/runに接続し、ルーティング/認証/guardが動く。まだ録音せずCloud/Localを保証しない。 |
+| 7: Content skeleton | `natade-coco-ronro` / GDK manifest, Container, Python runtime | PR2後の合成データ経路を先行。独立repoをGDKで初期化し、Core packageとplatform setをpin。最大8枠や`while-playing`/`keep-alive`は実動作検証後に宣言。未採用のopt-in guardは宣言しない。Pythonと静的Display/Controllerの同一8080 Serviceを検証する。 | `make validate/test/lint/build`相当、旧Game非影響、route/health、local synthetic smoke。 | 合成データでCanvas/Controllerの境界が動く。実録音、Host権限、PDF受取、Cloud/Local安全性は主張しない。 |
 | 7a: Product artwork | `natade-coco-ronro` / Launcher presentation assets | PR7後。専用`catalog.webp`/`lobby.webp`と6桁`accentColor`を制作・bundleし、`game.yaml`の`presentation`へ登録。元データ、権利、最適化条件、代替fallbackを記録。Live Canvasの背景へは流用しない。[非誘導・非監視の表現原則](../product/natadecoco-ronro-ux-artwork-brief.md)を制作レビューに含める。 | GDK schema/asset route検証、16:9 Catalog crop、Lobby左/下overlay、実Launcher表示、offline配信、画像失敗fallback、会議結果や機密性を誇張しないHuman Review。 | 既定fallbackに頼らず、論路を「採点・監視するゲーム」と誤認させない専用ArtworkがCatalog/Lobbyに表示される。 |
 | 8: Audio and lifecycle | `natade-coco-ronro` / Controller PTT, WSS, Session Adapter | PR5/6/7後。押下中だけのMic、source別一回ticket/lease/seq、Host Pause/Resume/Endと進行中Join、Host訂正、8 source公平Queue、gapを実装。Content EndはPlatform Endと別。 | 1/4/8 source同時押下、近接重複/同時発話、空/長押下、切断/ロック、Host移譲、中断中Join、古いFinal、Queue満杯、2時間超、全source Drain。 | 未押下/lock時にtrack送信0。1台の障害・無音/BGMで会議終了なし。欠落を隠さず、Event/Graphと訂正が再現可能。 |
 | 9: Canvas and PDF handoff | `natade-coco-ronro` / Display, Controller, ephemeral Store | PR8後。既存Semantic CanvasをLive/Final共通で表示し、右上Join QR、実入力状態を反映。固定revisionの既存PDF rendererをHost Controllerへ配信、30分以内の再試行/受取終了/期限切れ・消去を実装。会議内容はtmpfs WALでSession中のみ維持。 | 1920×1080、3–5m Human Review、PDF日本語/大Graph/警告/State、非Host拒否、期限・別run拒否、tmpfs/backup/log非残存、process再起動Replay、Pod消滅の明示失敗。 | 固定CanvasとPDFが整合し、Host受取後に通常Platform End可能。会議後Web閲覧/再ダウンロードなし。 |

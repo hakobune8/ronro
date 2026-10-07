@@ -9,6 +9,8 @@
 
 実装判断を残さないための接続・状態・音声・PDFの詳細は[Spot Content契約](../architecture/natadecoco-content-contract.md)、Spotらしい入口・会議中UI・専用artworkは[UI / Artworkブリーフ](../product/natadecoco-ronro-ux-artwork-brief.md)、PR単位の依存順・試験・ゲートは[実装計画](../implementation/natadecoco-content-implementation-plan.md)に記す。段階実装の着手は承認されたが、Platform ownerの契約確認・Spot実機受入れ・機密会議利用・配備は別ゲートである。
 
+2026-10-07 の実装順判断: [独立Content repository](https://github.com/hakobune8/natade-coco-ronro)の合成データ骨組みを先行し、`natade-coco-edge` の変更を保留する。この順序変更は、後述のHost認可・PDF受取前の終了保護が現行Platformだけで成立するという意味ではない。成立を実証できるまで実音声を伴う配備・機密会議向け宣言をしない。
+
 ## 1. Contextと調査基準
 
 RONROは会議中の論点図を作る研究・Pilot用プロトタイプである。現行のライブ経路はブラウザAudioWorkletのPCMをRONROのPython WebSocketへ送り、OpenAI Realtime transcriptionでFinal Transcriptを得て、OpenAI互換Analyzerの候補Eventを検証・受理し、Event Store／MaterializerからGraphとSemantic Canvasを作る（[README](../../README.md)、[Pilot設定](../../deploy/kubernetes/base/configmap.yaml)、[Live STT](../../prototype/live_stt.py)、[Analyzer](../../prototype/real_analyzer.py)）。現行Pilotは音声を外部APIへ送る。録音は同意条件のあるPilot評価用の例外で、機密会議向け既定動作ではない。
