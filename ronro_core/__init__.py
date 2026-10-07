@@ -14,6 +14,10 @@ from pathlib import Path
 
 _EXPORTS = {
     "AudioChunk": "live_audio", "AudioFrameError": "live_audio",
+    "CandidateEvent": "candidate_event",
+    "RealAnalyzer": "analysis_engine", "StaticJsonProvider": "analysis_engine",
+    "AnalyzerProvider": "analysis_engine", "ProviderResponse": "analysis_engine",
+    "ProviderFailure": "analysis_engine", "PROMPT_VERSION_V10": "analysis_engine",
     "AudioRange": "source_stt", "LiveSTTProvider": "source_stt",
     "LiveSTTSession": "source_stt", "SourceSTTLedger": "source_stt",
     "STTBoundary": "source_stt", "STTCommitted": "source_stt", "STTDrain": "source_stt",
@@ -50,6 +54,8 @@ def bundled_schema_dir() -> Path:
 
 __all__ = [
     "AudioChunk", "AudioFrameError", "AudioRange", "EventStore", "GraphMaterializer", "HumanCommandHandler",
+    "AnalyzerProvider", "CandidateEvent", "ProviderFailure", "ProviderResponse",
+    "RealAnalyzer", "StaticJsonProvider", "PROMPT_VERSION_V10",
     "LiveSTTProvider", "LiveSTTSession", "ReplayResult", "SourceSTTLedger",
     "STTBoundary", "STTCommitted", "STTDrain", "STTFailure", "STTFinal",
     "STTIntegrityError", "STTPartial", "STTSource",
