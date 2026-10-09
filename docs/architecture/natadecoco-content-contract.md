@@ -3,12 +3,14 @@
 | 項目 | 内容 |
 | --- | --- |
 | Status | Working design / 段階実装の入力。Platform owner確認・実機検証・配備承認ではない |
-| Updated | 2026-10-07 |
+| Updated | 2026-10-09 |
 | Parent | [RFC-0009](../rfc/0009-ronro-as-natadecoco-local-ai-content.md) |
 | Implementation | [PR単位の実装計画](../implementation/natadecoco-content-implementation-plan.md) |
 | UX / Artwork | [制作・受入れブリーフ](../product/natadecoco-ronro-ux-artwork-brief.md) |
 
-> 実装順の更新（2026-10-07）: 本文のPlatform認可/終了ガードは実音声・PDF受取を安全に公開するための設計要件であり、現在の実装済み契約ではない。利用者判断でPlatform変更を保留し、[独立Contentの合成データ骨組み](../implementation/natadecoco-content-implementation-plan.md)を先行する。RONRO ContentにHost権限や終了保護を自己申告させて、この不足を隠さない。
+> 契約改訂（2026-10-09）: 以前のHost専用Content操作・Platform終了ガード必須・手動「受取終了/破棄」は採用しない。以下は改訂後の設計であり、既存Content候補コードのHost命名/APIや本番配備が更新済みという意味ではない。[実装計画](../implementation/natadecoco-content-implementation-plan.md)に移行作業を記す。
+
+スマホControllerは**マイク/入力端点であって、人のIDではない**。1台を複数人が共有できる。以下の「認証済み参加者」は実装上「現在のrunに認可・接続されたController」と読む。Player Bearer/slot/source IDから発話者・操作した人・Host本人を推定しない。Human-origin Command/EventもAI提案ではない入力を示すだけで、人物の本人確認ではない。
 
 ## 1. 調査で確定した境界
 
@@ -21,42 +23,41 @@ GDK/Platformの調査対象はGDK `0ba3e224`、Platform作業checkout `44f52ae`�
 1. 新repo `natade-coco-ronro`をContentとし、RONRO Coreのversion/hash固定packageを一方向に利用する。Python backendを残し、同一Content Serviceの8080番・同一origin配下でDisplay、Controller module、API、WSSを公開する。GDKのGame互換Manifestを当初使い、`players: {min: 1, max: 8}`、`joinPolicy: while-playing`、`emptySessionPolicy: keep-alive`、対応Runtimeを宣言する。8人は音声処理性能の証明ではない。
 2. 初期実行は明示的な`cloud-demo`。機密/Local Secureと表示しない。STTとAnalyzerは別Provider契約で差し替える。Cloud資格情報はContent server側だけに置く。
 3. Session Managerは参加・枠・run・host leaseの権威、Contentは会議取込・Drain・PDFの権威。PlatformとContentの状態は混同しない。Platformを`playing`に保ったままContentの会議を終了・PDF受取し、その後PlatformをTerminateする。`finished`/rankingsを流用しない。
-4. **終了解除ガードはPhase 1の必須Platform契約**。RONROのopt-in Contentについて`/control/end`はContentの終了準備確認前に通常Terminateしない。既存Gameは変更しない。管理者の強制Terminateは可能だが、会議不完全・PDF喪失の可能性として監査する。
-5. Content本文は会議中と終了直後の受取窓だけSpot内に置く。PDF準備完了から30分、またはホストの受取終了操作で消去する。30分は[RFC-0009](../rfc/0009-ronro-as-natadecoco-local-ai-content.md)の**暫定上限**であり、会議後ライブラリを意味しない。PDFはホストの端末へ持ち出され得る。
+4. PlatformのStartと「ゲームを全体終了する」は既存ShellのHost権限に従う。後者はRONROの通常の会議Endではなく強制的なPlatform終了であり、Drain/PDF受取を保証しない。ContentはPlatformの新しい終了ガードを前提にせず、会議EndとPlatform終了を明確に分ける。
+5. Content本文は会議中と終了直後の受取窓だけSpot内に置く。PDF readyから30分（暫定上限）で**期限到達時のみ**消去し、Controllerからの手動削除を許さない。認可された各ControllerからPDFを端末へ持ち出し得ることを事前に示す。一端点の取得/保存失敗は他端点の受取窓を変えない。各出席者本人への配布を証明するものではない。
 
 ## 3. State / Authority / API
 
 | Platform | Content | 可能な操作 | 不変条件 |
 | --- | --- | --- | --- |
 | waiting/ready | idle | Hostが既存ShellでStart | Contentに音声は入れない |
-| playing | active | HostがPause/End/Correction、全員がPTT、途中Join | Source別に取込。Host離脱・無音はEndでない |
-| playing | paused | HostがResume/End、途中Join | PTT拒否、Graphと既存run維持 |
+| playing | active | 認可されたControllerがPause/End/Correction/PTT、途中Join | Source別に取込。Host離脱・無音はEndでない |
+| playing | paused | 認可されたControllerがResume/End、途中Join | PTT拒否、Graphと既存run維持 |
 | playing | finalizing | 再試行可能なDrain監視 | 新規PTT拒否。既存Sourceの範囲とQueueを確定 |
-| playing | handoff（PDF ready、complete/incomplete outcome付き） | HostがPDF取得・受取終了/廃棄 | 固定Event revisionからPDF。新規PTT拒否。Join QR非表示 |
-| playing | failed（PDF未生成） | Hostが原因表示・安全な再試行/明示破棄 | 正常PDFと表示しない。原データが残る間だけ同一runを再試行 |
-| playing | purged | Hostが既存ShellのEndを押す、またはPlatformが期限後に終了 | 本文/ticket無効、Content終了ガード解除 |
+| playing | handoff（PDF ready、complete/incomplete outcome付き） | 認可された各ControllerからPDF取得 | 固定Event revisionからPDF。新規PTT拒否。Join QR非表示。一端点の取得で窓を閉じない |
+| playing | failed（PDF未生成） | 認可されたControllerで原因表示・安全な再試行を要求 | 正常PDFと表示しない。原データが残る間だけ同一runを再試行 |
+| playing | purged | Platform Hostが既存Shellの全体終了を選択可能 | 期限到達でContent本文/ticket無効。Platform終了は別の明示操作 |
 | terminated/error | incomplete/purged | Operator調査のみ | 強制終了を正常終了と偽らない |
 
-Content Endは`active|paused → finalizing → handoff|failed`の冪等操作。`ended_incomplete`は**phaseではなく完了結果**であり、既知の欠落範囲/不明範囲をPDFに記して`handoff`へ進める。Drain不能やrevision不一致なら`failed`でPDFを正常成果物と呼ばない。finalizingはEndから最大10分でタイムアウトし、再試行可能なEvent/WALがある場合のみ同一runで再試行、そうでなければHostへ破棄/Operator対応を案内する。`handoff`/`failed`はそれぞれ入り時点から最大30分で本文消去・ticket失効・`purged`へ進む。失敗を無期限に保持しない。Pauseは音声取込世代を進め、既に受信したPCM/Final/Analyzer仕事をDrainまたは安全な隔離に移す。Resumeは新世代からで、旧Finalを新世代へ帰属させない。Hostが一時切断してもContent状態は維持し、既存Platform host transfer後の新Hostが権限を得る。Platformが異常終了したらPDF取得不能の可能性を非内容ログに残し、Sessionを黙って再作成しない。
+Content Endは`active|paused → finalizing → handoff|failed`の冪等操作。認可されたControllerからのEndは全員の取込を止めるため、操作前に明確な二段階確認を行い、確定したHuman-origin Commandとrunに紐づく入力端点・revisionを監査する。実行した人物は特定しない。競合するEnd/Resume/Correctionは同じcommand IDとphase/revision検査で決着させる。`ended_incomplete`は**phaseではなく完了結果**であり、既知の欠落範囲/不明範囲をPDFに記して`handoff`へ進める。Drain不能やrevision不一致なら`failed`でPDFを正常成果物と呼ばない。finalizingはEndから最大10分でタイムアウトし、再試行可能なEvent/WALがある場合のみ同一runで再試行、そうでなければControllerへ失敗/Operator対応を案内する。`handoff`/`failed`はそれぞれ入り時点から最大30分で本文消去・ticket失効・`purged`へ進む。Pauseは音声取込世代を進め、既に受信したPCM/Final/Analyzer仕事をDrainまたは安全な隔離に移す。Resumeは新世代からで、旧Finalを新世代へ帰属させない。Controllerが一時切断してもContent状態は維持する。Platformが異常終了したらPDF取得不能の可能性を非内容ログに残し、Sessionを黙って再作成しない。
 
-### 必要な最小Platform追加契約（後方互換）
+### Participant操作の認可境界
 
-`game.yaml`へ汎用の**opt-in termination guard**を追加するか、既存Manifest拡張点が見つかればそれを使う。RONRO Contentのみ`/control/end`の直前にPlatformが認証済み内部経路で`GET /internal/termination-readiness?sessionId=…&runId=…`を照会する。返答は`ready: false, phase: active|paused|finalizing|handoff|failed`または`ready: true, phase: purged`。タイムアウト/非200は通常終了を拒否し、Hostへ「処理中または状態不明」と表示する。`handoff`でも未受取の可能性があるので通常終了を拒否する。Hostの「受取終了」または「記録を破棄」はContentへ冪等Commandとして記録し、本文とticketを消して`purged`へ進む。期限到達時も同じ消去とし、Platform watchdogは`purged`を確認してSessionを終了する。全ての強制終了は別のoperator権限・理由・監査で扱い、既存Gameの終了を変えない。専用ポーリングでContent本文をPlatformへ送らない。guardの実際のendpoint名/Manifest field名はPlatform repoの契約テストで確定する。
+Platformの`/control/end`はゲーム全体の強制終了であり、RONRO会議の通常のEndと別操作にする。ContentはPlatformに終了readiness guardを要求しない。Platform Hostが全体終了を選ぶとDrainやPDF受取が中断され得ることをShell/運用に明示する。Contentの成功表示は固定revisionでPDFを生成した場合に限る。Platform Sessionの最終クローズ手順は実機で確認するが、架空のランキングや`finishGame`で迂回しない。
 
-Host専用のContent Command認可には、Controller moduleの見かけの`role`を信用しない。Contentの`POST /api/session/{run}/pause|resume|end|corrections|purge`と`GET /api/session/{run}/final.pdf`は、`requestGameResource`で付くPlatform player Bearerを検証し、Platform内部のoperation-scoped認可照会で**現時点の**session/run/player参加とhost leaseを確認する。この照会は既存Session Managerのactive-player verifyとLauncherのhost player bindingをPlatform側で合成する最小追加契約であり、ContentへHost cookieや管理者tokenを渡さない。参加者には`audio-ticket`発行だけ許可。host transfer、kick、token失効、run差替え時は直ちに再認可が失敗する。display credentialはaudio/host/PDFへ使わない。内部照会はService-to-Service認証・最小応答・閉域経路とする。Platform側に同等の既存公開契約があれば重複実装しない。
+RONRO会議のPause/Resume/End/Correction/会議後PDF・handoff状態取得は、当該Platform session/runの**現在認可されたController**へ許可する。Controller moduleの表示上の`role`、slot、古いBearer、Display credentialだけでは許可しない。各HTTP操作で`requestGameResource`のPlayer BearerをSession Managerのactive-player verifyで検証し、Launcherの現在のplaying RONRO session/runと接続端点を照合する。これは端点参加資格の検査であり人物認証ではない。認可照会不能・退出/kick・run差替えはfail closedとし、待機中にrunが変わった場合も再確認する。Platform Host leaseはこれらのContent操作の条件ではない。Platform Start/全体終了のHost契約は変えない。
 
-Player音声入場だけは、現行Session Manager `POST /api/v1/sessions/{sessionID}/players/{playerID}/verify`でBearerを検証した後、Launcher `GET /launcher-api/v1/session`で**同じ**playing RONRO session/run・接続Playerを照合するContent側の境界を[PR #18](https://github.com/hakobune8/natade-coco-ronro/pull/18)で実装した。これはHost leaseの証明ではなく、ticket発行と消費時の照合コードまでである。配備環境でのAPI到達性・応答契約、WSSでの継続再検証、active source上限は未受入れ。Host用のoperation-scoped認可と終了ガードをこのPlayer確認で代用しない。
+現行Contentの`PlatformPlayerAdmission`/`RunBoundPlayerAdmission`は音声ticket用にController資格・run照合を持つが、会議Command/Status/PDFへの注入と実機契約検証は未完了。候補の`Host*Authorizer`はController操作へ置換するまでは有効化しない。認可の緩和は端点の参加資格検査の省略ではない。監査にはrunに紐づく技術的入力端点と操作を記録し、**操作した人物を同定したと主張しない**。訂正はEvent経由でGraphへ反映する。
 
-Contentの外部HTTP契約は`/games/ronro/`配下に置く（ここで`ronro`はManifestの実IDで置換）。Player BearerをURL/Local Storage/JS moduleへ露出させず、Controller moduleは`requestGameResource`からだけ呼ぶ。既存Player JWTにはrun IDやHost roleがないため、署名検証だけでは足りない。Command bodyは`command_id`（retry時に同一値）、`expected_content_revision`、必要な訂正対象だけとし、session/run/player/roleは認可済みPlatform contextから得る。重複Commandは同じ結果、revision競合は409、権限不足は403、認可照会不能は503で**状態変更しない**。Host UIのrole表示は操作可否の案内にのみ使う。訂正Commandは既存Human-origin Event境界を通し、Graphを直接書き換えない。
+Contentの外部HTTP契約は`/games/ronro/`配下に置く（ここで`ronro`はManifestの実IDで置換）。Player BearerをURL/Local Storage/JS moduleへ露出させず、Controller moduleは`requestGameResource`からだけ呼ぶ。既存Player JWTにはrun IDがないため、署名検証だけでは足りない。Command bodyは`command_id`（retry時に同一値）、`expected_content_revision`、必要な訂正対象だけとし、session/run/playerは認可済みPlatform contextと照合する。重複Commandは同じ結果、revision競合は409、参加資格なしは403、認可照会不能は503で**状態変更しない**。Endは確認UIを経た一回のCommandとし、二重押下や別端末との競合で二重Drainしない。訂正Commandは既存Human-origin Event境界を通し、Graphを直接書き換えない。
 
 | Endpoint（概念path） | Caller / response | 権限・条件 |
 | --- | --- | --- |
 | `GET /api/state` | Display: Canvas snapshot/revision、Controller:自分に必要な会議/取込/PDF状態だけ | Displayはrun-bound Display credential、Controllerはactive player。全文Transcriptを一般Controllerへ返さない |
 | `POST /api/audio-ticket` | Controller:一回限りの短命ticket | active player、Content `active`、run一致、1 playerにつき1 capture generation |
 | `WSS /audio` | Controller:最初のframeでticket、以後source別PCMとACK | ticket/Origin/lease、`paused|finalizing`ではPCM拒否 |
-| `POST /api/commands/{pause,resume,end,correct,purge}` | Host:冪等な結果＋新revision | operation別Host leaseを**毎回**照会。`purge`には受取終了/明示破棄を区別して監査 |
-| `GET /api/final.pdf` | Host:固定revisionの添付PDF | `handoff`かつPDF ready、受取期限内。HTTP成功は端末保存成功としない |
-| `GET /internal/termination-readiness` | Platform:ready/phaseのみ | Platform-to-Content認証、session/run一致。会議本文は返さない |
+| `POST /api/commands/{pause,resume,end,correct}` | 現在の参加者:冪等な結果＋新revision | 操作ごとにPlayer Bearer＋現在のsession/run/接続照合。`purge`は公開しない |
+| `GET /api/handoff-state`・`GET /api/final.pdf` | 現在の参加者:状態／固定revisionの添付PDF | `handoff`かつPDF ready、受取期限内。HTTP成功は端末保存成功としない |
 
 Displayへのsnapshot配信とController状態更新はreconnect時に**revision付きfull snapshot**を先に返し、差分はその後に適用する。古いrunの音声ticket/差分は無効。既存Display SDKのSession snapshotはPlatform状態であってRONRO Graph正本ではない。Shared ViewのJoin QRは既存Launcherの`/launcher-api/v1/session`応答に含まれる`joinUrl`をDisplay権限で取得し、現在のsession/runおよびSpot local originを照合して表示する。room/sessionの参加情報以外のCredentialを含めず、Contentが独自の参加認証を作らない。ローカルURLと端末Wi-Fiの関係は実機試験する。
 
@@ -64,7 +65,7 @@ Displayへのsnapshot配信とController状態更新はreconnect時に**revision
 
 ## 4. 最大8台のPTT音声契約
 
-各Controllerは`idle → preparing → transmitting → closing → idle`を持つ。押下というUser Gestureで`getUserMedia`、AudioWorklet、WSS/ticketを準備し、最初のPCMをserverが受理した時点でのみ「収音中」。指を離す、`pointercancel`、blur、`visibilitychange:hidden`、pagehide、権限失効、disconnect、host pause/endではMediaStream trackを停止し、送信可能leaseを解除する。再接続後に押しっぱなしと推測して自動再開しない。準備中の発話は拾われない可能性を表示し、非押下状態を「聞いている」と誤表示しない。現行GDK controller moduleのbrowser permission/CSP/AudioWorklet動作は実機契約試験が必要。
+各Controllerは`idle → preparing → transmitting → closing → idle`を持つ。押下というUser Gestureで`getUserMedia`、AudioWorklet、WSS/ticketを準備し、最初のPCMをserverが受理した時点でのみ「収音中」。指を離す、`pointercancel`、blur、`visibilitychange:hidden`、pagehide、権限失効、disconnect、会議Pause/EndではMediaStream trackを停止し、送信可能leaseを解除する。再接続後に押しっぱなしと推測して自動再開しない。準備中の発話は拾われない可能性を表示し、非押下状態を「聞いている」と誤表示しない。現行GDK controller moduleのbrowser permission/CSP/AudioWorklet動作は実機契約試験が必要。
 
 音声frameは`source_id=(session,run,player,connection_generation)`、単調`frame_seq`、PCMサンプル範囲、受信時刻を持つ。初期Remote STT adapterには既存`prototype/live_audio.py`のmono PCM16LE/24 kHz正規化を使い、Browser実際のsample rateからの変換をFrame境界で検証する。Local Providerには同じTransport契約から別のrateへ変換でき、Canonへsample rateを混ぜない。source IDは話者本人/Ownerの証明ではない。サーバーはsourceごとに順序/重複/gap/backpressureを検出し、Sourceをまたいでitemを完了扱いにしない。重なった発話は複数Evidenceとなり得る。近接端末で同じ発話を二重収音しても、検証できない類似度だけでEvidenceを消さない。複数sourceのFinalは「発話の正確な全順序」を捏造せず、受信時刻・source・turn IDを持つ決定的なmerge順にEventへ受け渡し、同時発話は重なりとして診断する。意図的Pauseの無音はEvidence欠落としない。意図しない切断でPCM欠落/未確定音声があればsource別のgap intervalを記録する。Queueが溢れた場合は明示拒否・gap記録し、黙ってdropしない。
 
@@ -80,9 +81,9 @@ Provider非依存の初期契約は`prototype/source_stt.py`（配布時は`ronr
 
 Contentはrun単位のEvent Store/WALをバックアップ対象外のSpot tmpfs上に置き、Raw Audioは揮発ring bufferのみ。Graph/CanvasはEventから再生成し、配置metadataは非Canonical。process再起動時はWALからReplayし、未確定PCM/sourceのgapを付ける。Pod消滅でtmpfsが失われた場合は復元保証せず、Content失敗として見せる。Meeting Recordの`prepare_final_record`/`render_final_pdf`をCore package側の純粋関数として抽出するが、Spot側の認証/PDF受渡し/TTLは新Contentで実装する。PDFには固定revision・Candidate/Confirmed・Open/Action・分かる範囲の欠落時刻を含める。会議中CanvasとFinal Canvasは同じProjection/座標を使う。Cloud-demoではSpot→外部STT/Analyzerへ会議内容が送信されることを明示し、端末・Content・ProviderのログへRaw Audioや全文を記録しない。
 
-Host ControllerのPDF応答は`Cache-Control: no-store`、添付filename、Content-Type、Content-Security-Policy、`X-Content-Type-Options`を定め、URLにBearerを置かない。Hostが端末内保存を確認してから「受取終了」を選ぶ。HTTP 200だけで保存成功とはしない。期限後・別run・非Hostの取得は拒否。削除はtmpfsのrunディレクトリ、in-memory cache、ticket、WAL、生成PDFを対象とし、失敗は本文なしの診断値を残す。Operatorによる次のSession起動時にも旧runの残存を検査する。これは暗号学的な端末側PDF回収やProvider側の削除保証ではない。
+参加者ControllerのPDF応答は`Cache-Control: no-store`、添付filename、Content-Type、Content-Security-Policy、`X-Content-Type-Options`を定め、URLにBearerを置かない。各自が端末内保存を確認できるようにし、HTTP 200だけで保存成功とはしない。期限後・別run・参加資格喪失後の取得は拒否。**取得回数や一人の保存完了に関係なく**PDF readyから30分（暫定）の期限到達時にのみ、tmpfsのrunディレクトリ、in-memory cache、ticket、WAL、生成PDFを削除する。失敗は本文なしの診断値を残し、次のSession起動時にも旧runの残存を検査する。これは端末側PDF回収やProvider側の削除保証ではない。
 
-Controller moduleでは`requestGameResource`のPDF `Response`をBlobとして端末へ渡す。Blob URLの生成/クリック/破棄、iOS Safariの保存導線、CSPと大きなPDFによるメモリ上限を実機試験する。Blob URLを長期保持しない。保存の最終確認はOS側で利用者が行う。「受取終了」後は再ダウンロード不能であることを明示する。
+Controller moduleでは`requestGameResource`のPDF `Response`をBlobとして端末へ渡す。Blob URLの生成/クリック/破棄、iOS Safariの保存導線、CSPと大きなPDFによるメモリ上限を実機試験する。Blob URLを長期保持しない。保存の最終確認はOS側で利用者が行う。全員の画面に受取期限を示し、期限後は再ダウンロード不能と明示する。「受取終了」「記録を削除する」ボタンは設けない。
 
 ## 6. 実装前に証明する契約ゲート
 
@@ -90,7 +91,7 @@ Controller moduleでは`requestGameResource`のPDF `Response`をBlobとして端
 
 1. Controller moduleのiOS Safari/Android Chromeでuser gesture→microphone/AudioWorklet、release/lock/background時のtrack停止、同一origin WSS、最初のPCMまでの遅延を実測する。長押し負担はHuman Reviewを別に要する。
 2. 配備PlatformでRuntime 1.1以上の`while-playing`/`keep-alive`、8枠、2時間超、Host transfer、Content HTTP/WSS routingを確認する。作業checkoutを配備済み契約とみなさない。
-3. Platform ownerがopt-in終了ガードとoperation-scoped host認可の形・監査をレビューする。これなしにHost End/PDFを製品機能として公開しない。
+3. Content側でPlayer Bearer・同一session/run・現時点の接続を各Command/Status/PDFに対して照合し、kick/期限切れ/別run/照会不能ではfail closedになることを実機で確認する。参加者Endの二段階確認、競合の冪等性、Human-origin監査、全員のPDF受取窓、期限以外で削除不可も試験する。Platform全体終了は別の強制操作として失敗表示を確認する。
 4. PDF生成器が大きなGraph・日本語・長文・欠落警告を収め、PDFが受取端末へ届くことを確認する。既存rendererは再利用候補であり、大規模会議の表示品質保証ではない。
 5. Cloud-demoの限定Egressと、将来のlocal-secureに必要なDNS/IPv6/hostNetwork/Sidecar/端末経路の拒否試験を別々に通す。Cloud-demoの成功から機密性を推論しない。
 
