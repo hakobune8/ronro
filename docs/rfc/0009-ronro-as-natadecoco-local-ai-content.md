@@ -9,6 +9,8 @@
 
 実装判断を残さないための接続・状態・音声・PDFの詳細は[Spot Content契約](../architecture/natadecoco-content-contract.md)、Spotらしい入口・会議中UI・専用artworkは[UI / Artworkブリーフ](../product/natadecoco-ronro-ux-artwork-brief.md)、PR単位の依存順・試験・ゲートは[実装計画](../implementation/natadecoco-content-implementation-plan.md)に記す。段階実装の着手は承認されたが、Platform ownerの契約確認・Spot実機受入れ・機密会議利用・配備は別ゲートである。
 
+> **後続判断（2026-10-09）:** このRFCのHost専用の会議操作・PDF受取、手動の「受取終了／削除」、Platform終了ガード必須という初期案は、現在のContent候補の操作契約ではない。現在は参加中ControllerがRONRO内の中断・再開・訂正・終了・PDF受取を行い、早期削除は提供せず期限で自動消去する。PlatformのGame終了は別操作であり、Drain/PDF受取を妨げるリスクは残る。詳細と実機未受入れの範囲は[現状整理](../architecture/spot-content-current-status.md)と[Contentの参加Controller契約](https://github.com/hakobune8/natade-coco-ronro/blob/v0.10.0-rc.1/docs/participant-operations-contract.md)を優先して読む。本文は当時の設計経緯として保持する。
+
 2026-10-07 の実装順判断: [独立Content repository](https://github.com/hakobune8/natade-coco-ronro)の合成データ骨組みを先行し、`natade-coco-edge` の変更を保留する。この順序変更は、後述のHost認可・PDF受取前の終了保護が現行Platformだけで成立するという意味ではない。成立を実証できるまで実音声を伴う配備・機密会議向け宣言をしない。
 
 ## 1. Contextと調査基準

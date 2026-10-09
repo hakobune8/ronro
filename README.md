@@ -4,11 +4,13 @@
 
 ![現在の論点図：課題から案と決定候補へ展開したSemantic Canvas](docs/pilot/assets/ronro-semantic-canvas-stage-2.png)
 
-*現行のSemantic Canvasを制御された合成会議で表示した例です。実会議の記録や、AIによる関係付けの正確さを示すものではありません。*
+*RONRO CoreのSemantic Canvasを制御された合成会議で表示した例です。Spot実機の画面や、実会議におけるAIの関係付け精度を示すものではありません。*
 
 論路（ろんろ / RONRO）は、会議中の議論を「論点図」として整理し、参加者が「今、何を議論しているか」「何が決まりつつあるか」「何がまだ残っているか」を共有するためのオープンソース・プロトタイプです。
 
 会議後に読むAI議事録ではなく、会議中に見るための共有画面を目指しています。
+
+このリポジトリは **RONRO Core / Research** の正本です。natadeCOCO Spot向けの製品Contentは別リポジトリの[natade-coco-ronro](https://github.com/hakobune8/natade-coco-ronro)で開発しています。CoreとContentの役割、現在の検証状況は[Spot Contentの現状](docs/architecture/spot-content-current-status.md)を参照してください。Spotへの移行は進行中ですが、このREADMEのローカル起動手順は従来の単独Webプロトタイプ用であり、Spot版の起動手順ではありません。
 
 ## 何を作っているか
 
@@ -16,7 +18,7 @@
 
 ![会議終了時に同じCanvasを引いて全体を見た画面](docs/pilot/assets/ronro-semantic-canvas-final.png)
 
-*こちらも制御された合成会議の画面例です。離れた論点を無理に結ばず、会議全体を見渡します。*
+*こちらもCoreの制御された合成会議の画面例です。Spot実機での表示確認を意味しません。*
 
 - 今話していること
 - 出てきた考えや選択肢
@@ -45,9 +47,9 @@ Discussion Graph
 論点図（Shared View）
 ```
 
-音声入力はブラウザのAudioWorkletからバックエンドへ送り、バックエンドがOpenAI Realtime transcriptionとAnalyzerを呼び出します。確定した発話だけが既存のイベント・グラフ処理へ入り、共有画面へ反映されます。
+下記の単独Webプロトタイプでは、ブラウザのAudioWorkletからバックエンドへ音声を送り、OpenAI Realtime transcriptionとAnalyzerを呼び出します。確定した発話だけがイベント・グラフ処理へ入り、共有画面へ反映されます。Spot版は同じCoreの意味契約を使い、GDK/Platformとの接続やスマホマイクを別リポジトリで実装します。
 
-## 現在実装されているもの
+## Coreの単独Webプロトタイプで実装されているもの
 
 - ブラウザのマイク入力とPCM変換
 - ローカルWebSocketによる音声転送
@@ -61,9 +63,9 @@ Discussion Graph
 - Session DrainとEvaluation Harness
 - 1920×1080を対象とした読み取り専用の論点図共有画面
 
-現在は **prototype / live pilot準備段階** です。Production運用、複数ルーム、永続的な業務データ管理を目的としたものではありません。会議後の記録を正式な成果物として提供する機能は、現時点の実装済み機能に含めていません。
+この一覧は単独Webプロトタイプのものです。**Spot版の実機受入れや機密会議への適合を示す一覧ではありません。** Spot版にはCloud-demo候補とPDF受取経路がありますが、実Providerと実機の検証が残っています。単独WebプロトタイプをProduction運用、複数ルーム、永続的な業務データ管理の実装済みサービスとは扱いません。
 
-## ローカルで試す
+## Coreの単独Webプロトタイプをローカルで試す
 
 ### 必要なもの
 
@@ -101,6 +103,8 @@ cp .env.example .env
 ## ドキュメント
 
 - [ドキュメント案内（現行資料と履歴資料）](docs/README.md)
+- [Spot Contentとの役割分担と現在の検証状況](docs/architecture/spot-content-current-status.md)
+- [RFC-0009: natadeCOCO Contentへの移行](docs/rfc/0009-ronro-as-natadecoco-local-ai-content.md)
 - [MVP要件（改名前の名称を保持）](docs/requirements/discussion-map-ai-facilitator-mvp.md)
 - [Architecture Summary](docs/architecture/mvp-architecture-summary.md)
 - [論路のNaming Decision](docs/product/ronro-naming.md)
@@ -114,6 +118,8 @@ cp .env.example .env
 
 ## 制約とデータの扱い
 
+以下の外部API・録音の説明は、このリポジトリの**単独Web Pilot**に適用されます。Spot ContentのCloud-demoにも外部Provider送信がありますが、Pilot録音の保存ルールをSpotへ流用しません。Spot版の現在の扱いは[別資料](docs/architecture/spot-content-current-status.md)を参照してください。
+
 - AIの整理結果には誤りが含まれる可能性があります。
 - 決定候補は自動的に確定されません。最終判断は人が行います。
 - マイク音声はSpeech-to-Textと議論整理のため外部APIへ送信されます。
@@ -122,7 +128,7 @@ cp .env.example .env
 
 ## 今後の候補
 
-Pilotで得た知見をもとに、長時間会議での扱い、より堅牢なAnalyzer、配備・認証・永続化の見直しを検討します。これらは現時点でProduction機能として約束するものではありません。
+Pilotで得た知見をもとに、長時間会議での扱いとAnalyzerを改善します。Spot Contentは独立リポジトリで段階的に検証し、Local STT/Analyzerと機密会議向けネットワーク隔離は後続の課題とします。これらは現時点でProduction機能として約束するものではありません。
 
 ## Contributing
 

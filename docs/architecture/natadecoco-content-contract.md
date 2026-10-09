@@ -10,6 +10,8 @@
 
 > 実装順の更新（2026-10-07）: 本文のPlatform認可/終了ガードは実音声・PDF受取を安全に公開するための設計要件であり、現在の実装済み契約ではない。利用者判断でPlatform変更を保留し、[独立Contentの合成データ骨組み](../implementation/natadecoco-content-implementation-plan.md)を先行する。RONRO ContentにHost権限や終了保護を自己申告させて、この不足を隠さない。
 
+> **現行候補との差分（2026-10-09）:** 下記のHost専用Command/PDF、手動purge、Platform終了ガード必須という案は後続判断で置き換わった。RONRO内の操作は現在のrunへ参加を認められたControllerを毎回検証し、PDFは受取期限まで各参加Controllerに渡す。早期削除操作はなく、期限到達で消去する。Platform全体終了が会議Drain/PDFを妨げ得る点は解消済みと主張しない。実装と残ゲートは[現状整理](spot-content-current-status.md)および[Contentの参加Controller契約](https://github.com/hakobune8/natade-coco-ronro/blob/v0.10.0-rc.1/docs/participant-operations-contract.md)を優先し、以下の初期設計をそのまま実装指示として使わない。
+
 ## 1. 調査で確定した境界
 
 RONROの`prototype/service_final_record.py`には`prepare_final_record`と`render_final_pdf`が既にある。受理済みEventのReplay、Graph/Canvas revision、欠落区間を検査してPDFを作り、Raw Audioや全文TranscriptをPDFへ載せない。再利用候補はこの純粋な生成境界であり、`service_meeting_http.py`のアカウント認証・Postgres保存・7日削除はSpotへ移さない。現行`service_audio_transport.py`は単一owner/単一capture leaseを前提とするため、8台の音声入口をそのまま有効化してはならない。Event/Materializer、Human ConfirmationとSemantic Canvasの契約は維持する。
