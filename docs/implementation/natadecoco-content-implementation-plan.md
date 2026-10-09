@@ -8,11 +8,11 @@
 
 ## 2026-10-09 契約改訂と次の実装順（以下の旧PR3/4計画に優先）
 
-Platform HostはSession開始とゲーム全体の強制終了を担う。RONRO会議のPause/Resume/End/Correctionとhandoff状態・PDF取得は、同一session/runに**その時点で認証・接続している参加者**なら行える。各操作でPlayer Bearer、Session Manager active-player verify、Launcherの現在のplaying run/接続状態を照合し、UI roleやslotを認可根拠にしない。ContentのEndは全員の音声取込を止めるため二段階確認、Human-origin監査、冪等Command/revision競合処理を必須とする。全体終了は別の強制操作で、Drain/PDF受取の保証はない。
+Platform HostはSession開始とゲーム全体の強制終了を担う。RONRO会議のPause/Resume/End/Correctionとhandoff状態・PDF取得は、同一session/runに**その時点で認可・接続されているController**から行える。スマホControllerは共有マイクにもなり得る入力端点であり、Player照合は人物の本人確認・発話者証明・Hostの主体性を示さない。各操作でPlayer Bearer、Session Manager active-player verify、Launcherの現在のplaying run/接続状態を照合し、UI roleやslotを認可根拠にしない。ContentのEndは全員の音声取込を止めるため二段階確認、Human-origin監査、冪等Command/revision競合処理を必須とする。監査は技術的Controller sourceを残し、操作した人物を同定したとは主張しない。全体終了は別の強制操作で、Drain/PDF受取の保証はない。
 
 PDFはreadyから暫定30分、参加者それぞれが取得/再試行可能。一人の取得では期限を縮めない。**参加者の手動purge/「受取終了」を廃止し、期限到達時のみ消去**する。Content `Host*`候補・`/purge`・Host専用UI/テストをそのまま本番注入しない。Platform側のoperation別Host認可案[#857](https://github.com/SSLHQ/natade-coco-edge/pull/857)と終了ガード案[#858](https://github.com/SSLHQ/natade-coco-edge/pull/858)は、この改訂の初期Contentに必要な依存ではない。旧PR3/4の説明は当時の計画履歴として残すが、実装順・受入れ条件としては適用しない。これらのPRをマージ/配備する判断は別途行う。
 
-1. `natade-coco-ronro` / backend: `PlatformPlayerAdmission`/`RunBoundPlayerAdmission`をCommand/Status/PDF authorizerへ適用する。既存session/runの正確な照合、失効・kick・別run・Platform照会不能でfail closed、認可待ち中のrun変更、認可済みHuman-origin監査、End/Correction競合を合成試験する。CoreのDecision/Owner/Due/Replay契約は変えない。完了条件は、Host役割の有無と無関係に現在参加者だけが操作でき、非参加者・古いrunが一切変更できないこと。
+1. `natade-coco-ronro` / backend: `PlatformPlayerAdmission`/`RunBoundPlayerAdmission`をCommand/Status/PDF authorizerへ適用する。既存session/runの正確な照合、失効・kick・別run・Platform照会不能でfail closed、認可待ち中のrun変更、端点source付きHuman-origin監査、End/Correction競合を合成試験する。1台のControllerを複数人で使う場合も含め、source IDから発話者や操作人物を推定しない。CoreのDecision/Owner/Due/Replay契約は変えない。完了条件は、Host役割の有無と無関係に現在接続されたControllerだけが操作でき、外部端点・古いrunが一切変更できないこと。
 2. `natade-coco-ronro` / backend・Controller: 手動purge APIと「受取終了/記録削除」UIを除き、handoff/failedの既存期限タイマーだけを削除経路にする。全参加者へのPDF表示、期限・失敗表示、PDF exportの説明、Endの二段階確認を整える。1/2/8人の順不同ダウンロード、未取得者、二重End、期限境界、失敗再試行、期限後の復元不可を試験する。完了条件は他人の取得/保存失敗が窓を変えず、期限前に誰も削除できないこと。
 3. `natade-coco-ronro` / production composition: 上記認可と既存音声・Analyzer・Journal・PDF候補を本番entrypointへ明示的に注入する。既存503閉鎖経路を段階的に開き、Cloud-demo/非機密表示、実Provider・tmpfs・secret・Fleet契約を検証する。完了条件は1/4/8台、途中参加、休憩/再開、訂正、End/Drain、同じPDFの各自取得、期限消去までの実機E2Eと旧Game非影響。
 4. Platform/GDKは原則無変更。実機で`requestGameResource`/WSS・`while-playing`/`keep-alive`・全体終了との境界が既存契約では成立しない場合に限り、証拠を添えて最小変更を別途判断する。全体終了後のContentデータ/PDF喪失を正常完了と表示しない。

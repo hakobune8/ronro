@@ -13,6 +13,8 @@
 
 **2026-10-09 の新しい利用者判断（旧Host専用案を上書き）**: PlatformのHostだけが既存ShellでSessionを開始・全体終了する。RONRO Content内の会議の中断・再開・終了・論点の訂正、および終了直後のPDF取得は、同じPlatform session/runに現時点で認証・接続している参加者なら行える。全体終了は会議Endの代用品ではなく強制終了であり、Drain/PDF受取を保証しない。全参加者のPDF受取窓はPDF readyから暫定30分で、**期限到達時のみ**Spot内記録を削除する。誰にも手動削除・受取終了による早期消去を許さない。以前の本文・表にあるHost限定、operation別Host lease必須、opt-in終了ガード必須、受取終了/明示破棄、非Host PDF拒否は歴史的な案であり、現在の実装条件ではない。最新版の詳細契約と移行順は[Spot Content契約](../architecture/natadecoco-content-contract.md)と[実装計画](../implementation/natadecoco-content-implementation-plan.md)を正とする。既存候補コードが更新・本番有効化済みという意味ではない。
 
+**同日の補足 — Controller≠人**: スマホControllerは会議室のマイク/入力端点であり、1台を複数人で共有できる。PlatformのPlayer照合は「その端点が現在のsession/runに参加できる」ことを示すだけで、発話者、操作した人、進行役、Host本人を証明しない。上の「認証済み参加者」は認可対象としては**現在認可されたController**と読み替える。RONROは端点を人物IDやAction Ownerへ変換せず、Human-origin Eventも「人の入力」とAI提案の区別であり、実行者の本人確認ではない。PDFも端点への取得許可であって、各出席者への配布完了を保証しない。
+
 ## 1. Contextと調査基準
 
 RONROは会議中の論点図を作る研究・Pilot用プロトタイプである。現行のライブ経路はブラウザAudioWorkletのPCMをRONROのPython WebSocketへ送り、OpenAI Realtime transcriptionでFinal Transcriptを得て、OpenAI互換Analyzerの候補Eventを検証・受理し、Event Store／MaterializerからGraphとSemantic Canvasを作る（[README](../../README.md)、[Pilot設定](../../deploy/kubernetes/base/configmap.yaml)、[Live STT](../../prototype/live_stt.py)、[Analyzer](../../prototype/real_analyzer.py)）。現行Pilotは音声を外部APIへ送る。録音は同意条件のあるPilot評価用の例外で、機密会議向け既定動作ではない。
