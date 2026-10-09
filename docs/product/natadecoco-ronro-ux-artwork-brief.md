@@ -2,9 +2,11 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| Status | RFC-0009に基づく制作仕様。画像・UI本体は未制作、実機Human Review前 |
+| Status | RFC-0009に基づく制作・受入れブリーフ。Content候補にはLauncher/Lobby artworkと画面があるが、Spot実機Human Review前 |
 | Updated | 2026-10-07 |
 | Related | [RFC-0009](../rfc/0009-ronro-as-natadecoco-local-ai-content.md)、[実装計画](../implementation/natadecoco-content-implementation-plan.md)、[名称判断](ronro-naming.md) |
+
+制作物の実装先は[Spot Content](https://github.com/hakobune8/natade-coco-ronro)であり、この文書は過去の「未制作」を現在の状態として案内しない。完成判定には、[現状整理](../architecture/spot-content-current-status.md)にある実機表示・操作試験がなお必要。
 
 ## 目的と画面ごとの役割
 

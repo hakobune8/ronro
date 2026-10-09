@@ -2,9 +2,11 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| Status | In progress — Core/Contentの`develop`で合成Canvas、Core Event/Replay/PDF、source別STT/Analyzer、最大8音声sourceのローカル契約試験、Host EndとPDF取得のopt-in Content境界まで統合。実機は静的image起動のみ確認。Platform変更なしのため実音声・Host操作・PDF受取の実機受入れは未達 |
+| Status | In progress — Core/Contentの合成テストとopt-in Cloud-demo候補は統合済み。RC imageはCI発行済み。Fleet PRはDraftで安全ゲート未通過、実音声・PDFのSpot実機受入れは未達 |
 | Updated | 2026-10-09 |
 | Source | [RFC-0009](../rfc/0009-ronro-as-natadecoco-local-ai-content.md)、[接続・状態・音声・PDFの詳細契約](../architecture/natadecoco-content-contract.md)、[UI / Artworkブリーフ](../product/natadecoco-ronro-ux-artwork-brief.md) |
+
+> **計画の読み方（2026-10-09）:** 下のPR番号順・Host専用操作・手動purge・Platform終了ガード必須は策定時の計画であり、現行候補への未修正To-doではない。[Content PR #81](https://github.com/hakobune8/natade-coco-ronro/pull/81)で、参加中ControllerによるRONRO内操作と期限消去をopt-in Cloud-demoへ統合した。CI発行済みのRCと[DraftのFleet PR #859](https://github.com/SSLHQ/natade-coco-edge/pull/859)は別の受入れ段階である。PR #859は外向き通信とPlatformの既存egress禁止ゲートが衝突しており未配布。現行の責務・未達条件は[現状整理](../architecture/spot-content-current-status.md)を参照し、下の履歴表を現在のマージ順序として使わない。
 
 ## 2026-10-09 現在の実装・受入れ境界
 
