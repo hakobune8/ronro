@@ -2,9 +2,18 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| Status | In progress — Core/Contentの`develop`へbaseline・Core wheel・合成Canvas・Core-backed Event adapter・Python Content runtime・RONRO Controller module・Player音声入場境界を統合。`main`向け統合PRはDraft。Platform変更は保留。配備・実音声は未着手 |
-| Updated | 2026-10-07 |
+| Status | In progress — Core/Contentの`develop`で合成Canvas、Core Event/Replay/PDF、source別STT/Analyzer、最大8音声sourceのローカル契約試験まで統合。実機は静的image起動のみ確認。Platform変更なしのため実音声・Host操作・PDF受取の実機受入れは未達 |
+| Updated | 2026-10-09 |
 | Source | [RFC-0009](../rfc/0009-ronro-as-natadecoco-local-ai-content.md)、[接続・状態・音声・PDFの詳細契約](../architecture/natadecoco-content-contract.md)、[UI / Artworkブリーフ](../product/natadecoco-ronro-ux-artwork-brief.md) |
+
+## 2026-10-09 現在の実装・受入れ境界
+
+以下は本計画の2026-10-07時点の作業順より新しい実績であり、未完了のPR8–10aを完了扱いするものではない。
+
+- Content `develop`（`fa667ea`）には、Player照合、一回限りの音声Ticket、同一PortのWSS/PCM受信、最大8 source、source別STT Final/Drain、同一Analyzer推論境界、Core-backed Journal/Canvas/PDF、Displayの読取候補がある。ただし本番Entry Pointはこれらを注入せず、音声・状態Routeは503、`game.yaml`の`audio`はfalseのまま。Host操作・PDF受取の公開Routeはない。
+- [Content PR #58](https://github.com/hakobune8/natade-coco-ronro/pull/58)で休憩・再開をまたぐ古いTicket/音声接続の再利用を防ぎ、強制中断したsourceを完全記録と偽らない境界を追加した。[Content PR #59](https://github.com/hakobune8/natade-coco-ronro/pull/59)で合成8 sourceをWSS→STT Final→Analyzer→Canvas→End/Drain→PDF→Replayまで通した。これは実スマホ8台・2時間負荷・Host権限の検証ではない。
+- `tamarind-22`には、`8aab2ac`を基にしたamd64の**ローカル検証imageだけ**を手動取込し、一時Podのhealth/static Display/Controllerを確認した。[Contentの検証記録](https://github.com/hakobune8/natade-coco-ronro/blob/develop/docs/spot-device-rc1-checklist.md)参照。Fleet/Catalog/Launcher配布、現行Content commitの実機起動、物理画面・マイク・実会議は未確認。image cacheは配布の永続性を証明しない。
+- 利用者判断により、現在はHost認可とPlatform終了ガードのための`natade-coco-edge`変更を行わず**Contentのみ**進める。現行Platform契約ではoperation別Host権限とDrain/PDF受取前の終了保護をContentへ保証できない。Player Bearerや見かけのUI roleで代替しない。この選択の間、実音声を伴うSpot受入れと本計画の「初期実装完了」は達成と判定できない。次の判断点は、この保証を満たす正式な契約を得るか、Host/PDF UXと受入れ条件を明示的に再設計するかである。
 
 ## 実装順序とブランチ境界
 
