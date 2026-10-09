@@ -2,22 +2,35 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| Status | In progress — Core/Contentの`develop`で合成Canvas、Core Event/Replay/PDF、source別STT/Analyzer、最大8音声sourceのローカル契約試験、Host EndとPDF取得のopt-in Content境界まで統合。実機は静的image起動のみ確認。Platform変更なしのため実音声・Host操作・PDF受取の実機受入れは未達 |
+| Status | In progress — Core/Contentの候補境界は合成試験済み。2026-10-09にContent操作を参加者へ開く契約へ改訂。本番経路への認可注入・実機受入れは未達 |
 | Updated | 2026-10-09 |
 | Source | [RFC-0009](../rfc/0009-ronro-as-natadecoco-local-ai-content.md)、[接続・状態・音声・PDFの詳細契約](../architecture/natadecoco-content-contract.md)、[UI / Artworkブリーフ](../product/natadecoco-ronro-ux-artwork-brief.md) |
 
-## 2026-10-09 現在の実装・受入れ境界
+## 2026-10-09 契約改訂と次の実装順（以下の旧PR3/4計画に優先）
 
-以下は本計画の2026-10-07時点の作業順より新しい実績であり、未完了のPR8–10aを完了扱いするものではない。
+Platform HostはSession開始とゲーム全体の強制終了を担う。RONRO会議のPause/Resume/End/Correctionとhandoff状態・PDF取得は、同一session/runに**その時点で認証・接続している参加者**なら行える。各操作でPlayer Bearer、Session Manager active-player verify、Launcherの現在のplaying run/接続状態を照合し、UI roleやslotを認可根拠にしない。ContentのEndは全員の音声取込を止めるため二段階確認、Human-origin監査、冪等Command/revision競合処理を必須とする。全体終了は別の強制操作で、Drain/PDF受取の保証はない。
+
+PDFはreadyから暫定30分、参加者それぞれが取得/再試行可能。一人の取得では期限を縮めない。**参加者の手動purge/「受取終了」を廃止し、期限到達時のみ消去**する。Content `Host*`候補・`/purge`・Host専用UI/テストをそのまま本番注入しない。Platform側のoperation別Host認可案[#857](https://github.com/SSLHQ/natade-coco-edge/pull/857)と終了ガード案[#858](https://github.com/SSLHQ/natade-coco-edge/pull/858)は、この改訂の初期Contentに必要な依存ではない。旧PR3/4の説明は当時の計画履歴として残すが、実装順・受入れ条件としては適用しない。これらのPRをマージ/配備する判断は別途行う。
+
+1. `natade-coco-ronro` / backend: `PlatformPlayerAdmission`/`RunBoundPlayerAdmission`をCommand/Status/PDF authorizerへ適用する。既存session/runの正確な照合、失効・kick・別run・Platform照会不能でfail closed、認可待ち中のrun変更、認可済みHuman-origin監査、End/Correction競合を合成試験する。CoreのDecision/Owner/Due/Replay契約は変えない。完了条件は、Host役割の有無と無関係に現在参加者だけが操作でき、非参加者・古いrunが一切変更できないこと。
+2. `natade-coco-ronro` / backend・Controller: 手動purge APIと「受取終了/記録削除」UIを除き、handoff/failedの既存期限タイマーだけを削除経路にする。全参加者へのPDF表示、期限・失敗表示、PDF exportの説明、Endの二段階確認を整える。1/2/8人の順不同ダウンロード、未取得者、二重End、期限境界、失敗再試行、期限後の復元不可を試験する。完了条件は他人の取得/保存失敗が窓を変えず、期限前に誰も削除できないこと。
+3. `natade-coco-ronro` / production composition: 上記認可と既存音声・Analyzer・Journal・PDF候補を本番entrypointへ明示的に注入する。既存503閉鎖経路を段階的に開き、Cloud-demo/非機密表示、実Provider・tmpfs・secret・Fleet契約を検証する。完了条件は1/4/8台、途中参加、休憩/再開、訂正、End/Drain、同じPDFの各自取得、期限消去までの実機E2Eと旧Game非影響。
+4. Platform/GDKは原則無変更。実機で`requestGameResource`/WSS・`while-playing`/`keep-alive`・全体終了との境界が既存契約では成立しない場合に限り、証拠を添えて最小変更を別途判断する。全体終了後のContentデータ/PDF喪失を正常完了と表示しない。
+
+この改訂は**設計と実装計画**であり、現在のContent候補が操作できる、またはSpot実機で認証済みという主張ではない。
+
+## 2026-10-07〜09 の実装・受入れ履歴（改訂前）
+
+以下は本計画の2026-10-07時点の作業順より新しい実績だが、上記の2026-10-09契約改訂**前**の判断を含む。Host専用・手動purge・Platform guardに関する行は現行要件として読まない。未完了のPR8–10aを完了扱いするものでもない。
 
 - Content `develop`（`d1fb111`）には、Player照合、一回限りの音声Ticket、同一PortのWSS/PCM受信、最大8 source、source別STT Final/Drain、同一Analyzer推論境界、Core-backed Journal/Canvas/PDF、Displayの読取候補がある。[Content PR #60](https://github.com/hakobune8/natade-coco-ronro/pull/60)でHost認可を注入するPDF取得候補、[Content PR #61](https://github.com/hakobune8/natade-coco-ronro/pull/61)でHost End/DrainのHTTP候補を統合した。後者は同一Commandの再試行、Host切断後の背景Drain、認可待ち中のRun閉鎖を合成試験済み。ただし本番Entry Pointはこれらを注入せず、音声・状態・End・PDF Routeは503、`game.yaml`の`audio`はfalseのまま。実PlatformのHost権限・終了保護・スマホ保存確認・受取後消去は未実装。
 - [Content PR #58](https://github.com/hakobune8/natade-coco-ronro/pull/58)で休憩・再開をまたぐ古いTicket/音声接続の再利用を防ぎ、強制中断したsourceを完全記録と偽らない境界を追加した。[Content PR #59](https://github.com/hakobune8/natade-coco-ronro/pull/59)で合成8 sourceをWSS→STT Final→Analyzer→Canvas→End/Drain→PDF→Replayまで通した。これは実スマホ8台・2時間負荷・Host権限の検証ではない。
 - `tamarind-22`には、`8aab2ac`を基にしたamd64の**ローカル検証imageだけ**を手動取込し、一時Podのhealth/static Display/Controllerを確認した。[Contentの検証記録](https://github.com/hakobune8/natade-coco-ronro/blob/develop/docs/spot-device-rc1-checklist.md)参照。Fleet/Catalog/Launcher配布、現行Content commitの実機起動、物理画面・マイク・実会議は未確認。image cacheは配布の永続性を証明しない。
 - 利用者判断により、現在はHost認可とPlatform終了ガードのための`natade-coco-edge`変更を行わず**Contentのみ**進める。現行Platform契約ではoperation別Host権限とDrain/PDF受取前の終了保護をContentへ保証できない。Player Bearerや見かけのUI roleで代替しない。この選択の間、実音声を伴うSpot受入れと本計画の「初期実装完了」は達成と判定できない。次の判断点は、この保証を満たす正式な契約を得るか、Host/PDF UXと受入れ条件を明示的に再設計するかである。
 
-## 実装順序とブランチ境界
+## 旧実装順序とブランチ境界（PR3/4、Host専用操作、手動purgeは失効）
 
-各行は原則1 PR。新Content repo名の第一候補は`hakobune8/natade-coco-ronro`。GDK/Platformへの変更は既存Gameの後方互換テストを通してからContentへ取り込む。PlatformとContentを未検証のまま同時配備しない。Coreの正本は`ronro`だけで、依存はContent→versioned Core/GDKの一方向。現行Pilot/Account Serviceや既存評価Artifactを暗黙に移行・削除しない。
+以下の表は当時の作業履歴と未完了項目を追跡するために残す。**着手順と権限・削除の受入れ条件は冒頭の2026-10-09改訂節を優先する。** 新Content repoは`hakobune8/natade-coco-ronro`。GDK/Platformへの変更は既存Gameの後方互換テストを通してからContentへ取り込む。PlatformとContentを未検証のまま同時配備しない。Coreの正本は`ronro`だけで、依存はContent→versioned Core/GDKの一方向。現行Pilot/Account Serviceや既存評価Artifactを暗黙に移行・削除しない。
 
 ### 2026-10-07 実装順の変更: Contentを先行
 

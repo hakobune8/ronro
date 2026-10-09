@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 | --- | --- |
 | Status | Working architecture / 段階実装に着手。Platform契約・配備・機密会議利用は未承認 |
-| Last Updated | 2026-10-07 |
+| Last Updated | 2026-10-09 |
 | Scope | RONRO CoreとSpot向けContentの分離、AI Provider境界、音声・データ境界、GDK適合、段階的移行 |
 | Inputs | [MVP要件](../requirements/discussion-map-ai-facilitator-mvp.md)、[Architecture Baseline](../architecture/mvp-architecture-summary.md)、[RFC-0001](0001-discussion-model.md)〜[RFC-0008](0008-account-based-service-architecture.md) |
 
@@ -11,11 +11,13 @@
 
 2026-10-07 の実装順判断: [独立Content repository](https://github.com/hakobune8/natade-coco-ronro)の合成データ骨組みを先行し、`natade-coco-edge` の変更を保留する。この順序変更は、後述のHost認可・PDF受取前の終了保護が現行Platformだけで成立するという意味ではない。成立を実証できるまで実音声を伴う配備・機密会議向け宣言をしない。
 
+**2026-10-09 の新しい利用者判断（旧Host専用案を上書き）**: PlatformのHostだけが既存ShellでSessionを開始・全体終了する。RONRO Content内の会議の中断・再開・終了・論点の訂正、および終了直後のPDF取得は、同じPlatform session/runに現時点で認証・接続している参加者なら行える。全体終了は会議Endの代用品ではなく強制終了であり、Drain/PDF受取を保証しない。全参加者のPDF受取窓はPDF readyから暫定30分で、**期限到達時のみ**Spot内記録を削除する。誰にも手動削除・受取終了による早期消去を許さない。以前の本文・表にあるHost限定、operation別Host lease必須、opt-in終了ガード必須、受取終了/明示破棄、非Host PDF拒否は歴史的な案であり、現在の実装条件ではない。最新版の詳細契約と移行順は[Spot Content契約](../architecture/natadecoco-content-contract.md)と[実装計画](../implementation/natadecoco-content-implementation-plan.md)を正とする。既存候補コードが更新・本番有効化済みという意味ではない。
+
 ## 1. Contextと調査基準
 
 RONROは会議中の論点図を作る研究・Pilot用プロトタイプである。現行のライブ経路はブラウザAudioWorkletのPCMをRONROのPython WebSocketへ送り、OpenAI Realtime transcriptionでFinal Transcriptを得て、OpenAI互換Analyzerの候補Eventを検証・受理し、Event Store／MaterializerからGraphとSemantic Canvasを作る（[README](../../README.md)、[Pilot設定](../../deploy/kubernetes/base/configmap.yaml)、[Live STT](../../prototype/live_stt.py)、[Analyzer](../../prototype/real_analyzer.py)）。現行Pilotは音声を外部APIへ送る。録音は同意条件のあるPilot評価用の例外で、機密会議向け既定動作ではない。
 
-機密会議ではアプリが外部APIを呼ばないだけでは足りない。マイク、ブラウザ、転送、STT、Analyzer、ログ、Pod／HostのEgress、管理面を通じたデータ流出まで境界を定義・実証する必要がある。**音声入力の第一候補は参加したスマートフォンControllerのマイク（同時最大8台）**とし、Spot内でSTT・Analyzerを行い、大画面へ表示する。進行役は開始・終了・訂正の権限を持つが、音声入力を1台へ限定しない。この方式では生音声がSpot外のスマホで発生する。「生音声は一瞬もSpot外に存在しない」という当初の文字通りの要件は満たせない。保証可能な目標を「参加端末からローカル経路でSpotへ送り、外部AI・Internetへ送らず、Spot内で処理する」と区切る。より強い物理境界が必要な会議ではSpot直結マイクを別Capture profileとして検討する。両者を同じ保証として案内しない。
+機密会議ではアプリが外部APIを呼ばないだけでは足りない。マイク、ブラウザ、転送、STT、Analyzer、ログ、Pod／HostのEgress、管理面を通じたデータ流出まで境界を定義・実証する必要がある。**音声入力の第一候補は参加したスマートフォンControllerのマイク（同時最大8台）**とし、Spot内でSTT・Analyzerを行い、大画面へ表示する。Platform HostはSession開始・全体終了を担い、会議の中断・再開・終了・訂正・PDF取得は認証済みの参加者に開く。音声入力を1台へ限定しない。この方式では生音声がSpot外のスマホで発生する。「生音声は一瞬もSpot外に存在しない」という当初の文字通りの要件は満たせない。保証可能な目標を「参加端末からローカル経路でSpotへ送り、外部AI・Internetへ送らず、Spot内で処理する」と区切る。より強い物理境界が必要な会議ではSpot直結マイクを別Capture profileとして検討する。両者を同じ保証として案内しない。
 
 調査したGDK `main` は [0ba3e224](https://github.com/hakobune8/natade-coco-gdk/tree/0ba3e224d503b131ab0d7969cc9e7dd82026a364)。`game.yaml` は `kind: Game`、必須Controller実装、game/run/result時間を要求する。**テンプレートの1〜4 playersはサンプル設定であり、8台へ指定できる**。Platformの[Session Manager](https://github.com/SSLHQ/natade-coco-edge/blob/44f52ae319de18bc3b8a0fa4c3c194fe9ae68b79/game-platform/services/session-manager/internal/session/state.go)と[Game Catalog API](https://github.com/SSLHQ/natade-coco-edge/blob/44f52ae319de18bc3b8a0fa4c3c194fe9ae68b79/game-platform/docs/api/game-catalog-openapi.yaml)はいずれも最大8を許す。**枠を8と宣言できることは8本の音声ストリームの処理保証ではない**ため、Content側の音声経路・資源・障害分離を別途実証する。GDKはDisplay SDK、Platform Controllerへのhandoff、Manifest検証、コンテナ／Fleet引渡しを提供するが、現行テンプレートのGoサーバーは静的配信のみで、RONROのPython API・音声取込・永続状態を扱わない（[GDK開発ガイド](https://github.com/hakobune8/natade-coco-gdk/blob/0ba3e224d503b131ab0d7969cc9e7dd82026a364/docs/game-development.md)、[GDK Manifest](https://github.com/hakobune8/natade-coco-gdk/blob/0ba3e224d503b131ab0d7969cc9e7dd82026a364/game.yaml)）。現行GDKを「既に一般Content対応済み」とは呼ばない。
 
@@ -54,7 +56,7 @@ AI Runtime: Spot内のSTT／Analyzer実行、またはモードで許可され�
 
 ここでいう「AI Runtime」は**提案上の責務名**であり、GDKに既に共通Local AI Runtimeが実装済みという意味ではない。最初はContent内Adapterとして始めてもよく、複数Contentで共用する必要が確認されてからPlatform共通サービス化を判断する。
 
-Platform SessionとRONRO discussion sessionは同一IDとは限らない。Adapterが対応表と接続世代を持ち、Platformの`playing/terminated`とRONROの`idle/active/paused/finalizing/handoff/failed/purged`を混同しない。`ended_incomplete`相当は完了結果であってphaseではない。中断はContentの取込状態であり、Platform Sessionの終了ではない。**ホストControllerだけ**が開始・中断・再開・会議終了を指示する。中断は全sourceの取込を停止し、その時点までの確定処理を整合させ、Graph／Display／Join可能なSessionを維持する。再開は新しい取込世代から始め、前世代の遅延Finalを新音声として誤処理しない。会議終了は全sourceを閉じて音声Drain、Queue Drain、Graph revision確定、PDF生成・受取機会、終了画面への切替へ進む。ホストの一時切断や全員の無音・離脱はEnd命令にならない。**会議終了とPlatform SessionのTerminateは別操作**とし、PDF受取/廃棄または期限到達で内容を消去した後にPlatformを閉じる。既存Platformの即時`/control/end`は危険なため、Content専用のopt-in終了ガードを必須とする（[契約詳細](../architecture/natadecoco-content-contract.md)）。Platformの通常終了を、RONROの未処理音声が消えたことの証拠としない。
+Platform SessionとRONRO discussion sessionは同一IDとは限らない。Adapterが対応表と接続世代を持ち、Platformの`playing/terminated`とRONROの`idle/active/paused/finalizing/handoff/failed/purged`を混同しない。`ended_incomplete`相当は完了結果であってphaseではない。中断はContentの取込状態であり、Platform Sessionの終了ではない。Platform Sessionの開始/全体終了は既存ShellのHost操作、RONRO会議の中断・再開・終了・訂正は現時点の認証済み参加者の操作とする。中断は全sourceの取込を停止し、その時点までの確定処理を整合させ、Graph／Display／Join可能なSessionを維持する。再開は新しい取込世代から始め、前世代の遅延Finalを新音声として誤処理しない。会議終了は全sourceを閉じて音声Drain、Queue Drain、Graph revision確定、PDF生成・受取機会、終了画面への切替へ進む。Hostの一時切断や全員の無音・離脱はEnd命令にならない。**会議終了とPlatform SessionのTerminateは別操作**とし、ContentはPDF readyからの期限到達時にだけ内容を消去する。Platformの即時`/control/end`は明示的な強制終了として扱い、実行すると会議不完全/PDF喪失の可能性がある。これをRONRO会議の正常終了やDrain済みの証拠としない。
 
 ## 4. Repository strategyと配布
 
@@ -106,7 +108,7 @@ Modeは実装の環境変数だけでなく、Platformが承認する**実効ポ
 | `cloud-demo` | 参加Controller端末→Spot→Remote STT | Remote | Provider宛先限定 | **最初のGDK統合形態**。生音声とTranscriptの外部送信を明示・同意のうえ開発／デモに使う。機密モードと同じ安全表示をしない |
 | `offline` | Spot内 | Spot内 | Sessionの中核処理に外部接続不要 | model/image/auth handoffを事前準備。`local-secure`と同じNetwork denyを求めるなら別途検証 |
 
-`local-secure`の第一候補経路は、**参加スマホの押下中マイク（最大8台）→ ローカルWi-Fi／TLS → Spot上の認可済み音声入口 → Spot内STT → Spot内Analyzer → Spot内Event Store／Graph → Spotの大画面**。各Controllerは自分の音声だけを送る短命・Session／player／source限定権限を受け、ホストだけが開始・中断・再開・終了・Human Commandを操作する。音声をゲームの方向入力や一般のRealtime Gatewayへ混ぜず、接続先をSpotのローカルoriginに固定する設計とする。Controller SDKの制限付き`game-module`が`getUserMedia`や音声WSSを使えるかは未確認であり、GDK／Platform契約として先に検証する。Browser/OSのマイク権限、端末内の一時バッファ、他アプリやOS機能の保存・送信をPlatformのPod NetworkPolicyだけで保証できない。機密用途では管理・承認済み端末、事前説明、ブラウザ／OS設定の確認が必要で、個人端末の通信全体をRONROが遮断できるとは約束しない。Wi-Fiが切れた際に携帯回線や公開DNS経由へ静かに切り替わるなら**その端末の音声送信を止め**、Sessionはsource別の欠落可能性を表示して再接続待ちにする。他のマイクと議論は継続する。会議室LAN上のDisplay／Controllerが受け取るGraph由来テキストも機密データであり、承認済み端末・TLS・権限境界が必要。Providerのサーバー、モデル取得、メトリクス、Crash dump等の暗黙の外部送信も対象に含める。
+`local-secure`の第一候補経路は、**参加スマホの押下中マイク（最大8台）→ ローカルWi-Fi／TLS → Spot上の認可済み音声入口 → Spot内STT → Spot内Analyzer → Spot内Event Store／Graph → Spotの大画面**。各Controllerは自分の音声だけを送る短命・Session／player／source限定権限を受ける。Platform Start/全体終了はHost、RONRO会議操作は現在の認証済み参加者が担う。音声をゲームの方向入力や一般のRealtime Gatewayへ混ぜず、接続先をSpotのローカルoriginに固定する設計とする。Controller SDKの制限付き`game-module`が`getUserMedia`や音声WSSを使えるかは未確認であり、GDK／Platform契約として先に検証する。Browser/OSのマイク権限、端末内の一時バッファ、他アプリやOS機能の保存・送信をPlatformのPod NetworkPolicyだけで保証できない。機密用途では管理・承認済み端末、事前説明、ブラウザ／OS設定の確認が必要で、個人端末の通信全体をRONROが遮断できるとは約束しない。Wi-Fiが切れた際に携帯回線や公開DNS経由へ静かに切り替わるなら**その端末の音声送信を止め**、Sessionはsource別の欠落可能性を表示して再接続待ちにする。他のマイクと議論は継続する。会議室LAN上のDisplay／Controllerが受け取るGraph由来テキストも機密データであり、承認済み端末・TLS・権限境界が必要。Providerのサーバー、モデル取得、メトリクス、Crash dump等の暗黙の外部送信も対象に含める。
 
 ### 複数マイクと途中参加
 
@@ -116,7 +118,7 @@ Modeは実装の環境変数だけでなく、Platformが承認する**実効ポ
 
 スマホの自動スクリーンロック中に常時収音しているつもりになる事故を避けるため、**各Controllerは大きな「押して話す」ボタンを押している間だけ収音・送信する**方式を第一候補とする。参加直後、ボタンを押していない時、会議中断中はマイクを待機状態にし、バックグラウンド収音や無操作での自動再開をしない。非押下時にはMediaStream track自体を停止することを設計目標とし、単なるPCM送信停止を「マイク停止」と表示しない。端末ブラウザでこの条件と発話開始遅延を両立できなければ、常時track維持を同等の挙動として黙って採用せず、Capture方式を再検討する。押下後もマイク権限・音声接続が確立するまで「準備中」とし、実際にPCMを送れる時だけ「収音中」と示す。権限拒否・端末ロック・画面非表示・接続断・タッチ取消はそのsourceの収音を停止し、明確に「音声を拾えていません」と表示する。押したままロックされてもreleaseイベントに依存せず、Spot側の短い入力lease／接続heartbeat期限で取込を閉じる（無発話だけでは閉じない）。再接続後の自動収音は禁止し、再度押下を要する。
 
-ボタンを離したらそのsourceの現在の音声範囲を確定・Final化へ渡す。空・極短の押下で空commitを強制せず、意味のある未確定音声はbounded finalizeし、危険な空Final／範囲不明を黙って捨てない。複数人が同時に押すことは許すが、source別に処理し、同時発話・近接重複を一つの発話と決めつけない。ホストの中断／終了は押下中の全sourceに優先し、中断は音声を止めるだけで会議を終わらせない。Shared Viewの上部状態は、0台押下中なら「発話待ち」、実際に入力中なら「聞いています」、中断中なら「中断中」とし、収音していないのに「聞いています」と表示しない。Controllerにも同じ状態を示すが、Shared Viewに押下操作は要求しない。
+ボタンを離したらそのsourceの現在の音声範囲を確定・Final化へ渡す。空・極短の押下で空commitを強制せず、意味のある未確定音声はbounded finalizeし、危険な空Final／範囲不明を黙って捨てない。複数人が同時に押すことは許すが、source別に処理し、同時発話・近接重複を一つの発話と決めつけない。参加者の会議中断／終了は押下中の全sourceに優先し、中断は音声を止めるだけで会議を終わらせない。Shared Viewの上部状態は、0台押下中なら「発話待ち」、実際に入力中なら「聞いています」、中断中なら「中断中」とし、収音していないのに「聞いています」と表示しない。Controllerにも同じ状態を示すが、Shared Viewに押下操作は要求しない。
 
 これは**スクリーンロック中の取りこぼしをゼロにする対策ではない**。押し忘れた発話はEvidenceにならない。会議参加者が毎回スマホを押す負担、権限取得の開始遅延、長押しのしやすさ、画面ロック／ブラウザ切替時の挙動、3–5mでの共有状態の分かりやすさをP0.2／P1.3で実機確認する。必要な品質・会議への集中を満たせなければ、Spot直結の常時稼働マイクを別Capture profileとして比較し、この制約を隠さない。
 
@@ -128,13 +130,13 @@ Contentの音声入口は**sourceごとの独立したストリーム**として
 | Partial Transcript | 揮発。Canonical Eventにしない。 | UIへの公開可否を最小化。 |
 | Final Transcript / Evidence | センシティブ。Session中と終了処理・PDF作成に必要な短い受取猶予中だけ保持し、猶予終了時にSpotから消去する。 | 会議後の完全Replayは提供しない。PDFに必要なEvidence整合性は削除前に検査し、欠落はPDFへ表示する。 |
 | Event / Human訂正履歴 | 内容を含むセンシティブデータ。Session中の正本。終了処理・PDF作成・受取猶予が終わればSpotから消去する。 | `Event Stream = History`は稼働中の会議について成立する。PDF受取後の会議後監査・Replayを約束しない。 |
-| Graph / Canvas / PDF | 内容を含むセンシティブな派生状態。Drain後の固定revisionからPDFを生成し、進行役のスマホControllerへ権限付きダウンロードとして渡す。受取猶予後はSpot上のPDF・Graph・一時ファイルを消去する。 | 会議後Web閲覧・記録一覧・再ダウンロードは提供しない。スマホへ保存されたPDFと端末バックアップはSpot管理外。座標・`display_label`は非Canonical。 |
+| Graph / Canvas / PDF | 内容を含むセンシティブな派生状態。Drain後の固定revisionからPDFを生成し、現在の当該run参加者のスマホControllerへ権限付きダウンロードとして渡す。受取期限後はSpot上のPDF・Graph・一時ファイルを消去する。 | 会議後Web閲覧・記録一覧・期限後の再ダウンロードは提供しない。スマホへ保存されたPDFと端末バックアップはSpot管理外。座標・`display_label`は非Canonical。 |
 | Logs / metrics | 音声・全文Transcript・Evidence・Secretを出さず、接続／Queue／gap／revision等の最小診断値。 | 内容を含む障害調査は明示承認・監査・期限付き。 |
 | Evaluation data | 合成を標準。実会議データは別同意、限定保管、公開Gitへ入れない。 | Pilot録音と製品モードを混同しない。 |
 
 既存[RFC-0008](0008-account-based-service-architecture.md)は**アカウント型Webサービスの提案**としてRONRO管理データ7日以内復元不能・PDFのみ共有・終了後訂正なしを定めた。Spot Contentは別の製品形態であり、今回のHuman判断により**7日保存も直近20件保存も採用しない**。RFC-0008本文は当時の判断履歴として残し、本RFCがSpot形態の受取・消去方針を定める。既存Pilot録音の7日ルールは別用途として維持し、将来のSpot Contentへ持ち込まない。Provider側保持・配布済みPDFをSpot管理データと混同しない。PDFは外部持ち出しで回収できない。
 
-Spot Contentに会議後の記録保管機能は設けない。会議中のEvent／Evidence／GraphはPDF作成まで必要であり、終了直後に進行役がスマホControllerからPDFを受け取るための**短い、上限付きの再試行窓**だけ残す。初期設計値はPDF準備完了から最大30分とし、本人が「受取終了」を選んだ時点または期限到達で、認可ticketを失効させ、SpotにあるPDF・Evidence・Event／訂正履歴・Graph・内容を含む一時ファイル／キャッシュを消去する。削除失敗は非内容ログで検知・再試行し、次会議へ内容を見せない。短期一時領域をバックアップ・スナップショット・全文ログから除外し、暗黙の会議後保管を作らない。会議後のWeb閲覧・記録一覧・再ダウンロード・完全Replayは提供しない。PDFを受け取れず期限が切れた場合は記録が失われるため、Controllerで残り時間・失敗・期限切れを明示する。**現行Platformの`finished`結果表示は最大120秒かつrankings前提なので受取窓には使わない。** Platformは受取窓中`playing`を維持し、opt-in終了ガードが誤Terminateを防ぎ、期限到達時はpurge確認後に閉じる。実効性は[契約詳細](../architecture/natadecoco-content-contract.md)の試験で検証する。
+Spot Contentに会議後の記録保管機能は設けない。会議中のEvent／Evidence／GraphはPDF作成まで必要であり、終了直後に当該runの認証済み参加者がスマホControllerから各自PDFを受け取るための**短い、上限付きの再試行窓**だけ残す。初期設計値はPDF準備完了から30分で、**期限到達時のみ**認可ticketを失効させ、SpotにあるPDF・Evidence・Event／訂正履歴・Graph・内容を含む一時ファイル／キャッシュを消去する。一人の受取や保存確認で窓を閉じず、参加者向け手動削除を設けない。削除失敗は非内容ログで検知・再試行し、次会議へ内容を見せない。短期一時領域をバックアップ・スナップショット・全文ログから除外し、暗黙の会議後保管を作らない。会議後のWeb閲覧・記録一覧・期限後の再ダウンロード・完全Replayは提供しない。PDFを受け取れず期限が切れた場合は記録が失われるため、Controllerで残り時間・失敗・期限切れを明示する。**現行Platformの`finished`結果表示は最大120秒かつrankings前提なので受取窓には使わない。** Platformは受取窓中`playing`を維持する想定だが、Platform Hostの全体終了は明示的な強制操作として区別し、実行時にはPDF喪失の可能性を示す。Contentがこれを禁止できるとは主張しない。
 
 ## 7. Network isolation / Platform policy
 
@@ -149,24 +151,24 @@ Spot全体が中央管理面へ接続することと、ContentがInternetへ送�
 | 分類 | 現行契約とRONROへの扱い |
 | --- | --- |
 | そのまま活用 | Display SDKの認証済み起動・snapshot、Controller Shell handoff、同一originの`/games/<id>/`経路、最大8枠のManifest指定、`joinPolicy: while-playing`／`emptySessionPolicy: keep-alive`（対応Runtimeに限る）、Platform Join Page、Catalog／Fleet引渡し、pinned platform set、digest／SBOM／attestation、non-root/read-only等の基礎Sandbox。 |
-| 小さな拡張が必要 | `kind: Game`のまま使う場合でも、Content backendへの権限付きHTTP/WSS経路、各Controller moduleのマイク権限とsource限定の短命ticket、Platformによるoperation別のHost権限検査、Content専用の終了ガード、長時間・休憩・全source Drain／終了同期、Contentの状態snapshotの復元、Local AIの明示通信許可が必要。Platform／GDK双方の契約テストを伴わせる。**8枠指定そのものは拡張対象ではない**。 |
+| 小さな拡張が必要か検証 | `kind: Game`のまま使う場合、Content backendへの権限付きHTTP/WSS経路、各Controller moduleのマイク権限とsource限定の短命ticket、長時間・休憩・全source Drain、Contentの状態snapshotの復元、Local AIの明示通信許可を検証する。参加者の会議操作は既存Player照合をContent側で再利用するため、operation別Host権限検査とContent専用終了ガードは初期依存にしない。**8枠指定そのものは拡張対象ではない**。 |
 | Game前提が強い／未採用 | 必須`players.min≥1`、controllerProfile選択肢、方向入力・rankings・`finishGame`、result画面・rematch。参加者数をplayer数へ偽装しない。2時間で自動終了させない。必要なら後続で後方互換なInteractive Content profile／別kindを検討し、一括名称変更しない。 |
 
-**Phase 1の前提検証**: 進行役がSessionを開始し、右上QRから参加者が**会議中に**加わり、1〜8台のControllerが押下中だけ音声を送ってもDisplay・Canvasが継続することを試す。参加者に必要な操作は「押して話す」だけで、Human Command／終了／PDF受取は進行役に限定する。8台同時押下、同じ発話の複数マイク収音、途中参加、1台だけの断線／再接続、全員の一時離脱、9台目拒否、2時間超、全source Drainを分けて検証する。`gameDurationSeconds`は現行GDK説明では情報値であり、通常の終了はGame側`finishGame`が権威だが、Platformのエラー・空Session・更新時挙動は別途確認する。`keep-alive`はRuntime 1.1以上という[GDKの条件](https://github.com/hakobune8/natade-coco-gdk/blob/0ba3e224d503b131ab0d7969cc9e7dd82026a364/docs/empty-session-policy.md)に従う。これが成立しなければ小さな互換拡張を先行し、偽プレイヤーや非公開の並行Session Managerで回避しない。
+**Phase 1の前提検証**: Platform HostがSessionを開始し、右上QRから参加者が**会議中に**加わり、1〜8台のControllerが押下中だけ音声を送ってもDisplay・Canvasが継続することを試す。参加者は押して話すことに加え、会議中断・再開・終了・訂正、終了直後のPDF取得を行える。8台同時押下、同じ発話の複数マイク収音、途中参加、1台だけの断線／再接続、全員の一時離脱、9台目拒否、2時間超、全source Drainを分けて検証する。`gameDurationSeconds`は現行GDK説明では情報値であり、RONRO会議EndをGame側`finishGame`やPlatform全体終了と同一視しない。Platformのエラー・空Session・更新時挙動は別途確認する。`keep-alive`はRuntime 1.1以上という[GDKの条件](https://github.com/hakobune8/natade-coco-gdk/blob/0ba3e224d503b131ab0d7969cc9e7dd82026a364/docs/empty-session-policy.md)に従う。
 
 ### 会議終了からPDF受取まで
 
-進行役がスマホControllerで終了を指示したら、音声取込停止 → STT／Analyzer Drain → 受理済みEvent revision固定 → 同じSemantic Canvasから共有用PDF生成、の順とする。Controllerには「作成中」「PDFをダウンロード」「生成失敗／再試行」を表示し、参加者向けDisplayは同じCanvasのFinal全体図へ静かに移る。PDFは別の要約LLMが作る新しい記録ではなく、固定Graph revisionからの成果物。Candidate／Confirmed Decision、Open Item、Actionを区別し、`ended_incomplete`相当なら既知の欠落可能時間帯または範囲不明をPDFに明記する。会議後のGraph閲覧画面、記録一覧、クリック式の詳細UIは初期スコープに入れない。
+認証済み参加者がスマホControllerで二段階確認を経て会議終了を指示したら、音声取込停止 → STT／Analyzer Drain → 受理済みEvent revision固定 → 同じSemantic Canvasから共有用PDF生成、の順とする。Controllerには全員へ「作成中」「PDFをダウンロード」「生成失敗／再試行」を表示し、Displayは同じCanvasのFinal全体図へ静かに移る。PDFは別の要約LLMが作る新しい記録ではなく、固定Graph revisionからの成果物。Candidate／Confirmed Decision、Open Item、Actionを区別し、`ended_incomplete`相当なら既知の欠落可能時間帯または範囲不明をPDFに明記する。会議後のGraph閲覧画面、記録一覧、クリック式の詳細UIは初期スコープに入れない。
 
-PDF取得APIはPlatformに認可された当該Sessionの進行役だけへ短命の権限で提供し、参加者のマイク用ticketでは取得できないようにする。秘密情報をURLへ置かず、`Cache-Control: no-store`と添付ファイル応答を基本とする。ダウンロード完了のHTTP応答はスマホ内への保存成功を証明しないため、Controllerは受取操作を明示し、失敗時の再試行機会と終了操作を分ける。Spotからスマホへ渡したPDFは利用者端末／クラウドバックアップへ保存され得て、Spot側の削除やアクセス失効では回収できない。この外部持ち出しをダウンロード前に分かる形で説明する。Platformは受取・廃棄まで`playing`を維持し、Content終了ガードで不意のTerminateを止める。**`finished`もゲーム結果・ランキングもPDF受取には流用しない。**
+PDF取得APIはPlatformに認可された当該Session/runの現在の参加者へ提供し、マイク用ticketでは取得できないようにする。秘密情報をURLへ置かず、`Cache-Control: no-store`と添付ファイル応答を基本とする。ダウンロード完了のHTTP応答はスマホ内への保存成功を証明しないため、Controllerは各自の受取操作と期限内の再試行を示す。Spotからスマホへ渡したPDFは利用者端末／クラウドバックアップへ保存され得て、Spot側の削除やアクセス失効では回収できない。この外部持ち出しを全参加者へダウンロード前に説明する。一人の取得を他の参加者の受取終了とみなさず、削除は期限到達時のみ。**`finished`もゲーム結果・ランキングもPDF受取には流用しない。**
 
 | RONRO現行画面／機能 | Spot Contentでの割当 |
 | --- | --- |
 | `/`・`/shared` Semantic Canvas | Display。読み取り専用。同一CanvasのLive local camera／Final zoom-out。開始後・中断中は右上にコンパクトな途中参加QR、上部には実際の収音状態に合わせ「発話待ち／聞いています／中断中」を控えめに表示し、Final/PDFにQRは載せない。 |
-| `/session`進行役開始・停止・Human Command | Platform Controller Shellから認可されたホスト用module／ブラウザへ。開始・中断・再開・終了・訂正・PDF受取はホストだけ。参加者Controllerは大きな「押して話す」と明確な収音状態を備え、Graph操作は要求しない。 |
+| `/session`開始・会議操作・Human Command | Platform Session開始/全体終了は既存ShellのHost操作。RONRO会議の中断・再開・終了・訂正・PDF取得は同一runの認証済み参加者Controllerへ。押して話す導線と会議操作を区別し、Shared Viewには操作を要求しない。 |
 | `/control`、評価API、debug情報 | 開発・評価専用。Contentの参加者Ingressから除外。 |
 | `/live`音声WSS | 最大8台の認可済みControllerからSpot内originへのContent audio ingressへ適合。source別ticket・TLS・local-route検査を設け、Game controller inputのGatewayを音声transportとして流用しない。 |
-| 会議後Web／PDF | 会議後Web閲覧画面は不要。固定Graph revisionから生成したPDFを進行役のスマホControllerでダウンロードする。現行`prototype/service_final_record.py`に決定的なPDF rendererがあり、Spot用の認可・一時保持・受渡しは未実装。 |
+| 会議後Web／PDF | 会議後Web閲覧画面は不要。固定Graph revisionから生成したPDFを当該runの認証済み参加者が各自のスマホControllerで期限内にダウンロードする。現行`prototype/service_final_record.py`に決定的なPDF rendererがあり、Spot用の参加者認可・一時保持・受渡しは未受入れ。 |
 
 SpotのLauncher Catalog／Lobbyも利用者体験の一部とし、GDKの任意`presentation`契約に沿って**専用Catalog/Lobby artworkとaccentColorを初期Contentの成果物に含める**。画像はContent配布物としてbundleし、Canvasの背景や実会議結果の代用品にしない。Display／参加者Controller／Host Controllerはそれぞれ[UI / Artworkブリーフ](../product/natadecoco-ronro-ux-artwork-brief.md)の状態・可読性・操作の試験を通す。artworkが揃わない状態をSpot版完成と呼ばない。論路は参加者を評価・監視・競争させるゲームではない。「オープンでクリーン」は会議の一般公開ではなく、AIの暫定解釈を安心して訂正でき、参加者が通常どおり議論できる体験を指す。Speaker別の発言量・順位・押下時間をShared Viewへ出さず、確定していない候補を確定と見せない。PTTが会話を止めるなら中核UX不成立としてCapture方式へ戻り、見た目の改善だけで完了にしない。
 
@@ -178,7 +180,7 @@ SpotのLauncher Catalog／Lobbyも利用者体験の一部とし、GDKの任意`
 | [RFC-0003](0003-discussion-map-ux-and-layout.md)／[Canvas評価](../evaluation/semantic-canvas-candidate.md) | 旧6カード等は時点のProposal／履歴。現行実装は同一Semantic CanvasのLive/Final。新repoもこの実装を出発点とし、旧画面へ戻さない。 |
 | [RFC-0004](0004-visual-artifact-generation-and-intervention.md)／[0005](0005-meeting-minutes-generation.md) | Visual／MinutesはProposedの別機能。移行の必須依存にしない。会議後PDFは[RFC-0008](0008-account-based-service-architecture.md)のPDF共有方針を継ぎ、Spot上の会議後Web閲覧を必須にしない。AI要約を新正本にしない。 |
 | [RFC-0006](0006-discussion-item-references-and-recall.md) | Deferred。項目番号／音声参照解決を本移行で実装しない。 |
-| [RFC-0007](0007-service-readiness-improvement-inventory.md)／[0008](0008-account-based-service-architecture.md) | 複数会議・休憩・安全・PDF・ユーザー権限は**対象形態に応じた未承認設計／受入れ課題**。旧Webサービス案の7日保存・起動アカウント帰属、途中案の直近20件保存はSpot Contentへ適用しない。終了直後の進行役ControllerへのPDF受渡しと短い再試行窓のみを設け、内容データを消去する。 |
+| [RFC-0007](0007-service-readiness-improvement-inventory.md)／[0008](0008-account-based-service-architecture.md) | 複数会議・休憩・安全・PDF・ユーザー権限は**対象形態に応じた未承認設計／受入れ課題**。旧Webサービス案の7日保存・起動アカウント帰属、途中案の直近20件保存はSpot Contentへ適用しない。終了直後に当該runの参加者各自へPDFを渡す短い再試行窓だけを設け、期限到達時に内容データを消去する。 |
 
 | 案 | 長所 | 主な欠点 | 判断 |
 | --- | --- | --- | --- |
@@ -188,7 +190,7 @@ SpotのLauncher Catalog／Lobbyも利用者体験の一部とし、GDKの任意`
 
 ## 10. Migration / implementation plan（段階着手）
 
-各Stepは独立PRを基本とする。前段ゲート未達なら後段の「機密向け」表示・配備をしない。現行Pilotから利用者データを暗黙移行しない。Phase番号は依存順であり、並行可能なテスト作業を禁止しない。以下はArchitecture RFCの粗い移行順であり、**実装用の正確なPR依存順・終了ガード・Host認可は[実装計画](../implementation/natadecoco-content-implementation-plan.md)を正とする**。
+各Stepは独立PRを基本とする。前段ゲート未達なら後段の「機密向け」表示・配備をしない。現行Pilotから利用者データを暗黙移行しない。Phase番号は依存順であり、並行可能なテスト作業を禁止しない。**以下の表は2026-10-07時点の移行案を保持した履歴で、Host専用Content操作・終了ガード・手動purgeを含むセルは2026-10-09判断で失効した。現在の実装順・テスト・完了条件は[実装計画](../implementation/natadecoco-content-implementation-plan.md)の改訂節を正とする。**
 
 | Step / repo | Component・変更内容 | Dependency | Test | Completion criteria |
 | --- | --- | --- | --- | --- |
