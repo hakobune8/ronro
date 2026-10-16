@@ -8,6 +8,8 @@ Status: **proposed / 候補コードの開発中**。設計正本は[RFC-0010](.
 - 実装は`natade-coco-ronro`の`develop`から短命ブランチを切り、**PR単位で`develop`に統合**する。RFC文書PRも`ronro/develop`へ統合する。現在の`main`やFleet稼働Digestは、検証なしに進めない。
 - PRごとに`git diff --check`、Contentの`make validate test lint build`（必要なlocked setup後）、変更対象の回帰とローカルの合成runを確認する。CIでしか実行できない供給網・CodeQL・Container smokeはPR上の結果も確認する。ローカルCI相当がGreenなら統合可能だが、実機受入れ・Provider費用/同意・配備のゲートは別に残す。
 - `#98`の音声反映失敗とPlatform `#939`のController同期切替は未解決。これらをToggleや見た目の変更で解決済みと推定しない。原因・修正・実機再確認を明示するまで、#104の音声/総合受入れはNOT PASS。
+- 2026-10-17時点の配布版はRC6のまま。Content `develop`のRC7ソース候補はPR #158/#159まで統合済みだが、hosted CIは課金／支出制限でjob未開始、タグ・公開Image・Fleet変更なし。Platform [#943](https://github.com/SSLHQ/natade-coco-edge/pull/943)はCI Greenでもowner review待ち。ローカルCI相当での`develop`統合例外を、Image公開・実機受入れの合格条件へ拡張しない。
+- Local STTの多言語whisper.cpp small／mediumは未選定。モデル画像公開の[Content #137](https://github.com/hakobune8/natade-coco-ronro/pull/137)はdraftで、`packages: write`を伴う新workflowのsource-security契約が未承認。build-only job成功を画像公開・8台／2時間性能の証拠にしない。
 
 ## PRの依存順
 
