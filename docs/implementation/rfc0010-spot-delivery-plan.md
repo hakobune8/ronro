@@ -33,7 +33,7 @@ D1がPlatform原因で保留の場合、D2の**純粋なContentローカル実�
 
 ## D3 詳細契約：Toggle
 
-`PressToTalkCapture`のmic起動・generation fence・late permission response cleanup・WSS停止処理を再利用し、UIイベントを「押下保持」から`click`/keyboard activationのON/OFFへ替える。最初のclickの同じgesture内で`getUserMedia`を呼び、準備中の2回目clickはgenerationを進めて安全に解放する。Pointer/keyboardの重複発火で二重接続を作らない。可視性喪失、Platform断線、Host phase変化、run切替、readiness失効、WebSocket失敗はすべてsourceをOFFにする。復帰時はreadinessを再取得するが**自動でmicをONにしない**。`aria-pressed`と本文は「準備中」と「音声が受理済み」を区別する。
+`PressToTalkCapture`のmic起動・generation fence・late permission response cleanup・WSS停止処理を再利用し、UIイベントを「押下保持」から`click`/keyboard activationのON/OFFへ替える。最初のclickの同じgesture内で`getUserMedia`を呼び、準備中の2回目clickはgenerationを進めて安全に解放する。Pointer/keyboardの重複発火で二重接続を作らない。可視性喪失、Platform断線、Hostの休憩/終了、run切替、WebSocket失敗はsourceをOFFにする。新規ON前のreadiness失効は開始を拒否する。一方、受理済みの現run音声ソケットは、並走するreadiness照会の一時失敗や、同一runの定期Host取得に伴う過渡的なGDK `syncing`だけでは停止しない。捕捉開始時と現在のrun IDが一致することを要し、実際の同期`failed`、権限/接続喪失、Host phase変化では停止する。復帰時はreadinessを再取得するが**自動でmicをONにしない**。`aria-pressed`と本文は「準備中」と「音声が受理済み」を区別する。
 
 Content側の既存`membership check`/WebSocket heartbeat、one-use ticket、最大8source、sourceごとのstop/abort/Drainを維持する。無音・BGMは会議Endではない。OFF後の未確定音声は完了またはincompleteとして追跡し、空commitを成功扱いしない。8台同時ONの重複収音は、根拠なしに同一発話へ統合しない。
 
