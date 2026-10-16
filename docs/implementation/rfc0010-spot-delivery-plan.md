@@ -29,7 +29,7 @@ D1がPlatform原因で保留の場合、D2の**純粋なContentローカル実�
 
 `AudioIngress`の`_active`は予約済みで、`audio_ready`前を含む。表示へは直接出さず、`audio_ready`を送った後のrun内接続集合を別途追跡し、`finally`で必ず消す。受理したframeの単調時刻だけを保持し、音声サンプル/レベル/端末IDをDisplayへ渡さない。Paused/Endの権限境界を越えて状態を保持しない。
 
-`DisplayStateReader`に読み取り専用のProvider-neutralなsnapshot callbackを渡し、既存のDisplay JWT、session/run照合、`no-store`を再利用する。応答は既存`canvas`と並列の`audio_activity_v1`で、`connected_sources`は0–8、`stage`は`idle/receiving/queued/analyzing/uncertain`。Cue優先順位・4秒frame窓はRFCに従う。`DisplayState` parserは型/範囲/現runを検証する。2秒pollの同じGraph revisionでも活動状態が変化したら表示を更新し、状態取得失敗時は古い「マイク接続」を表示し続けない。`prefers-reduced-motion`では明滅しない。Canvasと下部Canonical本文の読みやすさを変えない。
+`DisplayStateReader`に読み取り専用のProvider-neutralなsnapshot callbackを渡し、既存のDisplay JWT、session/run照合、`no-store`を再利用する。応答は既存`canvas`と並列の`audio_activity_v1`で、`connected_sources`は0–8（収音中で`capture_stop`未受理のsource数）、`stage`は`idle/receiving/audio_processing/queued/analyzing/uncertain`。収音終了後のSource Final待ちは件数から外すが`audio_processing`で表し、Source不完全/failed-open/unresolvedは`uncertain`へ残す。Cue優先順位・4秒frame窓はRFCに従う。`DisplayState` parserは型/範囲/現runを検証する。2秒pollの同じGraph revisionでも活動状態が変化したら表示を更新し、状態取得失敗時は古い「マイク接続」を表示し続けない。`prefers-reduced-motion`では明滅しない。Canvasと下部Canonical本文の読みやすさを変えない。
 
 ## D3 詳細契約：Toggle
 
