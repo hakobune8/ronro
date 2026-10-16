@@ -33,7 +33,7 @@ RC6は`tamarind-22`に限定配布済みだが、配布と受入れは別であ�
 
 | 要素 | 提案する表示・データ源 | 誤認させない条件 |
 | --- | --- | --- |
-| 接続台数 | 上部の小さな`マイク接続 n台`。`n`は**現runで`audio_ready`まで進んだ音声WebSocketのうち、まだ閉じていないsource数**。Toggle OFFは接続を閉じるので0へ戻る。参加枠数や話者数ではない | 初期段階では「参加中のスマホ台数」は表示しない。Controllerだけ参加してマイクOFFなら数えない。集計不明時は前回値を固定せず`確認中`。8を超えず、IDや個人名は出さない |
+| 接続台数 | 上部の小さな`マイク n台`。`n`は**現runで`audio_ready`まで進み、まだ`capture_stop`も接続喪失も起きていない収音中source数**。STT Final待ちや中断cleanup中のWebSocketは数えない。参加枠数や話者数ではない | 初期段階では「参加中のスマホ台数」は表示しない。Controllerだけ参加してマイクOFFなら数えない。集計不明時は前回値を固定せず`確認中`。8を超えず、IDや個人名は出さない |
 | 処理中 | 取込中／STT Final待ち／Analyzer・Queue処理中を既存のrun内状態から集約し、控えめな1箇所の緩い明滅またはフェードと短い`処理中`表示にする | BGMの音量・波形だけを「意味のある発話を理解中」と見なさない。`idle`、`paused`、`finalizing`、音声欠落／失敗は区別し、永続Spinnerにしない。Reduced Motionでは静止表示。数値・状態は内容や端末IDを公開しない |
 | 参加QR | 上部を`参加はコチラ`に変更。QRの参加先・期限・run切替、Final時の非表示は従来通り | QRへ認証token・音声ticketを埋めない。画面表示だけで参加権限を推定しない |
 
@@ -41,15 +41,15 @@ RC6は`tamarind-22`に限定配布済みだが、配布と受入れは別であ�
 
 ### 3.1 Content内のread-only runtime状態契約（実装候補）
 
-CanvasのCanonical projectionには混ぜず、既存`/games/ronro/api/state`のrun-bound Display応答へ`audio_activity_v1`を追加する。Contentの`AudioIngress`が、現runの`audio_ready`送信後からWebSocket終了までの接続数と、最後に受理したPCM frameの単調時刻を持つ。`AnalysisPump.snapshot()`がpending/processing/failedを供給する。これらは**揮発的な観測値**であり、Evidence・Event・Graph revisionへ書き込まない。`DisplayStateReader`は認証・現run検証後にのみこれらを読み取る。Paused/Finalはphaseを優先し、end後に過去の接続数を見せない。
+CanvasのCanonical projectionには混ぜず、既存`/games/ronro/api/state`のrun-bound Display応答へ`audio_activity_v1`を追加する。Contentの`AudioIngress`が、現runの`audio_ready`送信後から`capture_stop`受理または接続喪失までの収音source数、受理PCMの単調時刻、停止後のFinal待ち数と中断cleanup中の数を持つ。`AnalysisPump.snapshot()`がpending/processing/failed、`RunDrainTracker.snapshot()`がSourceの不完全/failed-open/unresolvedを供給する。これらは**揮発的な観測値**であり、Evidence・Event・Graph revisionへ書き込まない。`DisplayStateReader`は認証・現run検証後にのみこれらを読み取る。Paused/Finalはphaseを優先し、end後に過去の接続数を見せない。収音が終わってもFinal待ちの間はSource予約とDrain判定を保持する。
 
 ```text
 audio_activity_v1:
-  connected_sources: 0..8
-  stage: idle | receiving | queued | analyzing | uncertain
+  connected_sources: 0..8  # 互換フィールド名。収音中source数であり、物理端末や生存WebSocketの総数ではない
+  stage: idle | receiving | audio_processing | queued | analyzing | uncertain
 ```
 
-`receiving`は現在接続があり**最近4秒以内にPCM frameをサーバーが受理した**ことだけを意味する。発話認識や理解成功を意味しない。`analyzing`はAnalyzerが実行中、`queued`は未処理Finalがあるが実行中ではない、`uncertain`は既知の処理失敗・状態取得失敗を示す。優先度は`uncertain > analyzing > receiving > queued > idle`とし、`receiving`/`analyzing`のみ穏やかに点滅する。STTの未完了itemについて正確な処理時点を観測できなければ、その区間を「分析中」と偽らない。Displayは現行2秒pollを維持し、responseが取れないときは**Canvasを保持したまま活動表示だけ`確認中`へ失効**させる。run切替ではCanvasも含め旧状態を破棄する。表示状態をGraph revisionだけでキャッシュしない。
+`receiving`は収音中かつ**最近4秒以内にPCM frameをサーバーが受理した**ことだけを意味する。発話認識や理解成功を意味しない。`audio_processing`は受理PCMの収音が終わりSource Final/Drainが未完了、`analyzing`はAnalyzerが実行中、`queued`は未処理Finalがあるが実行中ではない、`uncertain`は中断cleanup中・既知のAnalyzer失敗・Source不完全/failed-open/unresolved・状態取得失敗を示す。優先度は`uncertain > analyzing > receiving > audio_processing > queued > idle`とし、`receiving`/`audio_processing`/`analyzing`のみ穏やかに点滅する。これらは正確な内容理解を意味せず、Source不完全を`idle`へ戻さない。Displayは現行2秒pollを維持し、responseが取れないときは**Canvasを保持したまま活動表示だけ`確認中`へ失効**させる。run切替ではCanvasも含め旧状態を破棄する。表示状態をGraph revisionだけでキャッシュしない。
 
 ## 4. Controller — Toggle Captureと訂正
 
@@ -108,7 +108,7 @@ Stage 1と2の順番は、安全条件を満たすなら個別PRで調整可能�
 
 ## 8. Open Questions / Risk
 
-1. `audio_ready`済みWebSocketの生存判定には既存heartbeat／membership checkを使う。画面からの状態取得が一時失敗した際、何秒で`確認中`へ切り替えるかは2秒pollと実機遅延を踏まえて計測する（暫定上限4秒）。Platformの参加枠数とは別値であることをHuman Reviewで確認する。
+1. `audio_ready`後の収音中判定には既存heartbeat／membership checkと`capture_stop`境界を使う。WebSocketがFinal待ちで開いていてもマイク台数へ残さない。画面からの状態取得が一時失敗した際、何秒で`確認中`へ切り替えるかは2秒pollと実機遅延を踏まえて計測する（暫定上限4秒）。Platformの参加枠数とは別値であることをHuman Reviewで確認する。
 2. Toggleの長時間ON、ロック、iOS Safariの復帰時に、端末表示・Spot lease・実際のPCM送信をどう一致させるか。ロック中の収音を約束しない。
 3. 訂正の音声提案が無音/BGM/複数の同時発話時に曖昧なら、どの少数選択肢が会議を中断しないか。テキストの代替導線をどこまで残すか。
 4. LiteLLMの実配置、上流Provider、Data Controls、ログ、証明書/Secret、NetBird/NetworkPolicy境界。Stage 1でSTTを接続できるかはRealtime protocol適合後に別決定。
