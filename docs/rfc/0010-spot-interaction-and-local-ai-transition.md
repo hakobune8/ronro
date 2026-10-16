@@ -14,7 +14,7 @@ RONROは`ronro`をCore/Research、`natade-coco-ronro`をSpot Contentとする。
 
 2026-10-16時点でSpotへ配布されたContentは`v0.10.0-rc.6`（source `06b8d6c`）。DisplayはQRへ「途中参加」、Controllerは長押し「押して話す」とテキスト訂正欄を表示する。発話からの関係訂正はサーバー保持の提案をControllerで確認・反映する経路もある。Runtimeは`OpenAIRealtimeSTTProvider`と`OpenAIAnalyzerProvider`を組み立て、後者を含め外部APIへ直接送るCloud-demoである。Contentの`develop`にはその後Toggle・表示・Local Providerの**候補コード**が入っているが、Spotの稼働版や実機受入れとは区別する。**NetBird上のLiteLLM経由もSpot上のLocal LLMも、稼働中のProviderとしてはまだ確認されていない。**
 
-RC6は`tamarind-22`に限定配布済みだが、配布と受入れは別である。[実機受入れ #104](https://github.com/hakobune8/natade-coco-ronro/issues/104)の19項目は未完了で、Controllerの同期中／操作可能の往復は[Platform #939](https://github.com/SSLHQ/natade-coco-edge/issues/939)、単発音声がFinalへ届かない問題は[Content #98](https://github.com/hakobune8/natade-coco-ronro/issues/98)に残る。RC4の1回の音声試験は失敗、RC6の追加試験は未実施・保留であり、このRFCは再試験やProvider通信の承認を与えない。旧#82を閉じたことは19項目の受入れ・#98・#939が完了した意味ではない。
+RC6は`tamarind-22`に限定配布済みだが、配布と受入れは別である。Content `develop`には`0.10.0-rc.7`の**ソース候補**（[PR #158](https://github.com/hakobune8/natade-coco-ronro/pull/158)、[合成UI確認 #159](https://github.com/hakobune8/natade-coco-ronro/pull/159)）が入った。ローカル回帰はGreenだが、GitHub Actionsの課金／支出制限で当該候補のhosted jobは開始できておらず、RC7タグ・公開Image・Fleet配布・実機受入れはまだない。RC6の稼働DigestをRC7と読み替えない。[実機受入れ #104](https://github.com/hakobune8/natade-coco-ronro/issues/104)の19項目は未完了で、Controllerの同期中／操作可能の往復は[Platform #939](https://github.com/SSLHQ/natade-coco-edge/issues/939)とowner review待ちの[修正候補 #943](https://github.com/SSLHQ/natade-coco-edge/pull/943)、単発音声がFinalへ届かない問題は[Content #98](https://github.com/hakobune8/natade-coco-ronro/issues/98)に残る。RC4の1回の音声試験は失敗、RC6の追加試験は未実施・保留であり、このRFCは再試験やProvider通信の承認を与えない。旧#82を閉じたことは19項目の受入れ・#98・#939が完了した意味ではない。
 
 ### RFC-0009から維持する境界
 
@@ -121,4 +121,4 @@ RFC承認後も、(a) Controller安定参加、(b) Source別の実音声→Final
 
 ### Recommended next implementation step（RFC承認後）
 
-候補コードが`develop`へ入った後も、次の実機受入れ前の優先作業は**RC6で報告されたController同期問題（#939）の再現・診断とrun-scoped状態の読取安定化**である。Platform変更が必要ならContentとは別PRでowner reviewを受ける。ToggleやProvider候補のローカルGreenを旧実機失敗の解決と見なさず、接続・表示・音声・終了を対象Digestで改めて検証する。
+候補コードが`develop`へ入った後も、次の実機受入れ前の優先作業は**RC6で報告されたController同期問題（#939）の修正候補 #943 のowner reviewと、RC7の正確なソースでのhosted security／供給網検査**である。前者のCI Greenは実Safariでの安定参加を証明せず、後者の課金起因のjob未開始は合格ではない。どちらも整い、別途リリース判断された後にのみ候補Digestを固定し、接続・表示・音声・終了を実機で検証する。ToggleやProvider候補のローカルGreenを旧実機失敗の解決と見なさない。
