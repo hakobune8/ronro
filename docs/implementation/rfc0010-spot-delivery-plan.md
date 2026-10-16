@@ -1,6 +1,6 @@
 # RFC-0010 実装・検証計画（Spot Content）
 
-Status: **proposed**。設計正本は[RFC-0010](../rfc/0010-spot-interaction-and-local-ai-transition.md)、未完了の実機ゲートは[Content #104](https://github.com/hakobune8/natade-coco-ronro/issues/104)。この文書は実音声試験、外部Provider呼出し、Fleet配布の承認ではない。
+Status: **proposed / 候補コードの開発中**。設計正本は[RFC-0010](../rfc/0010-spot-interaction-and-local-ai-transition.md)、未完了の実機ゲートは[Content #104](https://github.com/hakobune8/natade-coco-ronro/issues/104)。Content `develop`にD2–D8の一部候補コードが統合されても、実機・Provider・隔離の受入れは別である。この文書は実音声試験、外部Provider呼出し、Fleet配布の承認ではない。
 
 ## ベースラインと分岐
 
@@ -20,7 +20,7 @@ Status: **proposed**。設計正本は[RFC-0010](../rfc/0010-spot-interaction-an
 | D4 Correction UX | Content Controller: server-held音声訂正提案の要約と確認を主導線にし、焦点近傍の既存関係を短い文言で選べる候補を試す。自然文textは代替とする | D1、D3とGraph read契約 | Human-origin Event、曖昧時no-op、revision race、remove/add/change endpoint、再提案抑止、Decision/Action不変、320/390/430pxとVoiceOver |
 | D5 Copy/artwork | Content `docs/launcher-artwork.md`, `artwork/source`, `public/assets`, CSS: 現行水彩から洗練した2方向をレビューし1方向を候補化 | D0。D2-D4と並行可 | 権利/制作履歴、画像サイズと最適化、Catalog/Lobby crop、文字・QR余白、offlineとasset失敗、開かれた議論のHuman Review |
 | D6 LiteLLM候補 | ContentのAnalyzer adapter/factoryだけを候補分岐化。Secretをコード/ログへ置かず、上流・保持・NetBird reachabilityとEgress方針を確認 | D1、Cloud-demo回帰。STTは独立 | 合成Final→同じCore検証/Replay、安全禁止事項、timeout/retry/failed-no-fallback。限定実Provider検査は別承認。LiteLLM経由をLocal Secureと表示しない |
-| D7 Local STT | Content/AI RuntimeのSTT adapter。必要なPlatform政策は別PR | D3、Provider-neutral STT contract、実機資源確認 | PCM/Final/item correlation、1/4/8台と2時間、gap/Drain/End、Raw Audio外送否定。ただしAnalyzerが遠隔ならTranscript外送を明示 |
+| D7 Local STT | Content/AI RuntimeのSTT adapter。多言語`whisper.cpp` small/mediumを同じ条件で比較し、必要なPlatform政策は別PR | D3、Provider-neutral STT contract、実機資源確認 | PCM/Final/item correlation、両モデルの日本語品質・1/4/8台と2時間・CPU/RAM、gap/Drain/End、Raw Audio外送否定。ただしAnalyzerが遠隔ならTranscript外送を明示 |
 | D8 Local Analyzer | Content/AI RuntimeのAnalyzer adapter。Spot上でmodel・resources・healthを管理し、必要なPlatform egress政策は別PR | D6/D7、モデル評価・政策 | 日本語Node/Relation/訂正、安全、latency/負荷、Offline起動/継続/End、実効Egress拒否。初めてLocal Secure候補を審査できる |
 
 D1がPlatform原因で保留の場合、D2の**純粋なContentローカル実装**は進められる。ただしController/Displayを使った実機合格や#104総合判定に昇格させない。D6のNetBird/LiteLLM候補も配置・上流・保持の審査までCloud-demoと同等の外送前提で扱う。
@@ -45,7 +45,7 @@ Content側の既存`membership check`/WebSocket heartbeat、one-use ticket、最
 
 Stage 1でLiteLLMを導入する場合も、現行`OpenAIRealtimeSTTProvider`は直接経路のままなら**Raw Audioが外部へ出る**。Analyzerの`OpenAIAnalyzerProvider`をbase URLだけ変更して互換とみなさず、adapterに明示的なendpoint・TLS・schema・timeout・error分類・logging禁止を持たせる。NetBirdと上流の配置、秘密/ログ/保持、Platform egress allowの承認を明示する。Core `RealAnalyzer`はCandidate Eventsを検証し、失敗時はfailed jobとして残す。勝手な別Provider fallbackをしない。
 
-Local STTはProvider-neutralなsource/item/Final/Drain契約、Local Analyzerは同じCandidate Event検証を維持する。Raw Audio/Transcriptの外送境界を各Stageで個別に証明する。Local Secureの表示/配布は、実機性能だけでなくPlatformの実効ネットワーク隔離、model更新経路と監査を含む別審査後に限定する。
+Local STTはProvider-neutralなsource/item/Final/Drain契約、Local Analyzerは同じCandidate Event検証を維持する。Raw Audio/Transcriptの外送境界を各Stageで個別に証明する。`whisper.cpp`のsmall/medium候補については、CIのビルド・スキャン成功を実機性能やEvidence完全性の合格と取り違えず、同じ日本語音声集合と同じSpot負荷・計測条件で比較する。Local Secureの表示/配布は、実機性能だけでなくPlatformの実効ネットワーク隔離、model更新経路と監査を含む別審査後に限定する。
 
 ## 完了判定と残課題
 

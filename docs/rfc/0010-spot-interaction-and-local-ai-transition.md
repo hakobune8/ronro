@@ -2,19 +2,19 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| Status | **Proposed / 未承認**。RFC-0009の残る実機受入れを引き継ぐ。実装・配備・機密会議利用の承認ではない |
+| Status | **Proposed / 実装候補の開発中**。RFC-0009の残る実機受入れを引き継ぐ。候補コードの統合は、配備・実機受入れ・機密会議利用の承認ではない |
 | Date | 2026-10-16 |
 | Scope | Spot Display、スマホController、artwork、STT/AnalyzerのProvider移行、実機受入れ |
 | Supersedes | [RFC-0009](0009-ronro-as-natadecoco-local-ai-content.md)の「押して話す」第一候補と、当時の画面文言・Cloud移行順。Event/Graph、データ境界、Platform責務は継承 |
-| Tracking | [Content #82](https://github.com/hakobune8/natade-coco-ronro/issues/82)の未完了受入れを後続issueへ引き継ぐ。#82の過去の実機証跡は変更しない |
+| Tracking | 未完了の実機受入れは[Content #104](https://github.com/hakobune8/natade-coco-ronro/issues/104)へ移管。[旧#82](https://github.com/hakobune8/natade-coco-ronro/issues/82)の過去の実機証跡は変更しない |
 
 ## 1. 背景と現在地
 
 RONROは`ronro`をCore/Research、`natade-coco-ronro`をSpot Contentとする。[現状整理](../architecture/spot-content-current-status.md)に従い、TranscriptはEvidence、Event StreamはHistory、Discussion GraphはCurrent State、Human CorrectionはEventとする。LiveとFinalは同じSemantic Canvasの異なるCameraである。スマホの識別子はマイクsourceの識別であり、人・発言者の本人確認ではない。Spot Controllerの参加資格とRONRO内の会議操作を、PlatformのGame全体終了やHost権限と混同しない。
 
-2026-10-16時点の`natade-coco-ronro`候補は`v0.10.0-rc.6`（source `06b8d6c`）。DisplayはQRへ「途中参加」、Controllerは長押し「押して話す」とテキスト訂正欄を表示する。発話からの関係訂正はサーバー保持の提案をControllerで確認・反映する経路もある。Runtimeは`OpenAIRealtimeSTTProvider`と`OpenAIAnalyzerProvider`を組み立て、後者を含め外部APIへ直接送るCloud-demoである。**NetBird上のLiteLLM経由もSpot上のLocal LLMも、稼働中のProviderとしてはまだ確認されていない。**
+2026-10-16時点でSpotへ配布されたContentは`v0.10.0-rc.6`（source `06b8d6c`）。DisplayはQRへ「途中参加」、Controllerは長押し「押して話す」とテキスト訂正欄を表示する。発話からの関係訂正はサーバー保持の提案をControllerで確認・反映する経路もある。Runtimeは`OpenAIRealtimeSTTProvider`と`OpenAIAnalyzerProvider`を組み立て、後者を含め外部APIへ直接送るCloud-demoである。Contentの`develop`にはその後Toggle・表示・Local Providerの**候補コード**が入っているが、Spotの稼働版や実機受入れとは区別する。**NetBird上のLiteLLM経由もSpot上のLocal LLMも、稼働中のProviderとしてはまだ確認されていない。**
 
-RC6は`tamarind-22`に限定配布済みだが、配布と受入れは別である。[実機受入れ #82](https://github.com/hakobune8/natade-coco-ronro/issues/82)は部分結果のみで、Controllerの同期中／操作可能の往復は[Platform #939](https://github.com/SSLHQ/natade-coco-edge/issues/939)、単発音声がFinalへ届かない問題は[Content #98](https://github.com/hakobune8/natade-coco-ronro/issues/98)に残る。RC4の1回の音声試験は失敗、RC6の追加試験は未実施・保留であり、このRFCは再試験やProvider通信の承認を与えない。旧#82を追跡issueへ移して閉じても、19項目の受入れ・#98・#939が完了した意味にはならない。
+RC6は`tamarind-22`に限定配布済みだが、配布と受入れは別である。[実機受入れ #104](https://github.com/hakobune8/natade-coco-ronro/issues/104)の19項目は未完了で、Controllerの同期中／操作可能の往復は[Platform #939](https://github.com/SSLHQ/natade-coco-edge/issues/939)、単発音声がFinalへ届かない問題は[Content #98](https://github.com/hakobune8/natade-coco-ronro/issues/98)に残る。RC4の1回の音声試験は失敗、RC6の追加試験は未実施・保留であり、このRFCは再試験やProvider通信の承認を与えない。旧#82を閉じたことは19項目の受入れ・#98・#939が完了した意味ではない。
 
 ### RFC-0009から維持する境界
 
@@ -41,7 +41,7 @@ RC6は`tamarind-22`に限定配布済みだが、配布と受入れは別であ�
 
 ### 3.1 Content内のread-only runtime状態契約（実装候補）
 
-CanvasのCanonical projectionには混ぜず、既存`/games/ronro/api/state`のrun-bound Display応答へ`audio_activity`を追加する。Contentの`AudioIngress`が、現runの`audio_ready`送信後からWebSocket終了までの接続数と、最後に受理したPCM frameの単調時刻を持つ。`AnalysisPump.snapshot()`がpending/processing/failedを供給する。これらは**揮発的な観測値**であり、Evidence・Event・Graph revisionへ書き込まない。`DisplayStateReader`は認証・現run検証後にのみこれらを読み取る。Paused/Finalはphaseを優先し、end後に過去の接続数を見せない。
+CanvasのCanonical projectionには混ぜず、既存`/games/ronro/api/state`のrun-bound Display応答へ`audio_activity_v1`を追加する。Contentの`AudioIngress`が、現runの`audio_ready`送信後からWebSocket終了までの接続数と、最後に受理したPCM frameの単調時刻を持つ。`AnalysisPump.snapshot()`がpending/processing/failedを供給する。これらは**揮発的な観測値**であり、Evidence・Event・Graph revisionへ書き込まない。`DisplayStateReader`は認証・現run検証後にのみこれらを読み取る。Paused/Finalはphaseを優先し、end後に過去の接続数を見せない。
 
 ```text
 audio_activity_v1:
@@ -86,7 +86,7 @@ audio_activity_v1:
 | 2 Local STT | Spot実機のLocal STT adapter。端末→Spot以外へRaw Audioを送らない | 段階1のAnalyzerを継続可能 | Raw Audio外送の否定を通信観測と政策で実証。Transcriptは依然Spot外へ出うるため機密会議向け完全Localと呼ばない |
 | 3 Local Analyzer | 合格済みLocal STT | Spot上のLocal LLM adapter | 日本語会議、訂正、Decision/Owner/Due安全性、2時間・1/4/8 source負荷、遅延、障害復帰を実測。会議内容を出すNetwork egressを実効拒否し、Offline起動/継続/終了を検証して初めてLocal Secure候補 |
 
-Stage 1と2の順番は、安全条件を満たすなら個別PRで調整可能。ただし各段階の外送先・データ種・Consent表示を構成と実測に一致させ、失敗時に別Providerへ黙ってfallbackしない。SpotのCPU/GPU/メモリ予算、modelの配置・更新、LiteLLMへのNetBird到達性、上流への再転送、Platform NetworkPolicy/Fleet権限は未決。Platform変更が要る場合はPlatform ownerの別審査とし、Contentの設定だけで隔離を保証したとは言わない。
+Stage 1と2の順番は、安全条件を満たすなら個別PRで調整可能。ただし各段階の外送先・データ種・Consent表示を構成と実測に一致させ、失敗時に別Providerへ黙ってfallbackしない。Local STTの有力候補は`whisper.cpp`の多言語smallとmediumを**同一の日本語Evidence・実機負荷条件で比較**することとし、まだモデルを選定しない。SpotのCPU/GPU/メモリ予算、modelの配置・更新、LiteLLMへのNetBird到達性、上流への再転送、Platform NetworkPolicy/Fleet権限は未決。Platform変更が要る場合はPlatform ownerの別審査とし、Contentの設定だけで隔離を保証したとは言わない。
 
 ## 7. 実装順とPR単位の受入れ
 
@@ -95,7 +95,7 @@ Stage 1と2の順番は、安全条件を満たすなら個別PRで調整可能�
 | 順 | Repository / 対象 | 作業 | 依存・検証・完了条件 |
 | --- | --- | --- | --- |
 | 0 | `natade-coco-ronro`＋必要なPlatform issue / RC6基線 | #82の実機受入れを後続issueへ移し、#98・#939と未実施項目を維持。Controller同期不安定を原因別に切り分け、最新Digestとrun保護を読み取る | 修正PRは別途。Controllerが安定参加・再読み込みでき、未承認の音声/Provider再試験をしない |
-| 1 | Content / Display projection | `接続 n`/`音声ON m`と処理状態の**実データ**をrun-scoped read-only payloadへ追加し、QR文言を変更 | 0/1/4/8、切断・古いheartbeat・pause/end・reduced motion、1920×1080の合成/実機検査。端末ID・音声内容の漏出なし |
+| 1 | Content / Display projection | `マイク接続 n台`と処理状態の**実データ**をrun-scoped read-only payloadへ追加し、QR文言を変更。接続数から発話者数や音声内容を推定しない | 0/1/4/8、切断・古いheartbeat・pause/end・reduced motion、1920×1080の合成/実機検査。端末ID・音声内容の漏出なし |
 | 2 | Content / audio Controller・backend | PTTをToggleへ変更。source lease、foreground/lock/断線での停止、再タップ復帰、bounded finalizeを維持 | #98の音声経路原因把握。短発話/長発話/無音+BGM/重複/古いFinal、1/4/8台と2時間負荷。いずれも一sourceの故障で会議を終わらせない |
 | 3 | Content / Correction・文言 | 音声提案の見せ方と少数の関係選択UIを比較・実装。短文+詳細の状態表示へ整理 | Human-origin Event/replay、曖昧時no-op、stale Evidence抑制、End/訂正idempotency、狭幅/VoiceOverを検証。Participant Human Reviewを通す |
 | 4 | Content / artwork | Catalog/Lobbyの2方向を試作し、権利・出典・最適化を記録 | Platform crop、QR/文字コントラスト、offline/asset failure fallback、Human Review。Live Canvasへ干渉なし |
@@ -119,4 +119,4 @@ RFC承認後も、(a) Controller安定参加、(b) Source別の実音声→Final
 
 ### Recommended next implementation step（RFC承認後）
 
-最初のPRは**ContentのRC6同期問題の再現・診断とrun-scoped状態の読取安定化**に限定する。#939のPlatform原因を切り分け、Platform変更が必要なら別PRでowner reviewを受ける。安定したController/Displayの状態を確認してから、接続台数と処理中表示を載せる。ToggleやProvider切替を同じPRへ混ぜず、旧受入れの原因を失わない。
+候補コードが`develop`へ入った後も、次の実機受入れ前の優先作業は**RC6で報告されたController同期問題（#939）の再現・診断とrun-scoped状態の読取安定化**である。Platform変更が必要ならContentとは別PRでowner reviewを受ける。ToggleやProvider候補のローカルGreenを旧実機失敗の解決と見なさず、接続・表示・音声・終了を対象Digestで改めて検証する。
