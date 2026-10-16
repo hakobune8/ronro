@@ -8,7 +8,8 @@ Status: **proposed / 候補コードの開発中**。設計正本は[RFC-0010](.
 - 実装は`natade-coco-ronro`の`develop`から短命ブランチを切り、**PR単位で`develop`に統合**する。RFC文書PRも`ronro/develop`へ統合する。現在の`main`やFleet稼働Digestは、検証なしに進めない。
 - PRごとに`git diff --check`、Contentの`make validate test lint build`（必要なlocked setup後）、変更対象の回帰とローカルの合成runを確認する。CIでしか実行できない供給網・CodeQL・Container smokeはPR上の結果も確認する。ローカルCI相当がGreenなら統合可能だが、実機受入れ・Provider費用/同意・配備のゲートは別に残す。
 - `#98`の音声反映失敗とPlatform `#939`のController同期切替は未解決。これらをToggleや見た目の変更で解決済みと推定しない。原因・修正・実機再確認を明示するまで、#104の音声/総合受入れはNOT PASS。
-- 2026-10-17時点の配布版はRC6のまま。Content `develop`のRC7ソース候補はPR #158/#159まで統合済みだが、hosted CIは課金／支出制限でjob未開始、タグ・公開Image・Fleet変更なし。Platform [#943](https://github.com/SSLHQ/natade-coco-edge/pull/943)はCI Greenでもowner review待ち。ローカルCI相当での`develop`統合例外を、Image公開・実機受入れの合格条件へ拡張しない。
+- 2026-10-17時点の配布版はRC6のまま。Content `develop`にはRC7ソース候補と後続のD7診断修正（[#161](https://github.com/hakobune8/natade-coco-ronro/pull/161)）が統合されたが、hosted CIは課金／支出制限でjob未開始、タグ・公開Image・Fleet変更なし。Platform [#943](https://github.com/SSLHQ/natade-coco-edge/pull/943)はowner reviewとhosted CIを通って`main`（`003baa781ffbe04cd543297825b8e4b7dd6e2ede`）へ統合済み。ただしPlatform Image・Fleet・実機への適用はまだない。ローカルCI相当での`develop`統合例外を、Image公開・実機受入れの合格条件へ拡張しない。
+- tamarind-22の現行Launcher 0.3.47はsource `8e19e9a7feede90d39a56c4f5b6d5f780a7d4f26`。#943が修正した共通同期の3実装ファイルはこのsourceに存在しないため、現在のPlatform `main`から作るImageを「#943だけの狭いhotfix」と呼ばない。Platform ownerは現行Digestとの全差分・互換性・回帰を審査して新しいPlatform候補とするか、旧版向けに別設計した修正を選ぶ。どちらも正確なImage Digest、供給網検査、Fleet差分、実機同期確認を経るまでD1をPASSにしない。中断した候補公開run `38977034356`で途中pushされた未スキャン・未署名のprivate candidate tagは使用禁止（詳細は[Platform #939](https://github.com/SSLHQ/natade-coco-edge/issues/939)）。
 - Local STTの多言語whisper.cpp small／mediumは未選定。モデル画像公開の[Content #137](https://github.com/hakobune8/natade-coco-ronro/pull/137)はdraftで、`packages: write`を伴う新workflowのsource-security契約が未承認。build-only job成功を画像公開・8台／2時間性能の証拠にしない。
 
 ## PRの依存順
@@ -16,7 +17,7 @@ Status: **proposed / 候補コードの開発中**。設計正本は[RFC-0010](.
 | PR | Repo / 最小変更 | 依存 | ローカル試験・完了条件 |
 | --- | --- | --- | --- |
 | D0 設計 | `ronro`: RFC-0010と本計画。`natade-coco-ronro`: `docs/`に現行コードとの対応表とPublic-safeテスト手順 | なし | リンク・矛盾確認、変更が文書のみであること。Core/Event意味を変更しない |
-| D1 基線 | Content: RC6のController同期失敗をContentから再現/観測し、Platform #939との境界を切り分ける。Contentが修正不要ならPlatform修正を待つ、または保留として独立PRを進める | D0 | 5秒ごとの正常refetchで操作欄が消えないこと、実際の断線/旧runは閉じること。Platform変更は別owner review。音声試験なし |
+| D1 基線 | Content: RC6のController同期失敗をContentから再現/観測し、Platform #939との境界を切り分ける。#943のsource修正は統合済み。次は旧Launcherとの差分をPlatform ownerが審査し、完全な公開ゲートを通した候補を限定配布する | D0、Platform配布候補の全差分審査 | 5秒ごとの正常refetchで操作欄が消えず、実際の断線/旧runは閉じること。正確な稼働DigestとiPhone/Safari実機再確認までPASSにしない。音声試験なし |
 | D2 Display状態 | Content `backend/audio_ingress.py`, `run_assembly.py`, `display_read.py`, `src/display-state.ts`, `display.ts`, `canvas.ts`とCSS: `audio_activity_v1`、QR文言、控えめな状態表示 | D0、D1の状態を記録 | 0/1/4/8、停止/切断/古いsnapshot、分析queue、reduced motion、1920×1080。現runのDisplay ticket以外は不可、Canvas/Evidenceへ混入なし |
 | D3 Toggle capture | Content `src/controller-audio-ui.ts`, `ptt-capture.ts`等: タップでON/OFF、緊急停止、短文状態。`backend`のsource lease/停止境界を確認・必要箇所だけ補強 | D1、D2の状態契約。#98の失敗段階を把握 | 同一gestureのmic開始、連打/準備中OFF、visibility/lock/pagehide/断線、source間独立、bounded finalizeと未完了警告、WSS認可/重複/容量。#98が残れば実音声受入れ不可 |
 | D4 Correction UX | Content Controller: server-held音声訂正提案の要約と確認を主導線にし、焦点近傍の既存関係を短い文言で選べる候補を試す。自然文textは代替とする | D1、D3とGraph read契約 | Human-origin Event、曖昧時no-op、revision race、remove/add/change endpoint、再提案抑止、Decision/Action不変、320/390/430pxとVoiceOver |
