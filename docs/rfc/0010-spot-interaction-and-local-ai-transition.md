@@ -33,11 +33,23 @@ RC6は`tamarind-22`に限定配布済みだが、配布と受入れは別であ�
 
 | 要素 | 提案する表示・データ源 | 誤認させない条件 |
 | --- | --- | --- |
-| 接続台数 | 上部の小さな`マイク接続 n台`。`n`は**現runに参加を認められ、音声経路が新鮮なheartbeatで生存しているController source数**。参加枠数や話者数ではない | Toggle OFFでも音声経路を維持する実装なら「接続」には含め、実際に送るsourceは`音声ON m台`と別に示す。経路を維持しない実装なら表示名を`参加中 n台`に変更し、マイク接続と偽らない。集計不明時は前回値を固定せず`確認中` |
+| 接続台数 | 上部の小さな`マイク接続 n台`。`n`は**現runで`audio_ready`まで進んだ音声WebSocketのうち、まだ閉じていないsource数**。Toggle OFFは接続を閉じるので0へ戻る。参加枠数や話者数ではない | 初期段階では「参加中のスマホ台数」は表示しない。Controllerだけ参加してマイクOFFなら数えない。集計不明時は前回値を固定せず`確認中`。8を超えず、IDや個人名は出さない |
 | 処理中 | 取込中／STT Final待ち／Analyzer・Queue処理中を既存のrun内状態から集約し、控えめな1箇所の緩い明滅またはフェードと短い`処理中`表示にする | BGMの音量・波形だけを「意味のある発話を理解中」と見なさない。`idle`、`paused`、`finalizing`、音声欠落／失敗は区別し、永続Spinnerにしない。Reduced Motionでは静止表示。数値・状態は内容や端末IDを公開しない |
 | 参加QR | 上部を`参加はコチラ`に変更。QRの参加先・期限・run切替、Final時の非表示は従来通り | QRへ認証token・音声ticketを埋めない。画面表示だけで参加権限を推定しない |
 
 既存のCanvas、現在地、下部Canonical本文、種別件数の視認性を損なわない。3–5m・1920×1080の実機と、0/1/4/8台・切断・再接続・中断・Finalの状態遷移で検査する。投影用Displayに操作ボタン、参加者名、音声レベルの監視UIを増やさない。Read-only projectionはrun ID/時刻が一致する値だけ採用し、古い状態を「接続中」「処理中」と表示し続けない。
+
+### 3.1 Content内のread-only runtime状態契約（実装候補）
+
+CanvasのCanonical projectionには混ぜず、既存`/games/ronro/api/state`のrun-bound Display応答へ`audio_activity`を追加する。Contentの`AudioIngress`が、現runの`audio_ready`送信後からWebSocket終了までの接続数と、最後に受理したPCM frameの単調時刻を持つ。`AnalysisPump.snapshot()`がpending/processing/failedを供給する。これらは**揮発的な観測値**であり、Evidence・Event・Graph revisionへ書き込まない。`DisplayStateReader`は認証・現run検証後にのみこれらを読み取る。Paused/Finalはphaseを優先し、end後に過去の接続数を見せない。
+
+```text
+audio_activity_v1:
+  connected_sources: 0..8
+  stage: idle | receiving | queued | analyzing | uncertain
+```
+
+`receiving`は現在接続があり**最近4秒以内にPCM frameをサーバーが受理した**ことだけを意味する。発話認識や理解成功を意味しない。`analyzing`はAnalyzerが実行中、`queued`は未処理Finalがあるが実行中ではない、`uncertain`は既知の処理失敗・状態取得失敗を示す。優先度は`uncertain > analyzing > receiving > queued > idle`とし、`receiving`/`analyzing`のみ穏やかに点滅する。STTの未完了itemについて正確な処理時点を観測できなければ、その区間を「分析中」と偽らない。Displayは現行2秒pollを維持し、responseが取れないときは**Canvasを保持したまま活動表示だけ`確認中`へ失効**させる。run切替ではCanvasも含め旧状態を破棄する。表示状態をGraph revisionだけでキャッシュしない。
 
 ## 4. Controller — Toggle Captureと訂正
 
@@ -78,6 +90,8 @@ Stage 1と2の順番は、安全条件を満たすなら個別PRで調整可能�
 
 ## 7. 実装順とPR単位の受入れ
 
+具体的な変更ファイル、契約テスト、PR間の依存とロールバック単位は[実装計画](../implementation/rfc0010-spot-delivery-plan.md)に記す。このRFCと計画を先に`develop`へ統合し、各PRを**1つの責務**に限定する。`develop`統合は配布・実機受入れを意味しない。
+
 | 順 | Repository / 対象 | 作業 | 依存・検証・完了条件 |
 | --- | --- | --- | --- |
 | 0 | `natade-coco-ronro`＋必要なPlatform issue / RC6基線 | #82の実機受入れを後続issueへ移し、#98・#939と未実施項目を維持。Controller同期不安定を原因別に切り分け、最新Digestとrun保護を読み取る | 修正PRは別途。Controllerが安定参加・再読み込みでき、未承認の音声/Provider再試験をしない |
@@ -92,7 +106,7 @@ Stage 1と2の順番は、安全条件を満たすなら個別PRで調整可能�
 
 ## 8. Open Questions / Risk
 
-1. 接続台数は`audio-ready`を何秒のheartbeatで失効させるか。OFF時に経路を維持しない端末は`参加中`へ表示を切り替える必要がある。Platformの参加snapshotとContent音声状態のどちらを表示の正本にするか。
+1. `audio_ready`済みWebSocketの生存判定には既存heartbeat／membership checkを使う。画面からの状態取得が一時失敗した際、何秒で`確認中`へ切り替えるかは2秒pollと実機遅延を踏まえて計測する（暫定上限4秒）。Platformの参加枠数とは別値であることをHuman Reviewで確認する。
 2. Toggleの長時間ON、ロック、iOS Safariの復帰時に、端末表示・Spot lease・実際のPCM送信をどう一致させるか。ロック中の収音を約束しない。
 3. 訂正の音声提案が無音/BGM/複数の同時発話時に曖昧なら、どの少数選択肢が会議を中断しないか。テキストの代替導線をどこまで残すか。
 4. LiteLLMの実配置、上流Provider、Data Controls、ログ、証明書/Secret、NetBird/NetworkPolicy境界。Stage 1でSTTを接続できるかはRealtime protocol適合後に別決定。

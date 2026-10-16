@@ -7,6 +7,7 @@
 - [Core / Content / Platformの境界と現在の検証状況](architecture/spot-content-current-status.md) — 最初に読む現状整理。実機受入れ・Local Secureは未完了。
 - [RFC-0009](rfc/0009-ronro-as-natadecoco-local-ai-content.md) — 移行アーキテクチャと当初の判断。後の操作権限変更は現状整理を優先。
 - [RFC-0010](rfc/0010-spot-interaction-and-local-ai-transition.md) — Spotでのマイク状態表示、Toggle操作、訂正UX、artworkと段階的Local AI移行の提案。実装・実機受入れは未完了。
+- [RFC-0010実装計画](implementation/rfc0010-spot-delivery-plan.md) — 開発ブランチ向けPR分割、依存、ローカル試験、実機との別ゲート。
 - [Content契約](architecture/natadecoco-content-contract.md)、[PR単位の実装計画](implementation/natadecoco-content-implementation-plan.md) — 初期設計と履歴。Host専用操作、手動削除、Platform終了ガードを必須とした箇所は現在のContent候補と一致しない。
 - [UI / Artworkブリーフ](product/natadecoco-ronro-ux-artwork-brief.md) — 制作時の受入れ観点。実際のContent資産と実機結果は別途確認する。
 - [Spot向けContentリポジトリ](https://github.com/hakobune8/natade-coco-ronro) — 現行コードとControllerの操作契約。
