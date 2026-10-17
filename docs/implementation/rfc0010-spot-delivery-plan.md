@@ -10,7 +10,7 @@ Status: **proposed / 候補コードの開発中**。設計正本は[RFC-0010](.
 - `#98`の音声反映失敗とPlatform `#939`のController同期切替は未解決。これらをToggleや見た目の変更で解決済みと推定しない。原因・修正・実機再確認を明示するまで、#104の音声/総合受入れはNOT PASS。
 - 2026-10-17時点の配布版はRC6のまま。Content `develop`にはRC7ソース候補と後続のD7診断修正（[#161](https://github.com/hakobune8/natade-coco-ronro/pull/161)）が統合されたが、RC7のhosted CIは課金／支出制限でjob未開始、タグ・公開Image・Fleet変更なし。Platform [#943](https://github.com/SSLHQ/natade-coco-edge/pull/943)はowner reviewとhosted CIを通って`main`（`003baa781ffbe04cd543297825b8e4b7dd6e2ede`）へ統合済み。修正を含む隔離Launcher画像は[既存CI run 38978432317](https://github.com/SSLHQ/natade-coco-edge/actions/runs/38978432317)で署名・SBOM・scanを通して公開済み（`sha256:dcf419153946520f669efa43af5929d474c4f704b4c93162bf858dbd6894dad5`）。[Draft #950](https://github.com/SSLHQ/natade-coco-edge/pull/950)はTamarind限定の通常Fleet走査対象外optionと差分検査を提示しており、**Fleet選択・実機適用はまだない**。ローカルCI相当での`develop`統合例外を、Image公開・実機受入れの合格条件へ拡張しない。
 - **配布基準の訂正**: 古いローカルPlatform checkoutの`fleet.yaml`からLauncher 0.3.47を誤って採用した。tamarind-22の実配布と現行Platform `main`のFleet定義は、共通Runtime／Launcher **0.3.63**。source `5bc25e10618482cb9dc939d140047a6fb7a2cbaa`、Launcher digest `sha256:f8e33aec6d63020bcbc1c55e862b54759d3f2e8a0188b1becc88b4d33bd179dd`（[RC6実配布のreadback](https://github.com/hakobune8/natade-coco-ronro/issues/82#issuecomment-6210354443)）。RC6のController契約2は0.3.47のController実装とは互換にならない。0.3.63 sourceから#943統合sourceまでのLauncherビルド入力差分は#943の修正・テスト6ファイルのみであり、「大規模Platform更新が必要」という前版の結論を撤回する。それでも正確なImage Digest、供給網検査、Fleet差分、実機同期確認を経るまでD1をPASSにしない。誤った基準で中断した候補公開run `38977034356`が途中pushした未スキャン・未署名のprivate candidate tagは使用禁止（[Platform #939の訂正記録](https://github.com/SSLHQ/natade-coco-edge/issues/939#issuecomment-6226180041)）。
-- Local STTの多言語whisper.cpp small／mediumは未選定。モデル画像公開の[Content #137](https://github.com/hakobune8/natade-coco-ronro/pull/137)はdraftのまま。新workflowの`packages: write`を公開jobだけへ、再利用CIの`security-events: write`をgate jobだけへ認める契約案を追加し、ローカル`make validate test lint build`はGreen。ただしhosted CI／owner review、タグ発行、画像公開、Fleet切替は未完了。build-only job成功を画像公開・8台／2時間性能の証拠にしない。
+- Local STTの多言語whisper.cpp small／mediumは未選定。モデル画像のタグ起点公開手順を加えた[Content #137](https://github.com/hakobune8/natade-coco-ronro/pull/137)は`develop`へ統合済みだが、公開tag・候補image・Fleet切替はない。`packages: write`は公開jobだけ、`security-events: write`はgate jobだけの契約とした。2026-10-17時点でContentの登録済みGitHub Actions 3本は利用者依頼で一時停止されており、再開判断なく候補公開を実行しない。build-only jobやローカル試験を画像公開・8台／2時間性能の証拠にしない。
 
 ## PRの依存順
 
@@ -49,6 +49,8 @@ Content側の既存`membership check`/WebSocket heartbeat、one-use ticket、最
 Stage 1でLiteLLMを導入する場合も、現行`OpenAIRealtimeSTTProvider`は直接経路のままなら**Raw Audioが外部へ出る**。Analyzerの`OpenAIAnalyzerProvider`をbase URLだけ変更して互換とみなさず、adapterに明示的なendpoint・TLS・schema・timeout・error分類・logging禁止を持たせる。NetBirdと上流の配置、秘密/ログ/保持、Platform egress allowの承認を明示する。Core `RealAnalyzer`はCandidate Eventsを検証し、失敗時はfailed jobとして残す。勝手な別Provider fallbackをしない。
 
 Local STTはProvider-neutralなsource/item/Final/Drain契約、Local Analyzerは同じCandidate Event検証を維持する。Raw Audio/Transcriptの外送境界を各Stageで個別に証明する。`whisper.cpp`のsmall/medium候補については、CIのビルド・スキャン成功を実機性能やEvidence完全性の合格と取り違えず、同じ日本語音声集合と同じSpot負荷・計測条件で比較する。Local Secureの表示/配布は、実機性能だけでなくPlatformの実効ネットワーク隔離、model更新経路と監査を含む別審査後に限定する。
+
+空の認識結果から発話なしを推論しない。D7で必要な非発話判定のSource/item範囲、Content監査の先行書込み、Coreの競合検査、small/medium共通評価、実機ゲートは[非発話区間の判定契約候補](../architecture/stt-no-speech-disposition-candidate.md)に具体化する。現行upstreamは型付き判定を出さず、この文書だけでは非発話の自動完了を実装・有効化しない。まずCore契約PR、その後Content監査/adapter、Runtimeの判定品質、実機の順に分ける。
 
 ## 完了判定と残課題
 
