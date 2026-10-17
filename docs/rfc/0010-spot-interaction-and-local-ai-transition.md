@@ -90,6 +90,8 @@ audio_activity_v1:
 
 Stage 1と2の順番は、安全条件を満たすなら個別PRで調整可能。ただし各段階の外送先・データ種・Consent表示を構成と実測に一致させ、失敗時に別Providerへ黙ってfallbackしない。Local STTの有力候補は`whisper.cpp`の多言語smallとmediumを**同一の日本語Evidence・実機負荷条件で比較**することとし、まだモデルを選定しない。SpotのCPU/GPU/メモリ予算、modelの配置・更新、LiteLLMへのNetBird到達性、上流への再転送、Platform NetworkPolicy/Fleet権限は未決。Platform変更が要る場合はPlatform ownerの別審査とし、Contentの設定だけで隔離を保証したとは言わない。
 
+Local STTが非ゼロPCMに空結果を返しても、それだけでは「発話なし」としてSource/itemを完了させない。BGM・小声・相づち・モデル失敗によるEvidence欠落を隠さないため、現行Coreの未解決Drainを維持する。将来の型付き非発話判定、Source監査、small/medium共通の評価条件、Core→Content→AI Runtime→実機のPR順は[非発話区間の判定契約候補](../architecture/stt-no-speech-disposition-candidate.md)に分離する。これは未承認の設計であり、現行ProviderやFleetを有効化しない。
+
 ## 7. 実装順とPR単位の受入れ
 
 具体的な変更ファイル、契約テスト、PR間の依存とロールバック単位は[実装計画](../implementation/rfc0010-spot-delivery-plan.md)に記す。このRFCと計画を先に`develop`へ統合し、各PRを**1つの責務**に限定する。`develop`統合は配布・実機受入れを意味しない。
