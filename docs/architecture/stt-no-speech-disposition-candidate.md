@@ -1,6 +1,6 @@
 # RFC-0010 D7 — 非発話区間のSource/item判定契約（候補）
 
-Status: **設計候補・未承認**。Coreには既定無効の型・Ledger検証だけを実装した。Contentによる監査付きの利用、判定器、実機での有効化は未実装。これはLocal STTの空結果を成功に変える許可ではない。[RFC-0010](../rfc/0010-spot-interaction-and-local-ai-transition.md)と[実装計画](../implementation/rfc0010-spot-delivery-plan.md)のD7を具体化する。Spot上のモデル品質、実機容量、Local Secure、実音声試験はいずれも未受入れ。
+Status: **設計候補・未承認**。Coreの型・Ledger検証は既定無効。[Content PR #168](https://github.com/hakobune8/natade-coco-ronro/pull/168)では、保護run JournalへSource/itemごとの判定提案を先行記録し、監査失敗を未完了にする候補経路を実装した。ただし本番run assemblyは判定方針を渡さず、判定器も未接続・未評価である。監査記録はCoreの受理済み完了を証明しない。これはLocal STTの空結果を成功に変える許可ではない。[RFC-0010](../rfc/0010-spot-interaction-and-local-ai-transition.md)と[実装計画](../implementation/rfc0010-spot-delivery-plan.md)のD7を具体化する。Spot上のモデル品質、実機容量、Local Secure、実音声試験はいずれも未受入れ。
 
 ## 現行契約と解くべき問題
 
@@ -20,7 +20,7 @@ STTCommitted(source, item_id, audio_range)
   | empty Final / no result                     # 信号の可能性があれば未完了
 ```
 
-`STTNoSpeech`の必須値は`source`、`item_id`、`audio_range`のみ。判定器のartifact digestと評価済み方針の識別子は、Contentが実際に検証した**run設定**へ結び、保護されたSource監査記録へ併記する。Peerの自己申告だけで版を確定しない。モデル・判定器がrun中に変わるなら、新しい設定として再検証するまで結果を受理しない。形式の最終決定はCore/Event契約変更PRで行う。
+`STTNoSpeech`の必須値は`source`、`item_id`、`audio_range`のみ（Core 0.1.0.dev5の既定無効な型）。判定器のartifact digestと評価済み方針の識別子は、Contentが実際に検証した**run設定**へ結び、保護されたSource監査記録へ併記する。Peerの自己申告だけで版を確定しない。モデル・判定器がrun中に変わるなら、新しい設定として再検証するまで結果を受理しない。これらのIdentityの型検査だけでは判定器の品質を保証しない。
 
 Coreで決定的に検査できるのは、同一source、既知のitem ID、Committedと**完全一致する範囲**、同一結果の冪等な再送、Final/Failure/別判定との競合、Provider drain後の到着拒否である。異source、未知・部分・重複範囲、self-reportedな「音声なし」だけの応答は拒否する。**これらの検査は発話なしという意味の正しさを証明しない。** 1 itemに発話と非発話が混在する場合、item全体を非発話にはできない。必要なら先に範囲を切って別itemとし、隙間・重複をCoreで検査する。モデルの空テキストを後から判定イベントへ変換しない。
 
@@ -38,7 +38,7 @@ Coreで決定的に検査できるのは、同一source、既知のitem ID、Com
 
 主指標は**発話を含むitemを誤って非発話完了にした件数**とその内容の重要度である。完全非発話itemの回収率、空Final未解決数、STTのCER、1/4/8 sourceの待ち時間・CPU/RAMは別指標とする。ゼロ誤判定の小標本を一般的な無欠落保証と呼ばない。小声・BGM等の難条件で一つでも欠落疑いがあれば、その条件を自動完了させない方針をHuman Reviewで決める。現行upstreamが区間と判定理由を出せないなら、Bridgeに空文字からの推測を足さず、明示的なローカル検出器または別プロトコルを評価する。
 
-## 実装PRの依存順（承認後）
+## 実装PRの依存順と現状
 
 | 順 | Repository / 責務 | 変更とテスト | 完了条件 |
 | --- | --- | --- | --- |
@@ -48,3 +48,5 @@ Coreで決定的に検査できるのは、同一source、既知のitem ID、Com
 | 4 | Platform/Fleet・実機 | 限定Digest、実効通信境界、1/4/8台と2時間、音声→Final/Evidence→Graph、End/Drain/PDFを実測 | #104の対象版で個別PASS。未確認をPASSにしない |
 
 この候補はD7の欠落隠蔽を避けるための設計であり、PR 1–2を先行してもPR 3–4の品質・実機結果がなければ自動非発話完了を**有効化しない**。
+
+2026-10-17時点で上表1はCoreへ、2の監査先行書込み候補はContentへ統合済み。3の型付きローカル判定器・private fixtureでの妥当性審査、4のSpot実機ゲートは未完了である。候補コードの存在をD7受入れや非発話の誤判定率の証拠へ読み替えない。
