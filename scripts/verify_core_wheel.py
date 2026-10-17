@@ -27,7 +27,9 @@ from prototype.live_audio import AudioChunk, encode_audio_frame
 from prototype.replay import ReplayRunner, canonical_json
 from prototype.schema import SchemaValidator
 from prototype.service_final_record import prepare_final_record, render_final_pdf
-from prototype.source_stt import AudioRange, SourceSTTLedger, STTCommitted, STTFinal, STTSource
+from prototype.source_stt import (
+    AudioRange, SourceSTTLedger, STTCommitted, STTFinal, STTNoSpeech, STTSource,
+)
 
 
 IMPLEMENTATION = (
@@ -143,10 +145,17 @@ def _source_result(payload: dict) -> dict:
     ledger.acknowledge("item-1")
     ledger.close_capture(0)
     ledger.mark_provider_drained()
+    no_speech = SourceSTTLedger(source, accept_no_speech=True)
+    no_speech.append(AudioChunk(0, 0.0, b"\x10\x00\xf0\xff"))
+    no_speech.commit(STTCommitted(source, "no-speech-item", AudioRange(0, 2)))
+    no_speech.acknowledge_no_speech(STTNoSpeech(source, "no-speech-item", AudioRange(0, 2)))
+    no_speech.close_capture(0)
+    no_speech.mark_provider_drained()
     return {"state": canonical_json(replay.state), "canvas": record["canvas"],
             "projection": map_projection(replay.state, replay.events, StableLayout())["semantic_canvas"],
             "pdf_sha256": hashlib.sha256(pdf).hexdigest(), "audio_frame_hex": frame.hex(),
-            "stt_final": ready.text if ready else None, "stt_drain_complete": ledger.drain().complete}
+            "stt_final": ready.text if ready else None, "stt_drain_complete": ledger.drain().complete,
+            "stt_no_speech_complete": no_speech.drain().complete}
 
 
 WHEEL_CHECK = """
@@ -184,12 +193,21 @@ ready = ledger.next_ready_final()
 ledger.acknowledge('item-1')
 ledger.close_capture(0)
 ledger.mark_provider_drained()
+no_speech = core.SourceSTTLedger(source, accept_no_speech=True)
+no_speech.append(core.AudioChunk(0, 0.0, b'\\x10\\x00\\xf0\\xff'))
+no_speech.commit(core.STTCommitted(source, 'no-speech-item', core.AudioRange(0, 2)))
+no_speech.acknowledge_no_speech(
+    core.STTNoSpeech(source, 'no-speech-item', core.AudioRange(0, 2)))
+no_speech.close_capture(0)
+no_speech.mark_provider_drained()
 print(json.dumps({'state': core.canonical_json(replay.state), 'canvas': record['canvas'],
                   'projection': core.map_projection(replay.state, replay.events,
                                                     core.StableLayout())['semantic_canvas'],
                   'pdf_sha256': hashlib.sha256(pdf).hexdigest(),
                   'audio_frame_hex': frame.hex(), 'stt_final': ready.text if ready else None,
-                  'stt_drain_complete': ledger.drain().complete}, ensure_ascii=False, sort_keys=True))
+                  'stt_drain_complete': ledger.drain().complete,
+                  'stt_no_speech_complete': no_speech.drain().complete},
+                 ensure_ascii=False, sort_keys=True))
 """
 
 

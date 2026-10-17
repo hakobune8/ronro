@@ -4,7 +4,8 @@ import unittest
 
 from prototype.live_audio import AudioChunk
 from prototype.source_stt import (
-    AudioRange, SourceSTTLedger, STTCommitted, STTFailure, STTFinal, STTIntegrityError,
+    AudioRange, SourceSTTLedger, STTCommitted, STTFailure, STTFinal, STTNoSpeech,
+    STTIntegrityError,
     STTSource,
 )
 
@@ -95,6 +96,73 @@ class SourceSTTLedgerTests(unittest.TestCase):
         self.assertEqual(ledger.next_ready_final().item_id, "later")
         ledger.acknowledge("later")
         self.assertEqual(ledger.drain().unresolved_item_ids, ("possible",))
+
+    def test_no_speech_disposition_is_disabled_by_default(self) -> None:
+        ledger = SourceSTTLedger(SOURCE_A)
+        ledger.append(frame(0, 0))
+        ledger.commit(committed(SOURCE_A, "item", 0, 2400))
+        with self.assertRaises(STTIntegrityError):
+            ledger.acknowledge_no_speech(STTNoSpeech(SOURCE_A, "item", AudioRange(0, 2400)))
+        self.assertEqual(ledger.drain().unresolved_item_ids, ("item",))
+        with self.assertRaises(ValueError):
+            SourceSTTLedger(SOURCE_A, accept_no_speech=1)
+
+    def test_audited_whole_item_no_speech_clears_only_that_item(self) -> None:
+        ledger = SourceSTTLedger(SOURCE_A, accept_no_speech=True)
+        ledger.append(frame(0, 0))
+        ledger.append(frame(1, 2400))
+        ledger.commit(committed(SOURCE_A, "first", 0, 2400))
+        ledger.commit(committed(SOURCE_A, "second", 2400, 4800))
+        disposition = STTNoSpeech(SOURCE_A, "first", AudioRange(0, 2400))
+        self.assertTrue(ledger.acknowledge_no_speech(disposition))
+        self.assertFalse(ledger.acknowledge_no_speech(disposition))
+        self.assertEqual(ledger.drain().unresolved_item_ids, ("second",))
+        self.assertIsNone(ledger.next_ready_final())
+        ledger.complete(STTFinal(SOURCE_A, "second", "後続発話"))
+        self.assertEqual(ledger.next_ready_final().item_id, "second")
+        ledger.acknowledge("second")
+        self.assertFalse(ledger.drain().complete)  # Source is still open.
+        ledger.close_capture(1)
+        ledger.mark_provider_drained()
+        self.assertTrue(ledger.drain().complete)
+        with self.assertRaises(STTIntegrityError):
+            ledger.acknowledge_no_speech(disposition)
+
+    def test_no_speech_requires_exact_source_item_and_committed_range(self) -> None:
+        ledger = SourceSTTLedger(SOURCE_A, accept_no_speech=True)
+        ledger.append(frame(0, 0))
+        ledger.commit(committed(SOURCE_A, "item", 0, 2400))
+        for invalid in (
+            STTNoSpeech(SOURCE_B, "item", AudioRange(0, 2400)),
+            STTNoSpeech(SOURCE_A, "other", AudioRange(0, 2400)),
+            STTNoSpeech(SOURCE_A, "item", AudioRange(0, 1200)),
+            STTNoSpeech(SOURCE_A, "item", AudioRange(1200, 2400)),
+        ):
+            with self.assertRaises(STTIntegrityError):
+                ledger.acknowledge_no_speech(invalid)
+        self.assertEqual(ledger.drain().unresolved_item_ids, ("item",))
+
+    def test_no_speech_conflicts_with_final_failure_and_blank_final(self) -> None:
+        for result in ("final", "failure", "blank"):
+            with self.subTest(result=result):
+                ledger = SourceSTTLedger(SOURCE_A, accept_no_speech=True)
+                ledger.append(frame(0, 0))
+                ledger.commit(committed(SOURCE_A, "item", 0, 2400))
+                if result == "failure":
+                    ledger.fail(STTFailure(SOURCE_A, "provider_error", "item"))
+                else:
+                    ledger.complete(STTFinal(SOURCE_A, "item", "発話" if result == "final" else ""))
+                with self.assertRaises(STTIntegrityError):
+                    ledger.acknowledge_no_speech(
+                        STTNoSpeech(SOURCE_A, "item", AudioRange(0, 2400)))
+        ledger = SourceSTTLedger(SOURCE_A, accept_no_speech=True)
+        ledger.append(frame(0, 0))
+        ledger.commit(committed(SOURCE_A, "item", 0, 2400))
+        ledger.acknowledge_no_speech(STTNoSpeech(SOURCE_A, "item", AudioRange(0, 2400)))
+        with self.assertRaises(STTIntegrityError):
+            ledger.complete(STTFinal(SOURCE_A, "item", "後から来た発話"))
+        with self.assertRaises(STTIntegrityError):
+            ledger.fail(STTFailure(SOURCE_A, "provider_error", "item"))
 
     def test_unknown_item_range_and_wrong_source_fail_closed(self) -> None:
         ledger = SourceSTTLedger(SOURCE_A)

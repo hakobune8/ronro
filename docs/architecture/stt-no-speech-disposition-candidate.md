@@ -1,6 +1,6 @@
 # RFC-0010 D7 — 非発話区間のSource/item判定契約（候補）
 
-Status: **設計候補・未承認・未実装**。これはLocal STTの空結果を成功に変える許可ではない。[RFC-0010](../rfc/0010-spot-interaction-and-local-ai-transition.md)と[実装計画](../implementation/rfc0010-spot-delivery-plan.md)のD7を具体化する。Spot上のモデル品質、実機容量、Local Secure、実音声試験はいずれも未受入れ。
+Status: **設計候補・未承認**。Coreには既定無効の型・Ledger検証だけを実装した。Contentによる監査付きの利用、判定器、実機での有効化は未実装。これはLocal STTの空結果を成功に変える許可ではない。[RFC-0010](../rfc/0010-spot-interaction-and-local-ai-transition.md)と[実装計画](../implementation/rfc0010-spot-delivery-plan.md)のD7を具体化する。Spot上のモデル品質、実機容量、Local Secure、実音声試験はいずれも未受入れ。
 
 ## 現行契約と解くべき問題
 
@@ -22,7 +22,7 @@ STTCommitted(source, item_id, audio_range)
 
 `STTNoSpeech`の必須値は`source`、`item_id`、`audio_range`のみ。判定器のartifact digestと評価済み方針の識別子は、Contentが実際に検証した**run設定**へ結び、保護されたSource監査記録へ併記する。Peerの自己申告だけで版を確定しない。モデル・判定器がrun中に変わるなら、新しい設定として再検証するまで結果を受理しない。形式の最終決定はCore/Event契約変更PRで行う。
 
-Coreで決定的に検査できるのは、同一source、既知のitem ID、Committedと**完全一致する範囲**、一度だけの結果、Final/Failure/別判定との競合、Provider drain後の到着拒否である。異source、未知・部分・重複範囲、self-reportedな「音声なし」だけの応答は拒否する。**これらの検査は発話なしという意味の正しさを証明しない。** 1 itemに発話と非発話が混在する場合、item全体を非発話にはできない。必要なら先に範囲を切って別itemとし、隙間・重複をCoreで検査する。モデルの空テキストを後から判定イベントへ変換しない。
+Coreで決定的に検査できるのは、同一source、既知のitem ID、Committedと**完全一致する範囲**、同一結果の冪等な再送、Final/Failure/別判定との競合、Provider drain後の到着拒否である。異source、未知・部分・重複範囲、self-reportedな「音声なし」だけの応答は拒否する。**これらの検査は発話なしという意味の正しさを証明しない。** 1 itemに発話と非発話が混在する場合、item全体を非発話にはできない。必要なら先に範囲を切って別itemとし、隙間・重複をCoreで検査する。モデルの空テキストを後から判定イベントへ変換しない。
 
 ## 受理・監査・再生の境界
 

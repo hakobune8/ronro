@@ -85,6 +85,19 @@ class STTFinal:
 
 
 @dataclass(frozen=True)
+class STTNoSpeech:
+    """Whole committed item judged speech-free by a qualified run policy.
+
+    This is not Transcript Evidence. The caller must durably audit the
+    run-bound detector decision before passing it to SourceSTTLedger.
+    """
+
+    source: STTSource
+    item_id: str
+    audio_range: AudioRange
+
+
+@dataclass(frozen=True)
 class STTFailure:
     source: STTSource
     code: str
@@ -106,7 +119,7 @@ class LiveSTTSession(Protocol):
     async def finish(self, reason: str) -> None: ...
 
     def events(self) -> AsyncIterator[
-        STTPartial | STTBoundary | STTCommitted | STTFinal | STTFailure
+        STTPartial | STTBoundary | STTCommitted | STTFinal | STTNoSpeech | STTFailure
     ]: ...
 
 
@@ -138,6 +151,7 @@ class _Item:
     digest: bytes | None = None
     final: STTFinal | None = None
     acknowledged: bool = False
+    no_speech: bool = False
     unresolved_empty: bool = False
     unresolved_failure: bool = False
     failure_code: str | None = None
@@ -153,10 +167,13 @@ class SourceSTTLedger:
     """
 
     def __init__(self, source: STTSource, *, max_pending_frames: int = 1200,
-                 max_items: int = 256) -> None:
+                 max_items: int = 256, accept_no_speech: bool = False) -> None:
         if max_pending_frames < 1 or max_items < 1:
             raise ValueError("STT ledger bounds must be positive")
+        if type(accept_no_speech) is not bool:
+            raise ValueError("no-speech policy must be explicitly enabled")
         self.source = source
+        self._accept_no_speech = accept_no_speech
         self._max_pending_frames = max_pending_frames
         self._max_items = max_items
         self._next_sequence = 0
@@ -225,6 +242,8 @@ class SourceSTTLedger:
         item = self._items.get(value.item_id)
         if item is None:
             raise STTIntegrityError("Final has no correlated committed item")
+        if item.no_speech:
+            raise STTIntegrityError("no-speech item cannot later become a Final")
         if item.unresolved_failure:
             raise STTIntegrityError("failed item cannot later become a Final")
         digest = hashlib.sha256(value.text.encode("utf-8")).digest()
@@ -238,6 +257,33 @@ class SourceSTTLedger:
         else:
             item.acknowledged = True
             item.unresolved_empty = item.possible_signal
+        return True
+
+    def acknowledge_no_speech(self, value: STTNoSpeech) -> bool:
+        """Accept a pre-audited whole-item disposition; never create Evidence.
+
+        The caller owns detector qualification, run binding and durable audit.
+        A blank Provider transcript alone must never call this method.
+        """
+        if not self._accept_no_speech:
+            raise STTIntegrityError("no-speech disposition is not enabled")
+        if self._provider_drained:
+            raise STTIntegrityError("no-speech disposition arrived after Provider drain")
+        if (not isinstance(value, STTNoSpeech) or value.source != self.source
+                or not isinstance(value.item_id, str) or not value.item_id
+                or len(value.item_id) > 256 or not isinstance(value.audio_range, AudioRange)):
+            raise STTIntegrityError("no-speech disposition has wrong source or identity")
+        item = self._items.get(value.item_id)
+        if item is None:
+            raise STTIntegrityError("no-speech disposition has no committed item")
+        if item.audio_range != value.audio_range:
+            raise STTIntegrityError("no-speech disposition does not cover the whole item")
+        if item.no_speech:
+            return False  # Idempotent duplicate after a prior audited acceptance.
+        if item.digest is not None or item.acknowledged or item.unresolved_failure:
+            raise STTIntegrityError("item already has a different completion")
+        item.no_speech = True
+        item.acknowledged = True
         return True
 
     def fail(self, value: STTFailure) -> None:
@@ -254,6 +300,8 @@ class SourceSTTLedger:
         item = self._items.get(value.item_id)
         if item is None:
             raise STTIntegrityError("failure has no correlated committed item")
+        if item.no_speech:
+            raise STTIntegrityError("no-speech item cannot become a failure")
         if item.unresolved_failure:
             if item.failure_code == value.code:
                 return
